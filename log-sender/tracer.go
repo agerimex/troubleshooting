@@ -58,7 +58,7 @@ func convertToUTF82(input string) string {
 	//return input
 }
 
-func writeToBackend(spans []sdktrace.ReadOnlySpan) {
+func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 	flag.Parse()
 	// Set up a connection to the server.
 	conn, err := grpc.Dial(*addrTrace, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -125,7 +125,7 @@ func writeToBackend(spans []sdktrace.ReadOnlySpan) {
 
 // ExportSpans exports trace spans to the custom storage backend (in this case, prints to the console).
 func (e *CustomExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
-	writeToBackend(spans)
+	writeTraceToBackend(spans)
 
 	return nil
 }

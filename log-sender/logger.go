@@ -53,7 +53,7 @@ type LogMessage struct {
 	Line     int       `json:"line"`
 }
 
-func writeToBackend(message []byte) {
+func writeLogToBackend(message []byte) {
 	flag.Parse()
 	conn, err := grpc.Dial(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
