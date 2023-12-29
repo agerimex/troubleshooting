@@ -6,7 +6,6 @@ require (
 	github.com/rs/zerolog v1.31.0
 	google.golang.org/grpc v1.57.0
 	google.golang.org/protobuf v1.31.0
-	logs-backend v0.0.1
 )
 
 require (
@@ -21,7 +20,6 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/stretchr/testify v1.8.4 // indirect
 	go.opentelemetry.io/otel v1.16.0
-	go.opentelemetry.io/otel/exporters/jaeger v1.16.0
 	go.opentelemetry.io/otel/metric v1.16.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.16.0
 	go.opentelemetry.io/otel/trace v1.16.0
@@ -30,4 +28,4 @@ require (
 	golang.org/x/text v0.9.0
 )
 
-replace logs-backend v0.0.1 => /Users/artem/dev/agerime/observability/logs-backend
+replace log-api v0.0.1 => ../protos/

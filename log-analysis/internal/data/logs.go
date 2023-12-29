@@ -253,34 +253,3 @@ func (l *Log) SelectCountSpans(ctx context.Context, filter SpanFilter) (uint64, 
 
 	return res, nil
 }
-
-func (l *Log) InsertTestData(ctx context.Context, data []Log) {
-	batch, err := clickhouseDB.PrepareBatch(ctx, "INSERT INTO logs")
-	if err != nil {
-		panic((err))
-	}
-	for i, d := range data { //i := 0; i < len(*data); i++ {
-		fmt.Println("insert", d)
-		err := batch.Append(
-			int64(i), d.Timestamp, "INFO", d.Message,
-			// uint8(42),
-			// "ClickHouse",
-			// "Inc",
-			// uuid.New(),
-			// map[string]uint8{"key": 1},             // Map(String, UInt8)
-			// []string{"Q", "W", "E", "R", "T", "Y"}, // Array(String)
-			// []any{ // Tuple(String, UInt8, Array(Map(String, String)))
-			// 	"String Value", uint8(5), []map[string]string{
-			// 		{"key": "value"},
-			// 		{"key": "value"},
-			// 		{"key": "value"},
-			// 	},
-			// },
-			// time.Now(),
-		)
-		if err != nil {
-			panic((err))
-		}
-	}
-	batch.Send()
-}

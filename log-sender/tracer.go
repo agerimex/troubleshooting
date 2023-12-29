@@ -20,8 +20,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.16.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"logs-backend/cmd/grpc_api/logs"
-	pb "logs-backend/cmd/grpc_api/logs"
+	pb "log-api/logs"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -68,14 +67,14 @@ func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 	defer conn.Close()
 	c := pb.NewLogServiceClient(conn)
 
-	var sta []*logs.OneSpan
+	var sta []*pb.OneSpan
 
 	for _, span := range spans {
 		fmt.Println("span time", span.EndTime().UnixMicro()-span.StartTime().UnixMicro())
 		fmt.Println("span status", span.Status().Description, span.Status().Code.String())
 		fmt.Println("span", span)
 		fmt.Println("\n\n\n\n")
-		protoSpan := &logs.OneSpan{
+		protoSpan := &pb.OneSpan{
 			Timestamp:      timestamppb.New(span.StartTime()),
 			TraceId:        convertToUTF82(span.SpanContext().TraceID().String()),
 			SpanId:         convertToUTF82(span.SpanContext().SpanID().String()),
