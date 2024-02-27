@@ -5,7 +5,7 @@ go 1.21.5
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.13.3
 	google.golang.org/grpc v1.57.0
-	log-api v0.0.1
+	github.com/artemparygin/troubleshooting/protos init
 )
 
 require (
@@ -31,4 +31,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace log-api v0.0.1 => ../protos/

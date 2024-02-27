@@ -6,6 +6,7 @@ require (
 	github.com/rs/zerolog v1.31.0
 	google.golang.org/grpc v1.57.0
 	google.golang.org/protobuf v1.31.0
+	github.com/artemparygin/troubleshooting/protos init
 )
 
 require (
@@ -28,4 +29,3 @@ require (
 	golang.org/x/text v0.9.0
 )
 
-replace log-api v0.0.1 => ../protos/
