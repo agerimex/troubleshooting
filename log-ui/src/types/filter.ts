@@ -3,5 +3,6 @@ export interface SpanFilter {
     rowsPerPage?: number, 
     timeFrom?: string, 
     status?: string,
-    serviceName?: string
+    serviceName?: string,
+    methodName?: string
   }

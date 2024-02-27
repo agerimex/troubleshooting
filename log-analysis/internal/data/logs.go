@@ -25,6 +25,7 @@ type SpanFilter struct {
 	TimeFrom    string `json:"time_from"`
 	Status      string `json:"status"`
 	ServiceName string `json:"service_name"`
+	MethodName  string `json:"method_name"`
 }
 
 type Span struct {
@@ -119,6 +120,8 @@ func addFilter(filter SpanFilter) (string, string) {
 				condition = append(condition, `"StatusCode" = {statusCode:Int8}`)
 			case "ServiceName":
 				condition = append(condition, `"ServiceName" iLike {serviceName:String}`)
+			case "MethodName":
+				condition = append(condition, `"SpanName" iLike {spanName:String}`)
 			case "RowsPerPage":
 				limit = `limit {rowsPerPage:Int64}`
 			}
@@ -174,7 +177,8 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter /*parent str
 		clickhouse.Named("parent", filter.ParentId),
 		clickhouse.Named("timeFrom", filter.TimeFrom),
 		clickhouse.Named("statusCode", StatusCodeFromString(filter.Status)),
-		clickhouse.Named("serviceName", "%"+filter.ServiceName+"%"))
+		clickhouse.Named("serviceName", "%"+filter.ServiceName+"%"),
+		clickhouse.Named("spanName", "%"+filter.MethodName+"%"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -206,12 +210,34 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter /*parent str
 			return nil, err
 		}
 
-		fmt.Println("UnixTimestamp", span.Timestamp)
+		// fmt.Println("UnixTimestamp", span.Timestamp)
+		var msgField string = ""
+		sqlArgs := make(map[int]string)
 		for _, tag := range span.Tags {
 			if tag["key"] == "db.statement" {
-				span.Msg = tag["value"]
+				// span.Msg = tag["value"]
+				msgField = tag["value"]
+			}
+			// if tag["key"] == "db.statement" {
+			// 	span.Msg = tag["value"]
+			// }
+			key := tag["key"]
+			if strings.HasPrefix(tag["key"], "db.sql.args.") {
+				argNum := key[len("db.sql.args."):]
+				value := tag["value"]
+				argsNum := strings.TrimSuffix(argNum, ".")
+				var argNumInt int
+				fmt.Sscanf(argsNum, "%d", &argNumInt)
+				sqlArgs[argNumInt] = value
 			}
 		}
+		if len(msgField) > 0 && len(sqlArgs) > 0 {
+			for argNum, value := range sqlArgs {
+				placeholder := fmt.Sprintf("$%d", argNum)
+				msgField = strings.ReplaceAll(msgField, placeholder, "'"+value+"'")
+			}
+		}
+		span.Msg = msgField
 
 		//Unset Code = 0
 		//Error Code = 1

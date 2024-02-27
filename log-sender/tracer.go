@@ -4,19 +4,18 @@ import (
 	"bytes"
 	"context"
 	"flag"
-	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otel"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/transform"
 
-	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.16.0"
 	"go.opentelemetry.io/otel/trace"
 
@@ -32,7 +31,7 @@ const (
 )
 
 var (
-	addrTrace = flag.String("addrTrace", "localhost:50052", "the address to connect to")
+	addrTrace = flag.String("addrTrace", "localhost:50055", "the address to connect to")
 	nameTrace = flag.String("nameTrace", defaultNameTrace, "Name to greet")
 )
 
@@ -70,10 +69,6 @@ func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 	var sta []*pb.OneSpan
 
 	for _, span := range spans {
-		fmt.Println("span time", span.EndTime().UnixMicro()-span.StartTime().UnixMicro())
-		fmt.Println("span status", span.Status().Description, span.Status().Code.String())
-		fmt.Println("span", span)
-		fmt.Println("\n\n\n\n")
 		protoSpan := &pb.OneSpan{
 			Timestamp:      timestamppb.New(span.StartTime()),
 			TraceId:        convertToUTF82(span.SpanContext().TraceID().String()),
@@ -86,7 +81,6 @@ func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 			StatusCode:     int32(span.Status().Code),
 			StatusMessage:  convertToUTF82(span.Status().Description),
 			Duration:       span.EndTime().UnixMicro() - span.StartTime().UnixMicro(),
-			// ServiceName:  span.Resource().String(),
 		}
 
 		protoSpan.ResourceAttributes = make(map[string]string)
@@ -99,7 +93,16 @@ func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 
 		// // Iterate over the SpanAttributes and populate the map.
 		for _, value := range span.Attributes() {
-			protoSpan.SpanAttributes[string(value.Key)] = convertToUTF82(value.Value.AsString())
+			//
+			// if value.Key == "http.route" {
+			// 	fmt.Println("value.Value string", value.Value.AsString(), "value.Value slicer", value.Value.AsStringSlice())
+			// }
+			if value.Value.Type() == attribute.INT64 {
+				// fmt.Println("value.Value", value.Value.AsInt64(), "value.Value.AsString()", value.Value.AsString())
+				protoSpan.SpanAttributes[string(value.Key)] = strconv.FormatInt(value.Value.AsInt64(), 10)
+			} else {
+				protoSpan.SpanAttributes[string(value.Key)] = convertToUTF82(value.Value.AsString())
+			}
 		}
 
 		for _, value := range span.Resource().Attributes() {
@@ -112,13 +115,9 @@ func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 		sta = append(sta, protoSpan)
 	}
 
-	response, err := c.SendSpans(context.Background(), &pb.Spans{Spans: sta})
+	_, err = c.SendSpans(context.Background(), &pb.Spans{Spans: sta})
 	if err != nil {
 		log.Fatalf("Error sending log message: %v", err)
-	}
-
-	if response.Success {
-		log.Println("Log message sent successfully")
 	}
 }
 
@@ -133,49 +132,6 @@ func (e *CustomExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadO
 func (e *CustomExporter) Shutdown(ctx context.Context) error {
 	// Implement any necessary cleanup logic here.
 	return nil
-}
-
-func InitTracer(jaegerURL string, serviceName string) (trace.Tracer, error) {
-	exporter, err := NewJaegerExporter(jaegerURL)
-	if err != nil {
-		return nil, fmt.Errorf("initialize exporter: %w", err)
-	}
-
-	tp, err := NewTraceProvider(exporter, serviceName)
-	if err != nil {
-		return nil, fmt.Errorf("initialize provider: %w", err)
-	}
-
-	otel.SetTracerProvider(tp)
-
-	return tp.Tracer("main tracer"), nil
-}
-
-// NewJaegerExporter creates new jaeger exporter
-//
-//	url example - http://localhost:14268/api/traces
-func NewJaegerExporter(url string) (tracesdk.SpanExporter, error) {
-	return jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(url)))
-}
-
-func NewTraceProvider(exp tracesdk.SpanExporter, ServiceName string) (*tracesdk.TracerProvider, error) {
-	// Ensure default SDK resources and the required service name are set.
-	r, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(ServiceName),
-		),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return tracesdk.NewTracerProvider(
-		tracesdk.WithBatcher(exp),
-		tracesdk.WithResource(r),
-		//tracesdk.WithSampler(tracesdk.Sample)
-	), nil
 }
 
 func NewTracer(svcName, jaegerEndpoint string) (trace.Tracer, error) {

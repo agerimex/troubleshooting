@@ -1,4 +1,4 @@
-module troubleshooting/sender
+module github.com/artemparygin/troubleshooting/tree/init/log-sender
 
 go 1.21.5
 

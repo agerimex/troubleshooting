@@ -17,7 +17,8 @@ export class Spans implements ISpans {
       rows_per_page: filter.rowsPerPage,
       time_from: filter.timeFrom,
       status: filter.status,
-      service_name: filter.serviceName
+      service_name: filter.serviceName,
+      method_name: filter.methodName
     }
     const [error, res] = await fetch(import.meta.env.VITE_LOGS_APP_API_URL + '/api/v1/view-spans', Security.requestOptions(payload))
       .then((response) => response.json())

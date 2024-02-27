@@ -89,7 +89,7 @@ func main() {
 		log.Fatalf("Failed to connect to clickhouse")
 	}
 
-	lis, err := net.Listen("tcp", ":50052") // Change the port as needed
+	lis, err := net.Listen("tcp", ":50055") // Change the port as needed
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}

@@ -22,6 +22,13 @@ type ServiceConfig struct {
 	port int
 }
 
+func initOpenTelemetry() {
+	_, err := sender.NewTracer("LogAnalysis", "localhost")
+	if err != nil {
+		fmt.Println("Where is receiver of traces")
+	}
+}
+
 func main() {
 	var cfg ServiceConfig
 
@@ -35,6 +42,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// initOpenTelemetry()
 
 	app := &application{
 		serviceConfig: cfg,

@@ -24,7 +24,7 @@
     </DataTable>
 
     <div class="card w-full">
-      <TreeTable :value="nodes" :lazy="true" :paginator="true" :rows="100" :rowsPerPageOptions="[10, 100, 500, 1000]" 
+      <TreeTable :value="nodes" :lazy="true" :paginator="true" :rows="25" :rowsPerPageOptions="[10, 100, 500, 1000]" 
           paginatorTemplate="RowsPerPageDropdown CurrentPageReport NextPageLink" v-model:first="firstRow"
           currentPageReportTemplate="{first} - {last} (Total of parents by filter {totalRecords})"
           @filter="onFilter($event)" filterDisplay="row"
@@ -47,7 +47,11 @@
             <Calendar id="calendar-24h" v-model="filterTimeFrom" v-on:update:modelValue="changeTime()" showTime hourFormat="24" :showSeconds="true" dateFormat="dd.mm.yy"/>
           </template>
         </Column>
-        <Column field="name" header="Name" :expander="false"></Column>
+        <Column field="name" header="Name" :expander="false">
+          <template #filter>
+            <InputText v-model="filterByMethodName" placeholder="Fiter by method name" type="text" class="p-column-filter" v-on:update:modelValue="filterChanged()"/>
+          </template>
+        </Column>
         <Column field="status" header="status" :showFilterMenu="false" :filterMenuStyle="{ width: '14rem' }" style="min-width: 12rem">
           <template #body="{ node }">
             <Tag :value="node.data.status" :severity="getSeverity(node.data.status)" />
@@ -62,8 +66,10 @@
             </div>
           </template>
         </Column>
-        
         <Column v-for="col of selectedColumns" :field="col.field" :header="col.header" :key="col.field">
+          <template #body="{ node }">
+            <div @dblclick="JSON.stringify(showDetails(node.data[col.field]))" class="multiline-cell" :title="JSON.stringify(node.data[col.field])">{{ node.data ? node.data[col.field] : "" }}</div>
+          </template>
           <template #filter>
             <div class="flex" v-if="col.filter">
               <InputText v-model="filters[col.field]" type="text" class="p-column-filter" :placeholder="col.filterPlaceHolder" v-on:update:modelValue="filterChanged()"/>
@@ -72,6 +78,12 @@
         </Column>
         <Column field="duration" header="duration" headerStyle="width: 5rem; text-align: right" bodyStyle="text-align: right; overflow: visible"></Column>
       </TreeTable>
+      <PrimeDialog v-model:visible="dialogVisible">
+        <p>{{ selectedCellText }}</p>
+        <template #footer>
+          <PrimeButton @click="closeDialog" label="Close" />
+        </template>
+      </PrimeDialog>
     </div>
   </main>
 </template>
@@ -88,6 +100,7 @@ import Calendar from 'primevue/calendar'
 import Tag from 'primevue/tag'
 import Dropdown from 'primevue/dropdown'
 import Column from 'primevue/column'
+import PrimeDialog from 'primevue/dialog'
 import logsApi from './api/logs.api'
 import spansApi from './api/spans.api'
 import { Logs } from './logs-api/logs.impl'
@@ -112,7 +125,8 @@ export default defineComponent({
     MultiSelect,
     PrimeButton,
     Tag,
-    Dropdown
+    Dropdown,
+    PrimeDialog
   },
   beforeMount () {
     // logsApi.init(new Logs())
@@ -126,6 +140,11 @@ export default defineComponent({
 
     const spansList = ref()
     const spansTree = ref()
+
+    const selectedCellText = ref('')
+    const dialogVisible = ref(false)
+
+    const filterByMethodName = ref('')
 
     spansApi.init(new Spans()).then(() => { fetchSpans() })
     logsApi.init(new Logs()).then(() => { fetchLogs() })
@@ -186,7 +205,14 @@ export default defineComponent({
         timeFrom = lastRowTime.value
       }
       console.log("filters.value['service']", filters.value['service'])
-      const filter: SpanFilter = {timeFrom: timeFrom, rowsPerPage: rowsPerPage.value, status: filterStatus.value, serviceName: filters.value['service'] }
+      const filter: SpanFilter = {timeFrom: timeFrom, rowsPerPage: rowsPerPage.value, status: filterStatus.value, serviceName: filters.value['service'], methodName: filterByMethodName.value }
+      return filter
+    }
+
+    function spanFilterNoTime() {
+      let timeFrom = filterTimeFrom.value.getTime().toString() + '000000'
+      console.log("filters.value['service']", filters.value['service'])
+      const filter: SpanFilter = {timeFrom: timeFrom, rowsPerPage: rowsPerPage.value, status: filterStatus.value, serviceName: filters.value['service'], methodName: filterByMethodName.value }
       return filter
     }
 
@@ -196,7 +222,7 @@ export default defineComponent({
       if (error === null && res !== null) {
         spansList.value = res
         nodes.value = await loadNodes(0, spansTree.value.rows)
-        await getchCountSpans(filter)
+        await getchCountSpans(spanFilterNoTime())
         loading.value = false
       } else {
         loading.value = false
@@ -359,6 +385,15 @@ export default defineComponent({
       fetchSpans()
     }
 
+    function showDetails(content: any) {
+      selectedCellText.value = content
+      dialogVisible.value = true
+    }
+
+    function closeDialog() {
+      dialogVisible.value = false
+    }
+
     return {
       logsList,
       spansList,
@@ -384,7 +419,12 @@ export default defineComponent({
       filterTimeFrom,
       firstRow,
       changeTime,
-      onRefresh
+      onRefresh,
+      selectedCellText,
+      dialogVisible,
+      showDetails,
+      closeDialog,
+      filterByMethodName
     }
   }
 })
@@ -392,6 +432,15 @@ export default defineComponent({
 
 
 <style scoped>
+.multiline-cell {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: calc(1.5em * 3); /* 3 lines with 1.5em line height */
+  -webkit-line-clamp: 3; /* Maximum number of lines */
+  line-height: 1.5em; /* Adjust as needed */
+}
+
 header {
   line-height: 1.5;
 }
