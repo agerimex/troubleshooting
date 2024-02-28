@@ -3,10 +3,10 @@ module github.com/artemparygin/troubleshooting/log-sender
 go 1.21.5
 
 require (
+	github.com/artemparygin/troubleshooting/protos v0.0.0-20240227214057-e13b56d3e3bf
 	github.com/rs/zerolog v1.31.0
 	google.golang.org/grpc v1.57.0
 	google.golang.org/protobuf v1.31.0
-	github.com/artemparygin/troubleshooting/protos init
 )
 
 require (
@@ -28,4 +28,3 @@ require (
 	golang.org/x/sys v0.12.0 // indirect
 	golang.org/x/text v0.9.0
 )
-

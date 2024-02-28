@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	pb "log-api/logs"
+	pb "github.com/artemparygin/troubleshooting/protos/logs"
 )
 
 type Log struct {

@@ -5,12 +5,12 @@ go 1.21.5
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.13.3
 	google.golang.org/grpc v1.57.0
-	github.com/artemparygin/troubleshooting/protos init
 )
 
 require (
 	github.com/ClickHouse/ch-go v0.58.2 // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
+	github.com/artemparygin/troubleshooting/protos v0.0.0-20240227214057-e13b56d3e3bf // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.6.1 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
@@ -30,4 +30,3 @@ require (
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-

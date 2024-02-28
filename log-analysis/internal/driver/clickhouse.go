@@ -83,7 +83,7 @@ func Connect() (driver.Conn, error) {
 	var (
 		// ctx       = context.Background()
 		conn, err = clickhouse.Open(&clickhouse.Options{
-			Addr: []string{"localhost:19000"},
+			Addr: []string{"clickhouse-server:9000"},
 			Auth: clickhouse.Auth{
 				Database: "default",
 				Username: "default",

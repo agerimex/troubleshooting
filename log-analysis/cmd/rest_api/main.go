@@ -8,6 +8,7 @@ import (
 
 	"logs-backend/internal/data"
 	"logs-backend/internal/driver"
+	//sender "github.com/artemparygin/troubleshooting/log-sender"
 )
 
 type application struct {
@@ -22,12 +23,13 @@ type ServiceConfig struct {
 	port int
 }
 
-func initOpenTelemetry() {
-	_, err := sender.NewTracer("LogAnalysis", "localhost")
-	if err != nil {
-		fmt.Println("Where is receiver of traces")
-	}
-}
+// func initOpenTelemetry() {
+// 	flag.Set("addrTrace", "log-receiver-compose:50055")
+// 	_, err := sender.NewTracer("LogAnalysis", "localhost")
+// 	if err != nil {
+// 		fmt.Println("Where is receiver of traces")
+// 	}
+// }
 
 func main() {
 	var cfg ServiceConfig
@@ -43,7 +45,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// initOpenTelemetry()
+	//initOpenTelemetry()
 
 	app := &application{
 		serviceConfig: cfg,

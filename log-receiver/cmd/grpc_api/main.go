@@ -7,9 +7,10 @@ import (
 	"net"
 	"time"
 
-	pb "log-api/logs"
 	"log-receiver/internal/data"
 	"log-receiver/internal/driver"
+
+	pb "github.com/artemparygin/troubleshooting/protos/logs"
 
 	"google.golang.org/grpc"
 )

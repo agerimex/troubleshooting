@@ -3,7 +3,7 @@
   </header>
 
   <main class="w-full">
-    <DataTable v-if="false" :value="logsList" paginator :rows="10" :rowsPerPageOptions="[5, 10, 20, 50]" tableStyle="min-width: 50rem"
+    <!-- <DataTable v-if="false" :value="logsList" paginator :rows="10" :rowsPerPageOptions="[5, 10, 20, 50]" tableStyle="min-width: 50rem"
                 currentPageReportTemplate="{first} to {last} of {totalRecords}">
       <Column field="id" header="id"></Column>
       <Column field="level" header="level"></Column>
@@ -21,7 +21,7 @@
       <Column field="parentSpanId" header="parentSpanId"></Column>
       <Column field="Tags" header="Tags"></Column>
       <Column field="ServiceTags" header="ServiceTags"></Column>
-    </DataTable>
+    </DataTable> -->
 
     <div class="card w-full">
       <TreeTable :value="nodes" :lazy="true" :paginator="true" :rows="25" :rowsPerPageOptions="[10, 100, 500, 1000]" 
