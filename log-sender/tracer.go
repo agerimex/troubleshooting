@@ -19,7 +19,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.16.0"
 	"go.opentelemetry.io/otel/trace"
 
-	pb "log-api/logs"
+	pb "github.com/artemparygin/troubleshooting/protos/logs"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
