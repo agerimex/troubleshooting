@@ -29,7 +29,7 @@ func (app *application) viewLogs(w http.ResponseWriter, r *http.Request) {
 		Data:    envelope{"logs": all},
 	}
 
-	app.writeJSON(w, http.StatusOK, payload)
+	app.writeJSON(r.Context(), w, http.StatusOK, payload)
 }
 
 func (app *application) selectAllRootSpans(filter data.SpanFilter /*parent string, rowsPerPage int, timeFrom string, status string*/) ([]*data.Span, error) {
@@ -79,7 +79,7 @@ func (app *application) viewSpans(w http.ResponseWriter, r *http.Request) {
 
 	err := app.readJSON(w, r, &requestPayload)
 	if err != nil {
-		app.errorJSON(w, err)
+		app.errorJSON(r.Context(), w, err)
 		return
 	}
 
@@ -99,7 +99,7 @@ func (app *application) viewSpans(w http.ResponseWriter, r *http.Request) {
 		Data:    envelope{"Spans": all},
 	}
 
-	app.writeJSON(w, http.StatusOK, payload)
+	app.writeJSON(r.Context(), w, http.StatusOK, payload)
 }
 
 func (app *application) countSpans(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func (app *application) countSpans(w http.ResponseWriter, r *http.Request) {
 
 	err := app.readJSON(w, r, &requestPayload)
 	if err != nil {
-		app.errorJSON(w, err)
+		app.errorJSON(r.Context(), w, err)
 		return
 	}
 
@@ -127,5 +127,5 @@ func (app *application) countSpans(w http.ResponseWriter, r *http.Request) {
 		Data:    envelope{"Count": count},
 	}
 
-	app.writeJSON(w, http.StatusOK, payload)
+	app.writeJSON(r.Context(), w, http.StatusOK, payload)
 }

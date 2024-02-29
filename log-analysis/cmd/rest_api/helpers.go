@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // readJSON tries to read the body of a request and converts it into JSON
@@ -28,7 +33,7 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, data in
 }
 
 // writeJSON takes a response status code and aribitrary data and writes a json response to the client
-func (app *application) writeJSON(w http.ResponseWriter, status int, data interface{}, headers ...http.Header) error {
+func (app *application) writeJSON(ctx context.Context, w http.ResponseWriter, status int, data jsonResponse, headers ...http.Header) error {
 	var output []byte
 
 	if app.environment == "development" {
@@ -58,12 +63,20 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data interf
 		return err
 	}
 
+	span := trace.SpanFromContext(ctx)
+	code := codes.Error
+	if !data.Error {
+		code = codes.Ok
+	}
+	span.SetStatus(code, data.Message)
+	span.SetAttributes(attribute.String("response", string(output)))
+
 	return nil
 }
 
 // errorJSON takes an error, and optionally a response status code, and generates and sends
 // a json error response
-func (app *application) errorJSON(w http.ResponseWriter, err error, status ...int) {
+func (app *application) errorJSON(ctx context.Context, w http.ResponseWriter, err error, status ...int) {
 	statusCode := http.StatusBadRequest
 
 	if len(status) > 0 {
@@ -89,5 +102,5 @@ func (app *application) errorJSON(w http.ResponseWriter, err error, status ...in
 	payload.Error = true
 	payload.Message = customErr.Error()
 
-	app.writeJSON(w, statusCode, payload)
+	app.writeJSON(ctx, w, statusCode, payload)
 }

@@ -24,7 +24,7 @@
     </DataTable> -->
 
     <div class="card w-full">
-      <TreeTable :value="nodes" :lazy="true" :paginator="true" :rows="25" :rowsPerPageOptions="[10, 100, 500, 1000]" 
+      <TreeTable :value="nodes" :lazy="true" :paginator="true" :rows=25 :rowsPerPageOptions="[10, 25, 100, 500, 1000]" 
           paginatorTemplate="RowsPerPageDropdown CurrentPageReport NextPageLink" v-model:first="firstRow"
           currentPageReportTemplate="{first} - {last} (Total of parents by filter {totalRecords})"
           @filter="onFilter($event)" filterDisplay="row"
@@ -154,7 +154,7 @@ export default defineComponent({
     const loading = ref(false)
     const totalRecords = ref(0)
     const lastRowTime = ref("0")
-    const rowsPerPage = ref(100)
+    const rowsPerPage = ref(25)
     const statuses = ref(['unset', 'error', 'ok'])
     const filterStatus = ref()
     const filterTimeFrom = ref(new Date(Date.now() - 5*60*1000))
