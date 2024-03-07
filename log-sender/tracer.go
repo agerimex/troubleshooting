@@ -113,7 +113,7 @@ func (e *CustomExporter) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func NewTracer(svcName) (trace.Tracer, error) {
+func NewTracer(svcName string) (trace.Tracer, error) {
 	customExporter := NewCustomExporter()
 
 	batcher := sdktrace.NewBatchSpanProcessor(customExporter)
