@@ -93,9 +93,9 @@ Coming soon
 * possible for set time interval
 * e2e tests
 
-# Open for feature requests, happy for helping with integration, and Welcome to connect for developing an awesome observability system
+## Open for feature requests, happy for helping with integration, and Welcome to connect for developing an awesome observability system
 
-Here is some screenshots
+Screenshots
 ------
 
 * Full pages
