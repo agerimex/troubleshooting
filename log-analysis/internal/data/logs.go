@@ -69,7 +69,6 @@ func StatusCodeToString(code string) string {
 }
 
 func (l *Log) SelectAllData(ctx context.Context) ([]*Log, error) {
-	// Query logs.
 	query := "SELECT * FROM logs order by timestamp desc"
 	rows, err := clickhouseDB.Query(ctx, query)
 	if err != nil {
@@ -78,8 +77,6 @@ func (l *Log) SelectAllData(ctx context.Context) ([]*Log, error) {
 	defer rows.Close()
 
 	var logs []*Log
-
-	// Iterate over the result set and print logs.
 	for rows.Next() {
 
 		var log Log
@@ -107,9 +104,7 @@ func addFilter(filter SpanFilter) (string, string) {
 	var condition []string
 	var limit string
 	for i := 0; i < v.NumField(); i++ {
-		//values[i] = v.Field(i).Interface()
 		values[i] = v.Field(i).Interface()
-		fmt.Println(v.Type().Field(i).Name, "=", v.Field(i).Interface(), "=", v.Field(i).IsZero())
 		if !v.Field(i).IsZero() {
 			switch field := v.Type().Field(i).Name; field {
 			case "TimeFrom":
@@ -140,38 +135,14 @@ func addSorting() string {
 	return `order by "UnixTime" ASC`
 }
 
-func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter /*parent string, rowsPerPage int, timeFrom string, status string*/) ([]*Span, error) {
-	// Query logs.
+func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) ([]*Span, error) {
 	query := `SELECT toString("UnixTime") as "Timestamp", "SpanName", "ServiceName", "TraceId", "SpanId", "ParentSpanId",
 	 arrayMap(key -> map('key', key, 'value', SpanAttributes[key]), mapKeys(SpanAttributes)) AS tags,
 	 arrayMap(key -> map('key', key, 'value', ResourceAttributes[key]), mapKeys(ResourceAttributes)) AS serviceTags, "ChildSpanCount", "StatusCode", "StatusMessage", "Duration" FROM otel_traces`
 
 	where, limit := addFilter(filter)
 	sorting := addSorting()
-
-	// var where string
-	// if len(filter.TimeFrom) > 0 {
-	// 	where = `where "ParentSpanId" = {parent:String} and "UnixTime" > toInt64({timeFrom:Int64})`
-	// } else {
-	// 	where = `where "ParentSpanId" = {parent:String}`
-	// }
-
-	// var statusCode string = ""
-	// if filter.Status == "error" {
-	// 	statusCode = "1"
-	// } else if filter.Status == "ok" {
-	// 	statusCode = "2"
-	// } else if filter.Status == "unset" {
-	// 	statusCode = "0"
-	// }
-	// if len(statusCode) > 0 {
-	// 	where = where + ` and "StatusCode" = {statusCode:Int8}`
-	// }
-
-	//query = query + ` ` + where + ` and "ServiceName" = 'MC5' order by "UnixTime" ASC limit {rowsPerPage:Int64}`
 	query += where + " " + sorting + " " + limit
-
-	fmt.Println("query", query)
 	rows, err := clickhouseDB.Query(ctx, query,
 		clickhouse.Named("rowsPerPage", strconv.Itoa(filter.RowsPerPage)),
 		clickhouse.Named("parent", filter.ParentId),
@@ -183,14 +154,10 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter /*parent str
 		log.Fatal(err)
 	}
 	defer rows.Close()
-
 	var spans []*Span
 
-	var id int64
-	id = 0
-	// Iterate over the result set and print logs.
+	var id int64 = 0
 	for rows.Next() {
-		//fmt.Println(rows, err)
 		var span Span
 		err := rows.Scan(
 			&span.Timestamp,
@@ -210,17 +177,12 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter /*parent str
 			return nil, err
 		}
 
-		// fmt.Println("UnixTimestamp", span.Timestamp)
 		var msgField string = ""
 		sqlArgs := make(map[int]string)
 		for _, tag := range span.Tags {
 			if tag["key"] == "db.statement" {
-				// span.Msg = tag["value"]
 				msgField = tag["value"]
 			}
-			// if tag["key"] == "db.statement" {
-			// 	span.Msg = tag["value"]
-			// }
 			key := tag["key"]
 			if strings.HasPrefix(tag["key"], "db.sql.args.") {
 				argNum := key[len("db.sql.args."):]
@@ -238,20 +200,7 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter /*parent str
 			}
 		}
 		span.Msg = msgField
-
-		//Unset Code = 0
-		//Error Code = 1
-		//Ok Code = 2
-
 		span.Status = StatusCodeToString(strconv.Itoa(int(span.StatusCode)))
-		// if span.StatusCode == 1 {
-		// 	span.Status = "error"
-		// } else if span.StatusCode == 2 {
-		// 	span.Status = "ok"
-		// } else {
-		// 	span.Status = "unset"
-		// }
-
 		spans = append(spans, &span)
 		id = id + 1
 	}
@@ -260,12 +209,10 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter /*parent str
 }
 
 func (l *Log) SelectCountSpans(ctx context.Context, filter SpanFilter) (uint64, error) {
-	// Query logs.
 	query := `SELECT count(*) FROM otel_traces`
 	where, _ := addFilter(filter)
 	query += " " + where
 	var res uint64
-	fmt.Println(query)
 	row := clickhouseDB.QueryRow(ctx, query,
 		clickhouse.Named("parent", filter.ParentId),
 		clickhouse.Named("timeFrom", filter.TimeFrom),
@@ -273,7 +220,6 @@ func (l *Log) SelectCountSpans(ctx context.Context, filter SpanFilter) (uint64, 
 		clickhouse.Named("serviceName", filter.ServiceName))
 	err := row.Scan(&res)
 	if err != nil {
-		fmt.Println(err)
 		return 0, err
 	}
 

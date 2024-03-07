@@ -1,22 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  prefix: 'tw-',
   content: [
-    './src/**/*.{js,ts,jsx,tsx,vue}',
-    './node_modules/primevue/**/*.{vue,js,ts,jsx,tsx}'
+    './src/**/*.{js,ts,jsx,tsx,vue}'
   ],
-  theme: {
-    extend: {
-      colors: {
-        'main-color': '#E4E6E5',
-        'main-bg': '#FAFAFA'
-      },
-      textColor: {
-        'panel-caption': '#565757'
-      },
-      height: {
-        'control-panel': '8rem'
-      }
-    }
-  },
+  theme: {},
   plugins: []
 }

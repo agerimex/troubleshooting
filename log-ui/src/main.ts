@@ -1,13 +1,15 @@
-import './assets/main.css'
+import "primeflex/primeflex.css"
+import "primevue/resources/themes/lara-dark-amber/theme.css"
+import "primevue/resources/primevue.min.css"
 import "primeicons/primeicons.css"
+import "./style.css"
 
 import { createApp } from 'vue'
 import PrimeVue from 'primevue/config'
-import Tailwind from "primevue/passthrough/tailwind"
 import App from './App.vue'
 
 
 export const app = createApp(App)
 app
-  .use(PrimeVue, { unstyled: true, pt: Tailwind })
+  .use(PrimeVue)
   .mount('#app')

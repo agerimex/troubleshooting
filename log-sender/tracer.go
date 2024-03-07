@@ -26,25 +26,17 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const (
-	defaultNameTrace = "world"
-)
-
 var (
-	addrTrace = flag.String("addrTrace", "localhost:50055", "the address to connect to")
-	nameTrace = flag.String("nameTrace", defaultNameTrace, "Name to greet")
+	addrTrace = flag.String("addrTrace", "localhost:50055", "default address")
 )
 
-// CustomExporter is a simple custom exporter that prints trace information to the console.
 type CustomExporter struct{}
 
-// NewCustomExporter creates a new instance of the CustomExporter.
 func NewCustomExporter() *CustomExporter {
 	return &CustomExporter{}
 }
 
 func convertToUTF82(input string) string {
-	// Convert from Windows-1252 to UTF-8
 	reader := transform.NewReader(bytes.NewReader([]byte(input)), charmap.Windows1252.NewDecoder())
 	buf := new(bytes.Buffer)
 	_, err := buf.ReadFrom(reader)
@@ -52,13 +44,10 @@ func convertToUTF82(input string) string {
 		return ""
 	}
 	return buf.String()
-
-	//return input
 }
 
 func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 	flag.Parse()
-	// Set up a connection to the server.
 	conn, err := grpc.Dial(*addrTrace, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
@@ -86,19 +75,12 @@ func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 		protoSpan.ResourceAttributes = make(map[string]string)
 		protoSpan.SpanAttributes = make(map[string]string)
 
-		// Iterate over the ResourceAttributes and populate the map.
 		for _, value := range span.Resource().Attributes() {
 			protoSpan.ResourceAttributes[string(value.Key)] = convertToUTF82(value.Value.AsString())
 		}
 
-		// // Iterate over the SpanAttributes and populate the map.
 		for _, value := range span.Attributes() {
-			//
-			// if value.Key == "http.route" {
-			// 	fmt.Println("value.Value string", value.Value.AsString(), "value.Value slicer", value.Value.AsStringSlice())
-			// }
 			if value.Value.Type() == attribute.INT64 {
-				// fmt.Println("value.Value", value.Value.AsInt64(), "value.Value.AsString()", value.Value.AsString())
 				protoSpan.SpanAttributes[string(value.Key)] = strconv.FormatInt(value.Value.AsInt64(), 10)
 			} else {
 				protoSpan.SpanAttributes[string(value.Key)] = convertToUTF82(value.Value.AsString())
@@ -121,25 +103,21 @@ func writeTraceToBackend(spans []sdktrace.ReadOnlySpan) {
 	}
 }
 
-// ExportSpans exports trace spans to the custom storage backend (in this case, prints to the console).
 func (e *CustomExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	writeTraceToBackend(spans)
 
 	return nil
 }
 
-// Shutdown is called when the exporter is shut down.
 func (e *CustomExporter) Shutdown(ctx context.Context) error {
-	// Implement any necessary cleanup logic here.
 	return nil
 }
 
-func NewTracer(svcName, jaegerEndpoint string) (trace.Tracer, error) {
+func NewTracer(svcName) (trace.Tracer, error) {
 	customExporter := NewCustomExporter()
 
 	batcher := sdktrace.NewBatchSpanProcessor(customExporter)
 
-	// Create a TracerProvider with the batcher
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithSpanProcessor(batcher),
@@ -152,6 +130,5 @@ func NewTracer(svcName, jaegerEndpoint string) (trace.Tracer, error) {
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
-	// returns tracer
 	return otel.Tracer(svcName), nil
 }

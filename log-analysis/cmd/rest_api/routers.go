@@ -23,14 +23,6 @@ func (app *application) routers() http.Handler {
 		MaxAge:           300,
 	}))
 
-	// mux.Post("/api/v1/login", app.Login)
-	// mux.Post("/api/v1/logout", app.Logout)
-
-	mux.Route("/api/v1/privy", func(mux chi.Router) {
-		// mux.Use(app.AuthTokenMiddleware)
-	})
-
-	// mux.Post("/api/v1/validate-token", app.ValidateToken)
 	mux.Get("/api/v1/view-logs", app.viewLogs)
 	mux.Post("/api/v1/view-spans", app.viewSpans)
 	mux.Post("/api/v1/count-spans", app.countSpans)

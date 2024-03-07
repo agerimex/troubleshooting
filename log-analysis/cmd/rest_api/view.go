@@ -32,7 +32,7 @@ func (app *application) viewLogs(w http.ResponseWriter, r *http.Request) {
 	app.writeJSON(r.Context(), w, http.StatusOK, payload)
 }
 
-func (app *application) selectAllRootSpans(filter data.SpanFilter /*parent string, rowsPerPage int, timeFrom string, status string*/) ([]*data.Span, error) {
+func (app *application) selectAllRootSpans(filter data.SpanFilter) ([]*data.Span, error) {
 	ctx := context.Background()
 	return app.models.Log.SelectRootSpan(ctx, filter)
 }

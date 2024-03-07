@@ -1,4 +1,4 @@
-FROM node:16 AS build-frontend
+FROM node:18 AS build-frontend
 
 WORKDIR /app
 

@@ -20,12 +20,9 @@ func (l *Log) InsertTraceData(ctx context.Context, data []*pb.OneSpan) {
 	if err != nil {
 		panic((err))
 	}
-	for _, d := range data { //i := 0; i < len(*data); i++ {
-		//fmt.Println("insert", d)
+	for _, d := range data {
 		err := batch.Append(
 			d.Timestamp.AsTime().UnixNano(),
-			d.Timestamp.AsTime(),
-			d.Timestamp.AsTime(),
 			d.TraceId,
 			d.SpanId,
 			d.ParentSpanId,
@@ -48,41 +45,26 @@ func (l *Log) InsertTraceData(ctx context.Context, data []*pb.OneSpan) {
 			d.ChildSpanCount,
 		)
 		if err != nil {
-			panic((err))
+			fmt.Println(err)
 		}
 	}
 	err = batch.Send()
 	if err != nil {
-		panic((err))
+		fmt.Println(err)
 	}
 }
 
-func (l *Log) InsertTestData(ctx context.Context, data []Log) {
+func (l *Log) InsertLogData(ctx context.Context, data []Log) {
 	batch, err := clickhouseDB.PrepareBatch(ctx, "INSERT INTO logs")
 	if err != nil {
-		panic((err))
+		fmt.Println(err)
 	}
-	for i, d := range data { //i := 0; i < len(*data); i++ {
-		fmt.Println("insert", d)
+	for i, d := range data {
 		err := batch.Append(
 			int64(i), d.Timestamp, "INFO", d.Message,
-			// uint8(42),
-			// "ClickHouse",
-			// "Inc",
-			// uuid.New(),
-			// map[string]uint8{"key": 1},             // Map(String, UInt8)
-			// []string{"Q", "W", "E", "R", "T", "Y"}, // Array(String)
-			// []any{ // Tuple(String, UInt8, Array(Map(String, String)))
-			// 	"String Value", uint8(5), []map[string]string{
-			// 		{"key": "value"},
-			// 		{"key": "value"},
-			// 		{"key": "value"},
-			// 	},
-			// },
-			// time.Now(),
 		)
 		if err != nil {
-			panic((err))
+			fmt.Println(err)
 		}
 	}
 	batch.Send()

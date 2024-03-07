@@ -27,7 +27,7 @@ type ServiceConfig struct {
 
 func initOpenTelemetry() {
 	flag.Set("addrTrace", "log-receiver-compose:50055")
-	_, err := sender.NewTracer("LogAnalysis", "localhost")
+	_, err := sender.NewTracer("LogAnalysis")
 	if err != nil {
 		fmt.Println("Where is receiver of traces")
 	}

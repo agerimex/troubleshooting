@@ -8,14 +8,12 @@ import (
 	"net/http"
 	"strings"
 
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// readJSON tries to read the body of a request and converts it into JSON
 func (app *application) readJSON(w http.ResponseWriter, r *http.Request, data interface{}) error {
-	maxBytes := 1048576 // one megabyte
+	maxBytes := 1048576
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
 
 	dec := json.NewDecoder(r.Body)
@@ -32,7 +30,6 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, data in
 	return nil
 }
 
-// writeJSON takes a response status code and aribitrary data and writes a json response to the client
 func (app *application) writeJSON(ctx context.Context, w http.ResponseWriter, status int, data jsonResponse, headers ...http.Header) error {
 	var output []byte
 
@@ -69,13 +66,10 @@ func (app *application) writeJSON(ctx context.Context, w http.ResponseWriter, st
 		code = codes.Ok
 	}
 	span.SetStatus(code, data.Message)
-	span.SetAttributes(attribute.String("response", string(output)))
 
 	return nil
 }
 
-// errorJSON takes an error, and optionally a response status code, and generates and sends
-// a json error response
 func (app *application) errorJSON(ctx context.Context, w http.ResponseWriter, err error, status ...int) {
 	statusCode := http.StatusBadRequest
 
