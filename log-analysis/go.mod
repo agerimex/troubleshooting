@@ -35,7 +35,7 @@ require (
 	github.com/ClickHouse/ch-go v0.58.2 // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/artemparygin/troubleshooting/log-sender v0.0.0-20240228212205-72ad7a898c46
-	github.com/artemparygin/troubleshooting/protos v0.0.0-20240227214057-e13b56d3e3bf // indirect
+	github.com/artemparygin/troubleshooting/protos v0.0.0-20240307222833-0942b1140f60 // indirect
 	github.com/felixge/httpsnoop v1.0.2 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.6.1 // indirect

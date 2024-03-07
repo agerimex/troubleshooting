@@ -1,5 +1,5 @@
 http://:8095 {
 	root * /dist
-	reverse_proxy /api/* 192.168.178.222:8094
+	reverse_proxy /api/* log-analysis-compose:8094
 	file_server
 }
