@@ -98,7 +98,7 @@ Coming soon
 Screenshots
 ------
 
-* Full pages
+* Full page
 <img src="img/full_page.png" alt="Full Page" style="display: block; margin: auto;">
 
 * Possible for select a list of colums for view
