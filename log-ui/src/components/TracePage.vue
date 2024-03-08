@@ -118,7 +118,7 @@ export default defineComponent({
     const spansList = ref()
     const spansTree = ref()
 
-    const selectedCellText = ref('')
+    const selectedCellText = ref()
     const dialogVisible = ref(false)
 
     const filterByMethodName = ref('')
@@ -344,7 +344,7 @@ export default defineComponent({
       selectedCellText.value = content
       const formattedContent = formatContent(content)
       if (formattedContent !== null) {
-          selectedCellText.value = formattedContent
+          selectedCellText.value = formattedContent as string | object
       }
       dialogVisible.value = true
     }

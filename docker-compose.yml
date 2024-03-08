@@ -9,7 +9,7 @@ services:
       - "18123:8123"
       - "19000:9000"
     networks:
-      - grpc_network
+      - troubleshooting_network
     ulimits:
       nofile:
         soft: 262144
@@ -21,7 +21,7 @@ services:
     ports:
       - "8094:8094"
     networks:
-      - grpc_network
+      - troubleshooting_network
     depends_on:
       - clickhouse-server
     restart: always
@@ -31,17 +31,19 @@ services:
     ports:
       - "50055:50055"
     networks:
-      - grpc_network
+      - troubleshooting_network
     restart: always
 
  log-ui-compose:
     image: 'docker-log-ui:1'
     ports:
       - "8095:8095"
+    networks:
+      - troubleshooting_network
     restart: always
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
 
 networks:
-  grpc_network:
-    external: true  # Use the existing network
+  troubleshooting_network:
+    external: true
