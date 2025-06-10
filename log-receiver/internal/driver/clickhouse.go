@@ -9,7 +9,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
-func СreateLogs(ctx context.Context, conn driver.Conn) {
+func CreateLogs(ctx context.Context, conn driver.Conn) {
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS logs (
 			id Int64 CODEC(ZSTD(1)),
