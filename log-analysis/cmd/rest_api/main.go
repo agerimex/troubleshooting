@@ -10,7 +10,7 @@ import (
 	"logs-backend/internal/data"
 	"logs-backend/internal/driver"
 
-	sender "github.com/artemparygin/troubleshooting/log-sender"
+	sender "github.com/agerimex/troubleshooting/log-sender"
 )
 
 type application struct {

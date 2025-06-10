@@ -4,10 +4,10 @@ github.com/ClickHouse/clickhouse-go/v2 v2.13.3 h1:/esk41SjVLIDQs2rkOmRKXJ1FIFArI
 github.com/ClickHouse/clickhouse-go/v2 v2.13.3/go.mod h1:yoCB//XLqbyqaYvXzdbIdmMafOSomU3erh3r06NLCZU=
 github.com/andybalholm/brotli v1.0.5 h1:8uQZIdzKmjc/iuPu7O2ioW48L81FgatrcpfFmiq/cCs=
 github.com/andybalholm/brotli v1.0.5/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHGRSepvi9Eig=
-github.com/artemparygin/troubleshooting/log-sender v0.0.0-20240307231929-143a2f8b4eaa h1:Z2iqSQE/JAg9ccHO1j0xSP2NabeL57nweEd0MqcrKcY=
-github.com/artemparygin/troubleshooting/log-sender v0.0.0-20240307231929-143a2f8b4eaa/go.mod h1:c9snst2qfNkB4MRq1Mfr/hvx9AiOSu4IMJJeyeHmKy8=
-github.com/artemparygin/troubleshooting/protos v0.0.0-20240307231929-143a2f8b4eaa h1:3635jFoIjgfgo2o9/ng2epH/Gde11T9G04IZ/HKySWM=
-github.com/artemparygin/troubleshooting/protos v0.0.0-20240307231929-143a2f8b4eaa/go.mod h1:XQcdXvQpQSqB7+qaD9U6HfO31U2CapgGsLfYbOpC/kg=
+github.com/agerimex/troubleshooting/log-sender v0.0.0-20240307231929-143a2f8b4eaa h1:Z2iqSQE/JAg9ccHO1j0xSP2NabeL57nweEd0MqcrKcY=
+github.com/agerimex/troubleshooting/log-sender v0.0.0-20240307231929-143a2f8b4eaa/go.mod h1:c9snst2qfNkB4MRq1Mfr/hvx9AiOSu4IMJJeyeHmKy8=
+github.com/agerimex/troubleshooting/protos v0.0.0-20240307231929-143a2f8b4eaa h1:3635jFoIjgfgo2o9/ng2epH/Gde11T9G04IZ/HKySWM=
+github.com/agerimex/troubleshooting/protos v0.0.0-20240307231929-143a2f8b4eaa/go.mod h1:XQcdXvQpQSqB7+qaD9U6HfO31U2CapgGsLfYbOpC/kg=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
