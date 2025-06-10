@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/trace"
 
-	pb "github.com/artemparygin/troubleshooting/protos/logs"
+	pb "github.com/agerimex/troubleshooting/protos/logs"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

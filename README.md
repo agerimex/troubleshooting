@@ -24,7 +24,7 @@ Troubleshooting is currently at MVP stage. In progress: testing, updating docume
 Quick start
 ------
 ```
-git clone https://github.com/artemparygin/troubleshooting.git
+git clone https://github.com/agerimex/troubleshooting.git
 cd troubleshooting
 make all
 docker-compose up
@@ -34,7 +34,7 @@ open url localhost:8095
 How to intergate to your golang project
 ------
 ```
-go get github.com/artemparygin/troubleshooting/log-sender
+go get github.com/agerimex/troubleshooting/log-sender
 go get github.com/riandyrn/otelchi
 go get github.com/uptrace/opentelemetry-go-extra/otelsql
 go get go.opentelemetry.io/otel/semconv/v1.20.0
@@ -47,7 +47,7 @@ package main
 ...
 import (
 ...
-    sender "github.com/artemparygin/troubleshooting/log-sender"
+    sender "github.com/agerimex/troubleshooting/log-sender"
 ...
 )
 ...

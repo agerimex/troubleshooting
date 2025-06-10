@@ -9,7 +9,7 @@ import (
 	"log-receiver/internal/data"
 	"log-receiver/internal/driver"
 
-	pb "github.com/artemparygin/troubleshooting/protos/logs"
+	pb "github.com/agerimex/troubleshooting/protos/logs"
 
 	"google.golang.org/grpc"
 )
