@@ -58,7 +58,7 @@ func main() {
 
 	ctx := context.Background()
 	driver.CreateTracer(ctx, clickhouse)
-	driver.СreateLogs(ctx, clickhouse)
+        driver.CreateLogs(ctx, clickhouse)
 
 	if err != nil {
 		log.Fatalf("Failed to connect to clickhouse")
