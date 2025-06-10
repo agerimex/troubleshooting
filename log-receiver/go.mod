@@ -4,7 +4,7 @@ go 1.21.5
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.13.3
-	github.com/agerimex/troubleshooting/protos v0.0.0-20240307231929-143a2f8b4eaa
+	github.com/agerimex/troubleshooting/protos v0.0.0-20250610202227-67b33e660507
 	google.golang.org/grpc v1.57.0
 )
 

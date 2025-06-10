@@ -28,9 +28,9 @@ require (
 
 require (
 	github.com/ClickHouse/ch-go v0.58.2 // indirect
+	github.com/agerimex/troubleshooting/log-sender v0.0.0-20250610202227-67b33e660507
+	github.com/agerimex/troubleshooting/protos v0.0.0-20250610202227-67b33e660507 // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
-	github.com/agerimex/troubleshooting/log-sender v0.0.0-20240307231929-143a2f8b4eaa
-	github.com/agerimex/troubleshooting/protos v0.0.0-20240307231929-143a2f8b4eaa // indirect
 	github.com/felixge/httpsnoop v1.0.2 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.6.1 // indirect
