@@ -25,7 +25,7 @@ func TestFillNamedParams(t *testing.T) {
 
 func TestQuerySpanIsChildAndRecordsUsedParams(t *testing.T) {
 	recorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()), sdktrace.WithSpanProcessor(recorder))
 	otel.SetTracerProvider(provider)
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 

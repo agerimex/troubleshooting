@@ -84,6 +84,7 @@ func (app *application) viewSpans(w http.ResponseWriter, r *http.Request) {
 	if requestPayload.ParentId == "" {
 		requestPayload.ParentId = "0000000000000000"
 	}
+	requestPayload.LimitRows()
 
 	all, err := app.selectAllRootSpans(r.Context(), requestPayload)
 	if err != nil {

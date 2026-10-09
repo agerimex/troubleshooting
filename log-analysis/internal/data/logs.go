@@ -32,6 +32,23 @@ type SpanFilter struct {
 	AfterSpanId string `json:"after_span_id"`
 }
 
+const (
+	DefaultRowsPerPage = 25
+	// MaxRowsPerPage caps a span page, so one request can't read the whole table.
+	MaxRowsPerPage = 1000
+)
+
+// LimitRows sets RowsPerPage to DefaultRowsPerPage when it is missing and caps
+// it at MaxRowsPerPage.
+func (f *SpanFilter) LimitRows() {
+	if f.RowsPerPage <= 0 {
+		f.RowsPerPage = DefaultRowsPerPage
+	}
+	if f.RowsPerPage > MaxRowsPerPage {
+		f.RowsPerPage = MaxRowsPerPage
+	}
+}
+
 type Span struct {
 	Timestamp      string              `json:"timeStamp"`
 	SpanName       string              `json:"name"`

@@ -44,7 +44,8 @@ var spanKinds = map[tracepb.Span_SpanKind]string{
 }
 
 // Spans converts an OTLP export request into spans for InsertTraceData.
-// Spans without a valid trace or span id are skipped and counted in rejected.
+// Spans with an invalid trace, span or parent id (see validIDs) are skipped
+// and counted in rejected.
 //
 // ChildSpanCount is left at 0: OTLP doesn't carry it, so log-analysis counts
 // children when it reads spans.
@@ -56,7 +57,7 @@ func Spans(resourceSpans []*tracepb.ResourceSpans) (spans []*pb.OneSpan, rejecte
 		for _, ss := range rs.GetScopeSpans() {
 			scope := ss.GetScope()
 			for _, span := range ss.GetSpans() {
-				if len(span.GetTraceId()) != 16 || len(span.GetSpanId()) != 8 {
+				if !validIDs(span) {
 					rejected++
 					continue
 				}
@@ -68,6 +69,29 @@ func Spans(resourceSpans []*tracepb.ResourceSpans) (spans []*pb.OneSpan, rejecte
 		}
 	}
 	return spans, rejected
+}
+
+// validIDs reports whether the span ids follow the OpenTelemetry rules: a
+// 16-byte trace id and an 8-byte span id, each with at least one non-zero
+// byte. An all-zero span id would also collide with RootParentSpanID. The
+// parent is optional, but a non-empty parent of the wrong length is rejected
+// rather than stored as a root, which would misplace the span in the tree.
+func validIDs(span *tracepb.Span) bool {
+	parent := span.GetParentSpanId()
+	return validID(span.GetTraceId(), 16) && validID(span.GetSpanId(), 8) &&
+		(len(parent) == 0 || len(parent) == 8)
+}
+
+func validID(id []byte, size int) bool {
+	if len(id) != size {
+		return false
+	}
+	for _, b := range id {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func convertSpan(span *tracepb.Span, scope *commonpb.InstrumentationScope) *pb.OneSpan {

@@ -11,6 +11,10 @@
           <div style="text-align:left">
             <MultiSelect :modelValue="selectedColumns" @update:modelValue="onToggle" :options="columns" optionLabel="header" class="w-full" display="chip"/>
           </div>
+          <div v-if="notice" class="flex items-center gap-2 mt-2 text-red-600">
+            <span>{{ notice }}</span>
+            <PrimeButton v-if="noticeRetry" type="button" label="Retry" size="small" text @click="fetchSpans" />
+          </div>
         </template>
         <template #paginatorstart>
           <PrimeButton type="button" icon="pi pi-refresh" text @click="onRefresh" />
@@ -133,6 +137,15 @@ export default defineComponent({
     // replaced; otherwise reloaded rows keep the "expanded" icon without children.
     const expandedKeys = ref<Record<string, boolean>>({})
     const loading = ref(false)
+    // Shown above the table: why a load failed, or that a list was truncated.
+    const notice = ref('')
+    const noticeRetry = ref(false)
+    function showNotice(text: string, retry: boolean) {
+      notice.value = text
+      noticeRetry.value = retry
+    }
+    // Children loaded per expanded node; log-analysis caps a page at 1000 rows.
+    const maxChildren = 1000
     const totalRecords = ref(0)
     // Cursor of the next page: time and spanId of the last row shown.
     const lastRowTime = ref("0")
@@ -178,13 +191,6 @@ export default defineComponent({
       }
     }
 
-    async function getchCountSpans(filter: SpanFilter = {}) {
-      const [error, res] = await spansApi.countOfSpans(filter)
-      if (error === null && res !== null) {
-        totalRecords.value = res
-      }
-    }
-
     function spanFilter() {
       let timeFrom = filterTimeFrom.value.getTime().toString() + '000000'
       let afterSpanId = ""
@@ -202,20 +208,41 @@ export default defineComponent({
       return filter
     }
 
+    // Bumped by every fetchSpans. A response is applied only if no newer request
+    // started meanwhile; otherwise a slow response for an old filter would
+    // overwrite the rows of the current one.
+    let requestSeq = 0
+
     async function fetchSpans() {
+      const seq = ++requestSeq
+      loading.value = true
+      // Snapshot both filters now: the user may change them while we wait.
       const filter = spanFilter()
+      const countFilter = spanFilterNoTime()
       const [error, res] = await spansApi.viewSpans(filter)
+      if (seq !== requestSeq) {
+        return
+      }
       expandedKeys.value = {}
       if (error === null && res !== null) {
         spansList.value = res
         nodes.value = await loadNodes(0, spansTree.value.rows)
-        await getchCountSpans(spanFilterNoTime())
+        notice.value = ''
+        const [countError, count] = await spansApi.countOfSpans(countFilter)
+        if (seq !== requestSeq) {
+          return
+        }
+        if (countError === null && count !== null) {
+          totalRecords.value = count
+        }
         loading.value = false
       } else {
         loading.value = false
         spansList.value = []
         nodes.value = []
         totalRecords.value = 0
+        // Without this an API failure looks the same as "no matching traces".
+        showNotice('Could not load spans: ' + error, true)
       }
     }
 
@@ -237,9 +264,23 @@ export default defineComponent({
     const onExpand = async (node: any) => {
       if (!node.children) {
         loading.value = true
+        const seq = requestSeq
 
-        const [error, res] = await spansApi.viewSpans({parentId: node.key, rowsPerPage: 100000, timeFrom: "0"})
-        if (error === null && res !== null) {
+        const [error, res] = await spansApi.viewSpans({parentId: node.key, rowsPerPage: maxChildren, timeFrom: "0"})
+        if (seq !== requestSeq) {
+          // The rows were reloaded meanwhile; this node is no longer shown.
+          return
+        }
+        if (error !== null || res === null) {
+          // Collapse it again, so the icon matches and the user can retry.
+          const keys = { ...expandedKeys.value }
+          delete keys[node.key]
+          expandedKeys.value = keys
+          showNotice('Could not load child spans: ' + error, false)
+        } else {
+          if (res.length === maxChildren) {
+            showNotice(`Showing only the first ${maxChildren} child spans of ${node.data.name}`, false)
+          }
           let lazyNode = {...node}
 
           lazyNode.children = []
@@ -381,6 +422,9 @@ export default defineComponent({
       spansList,
       nodes,
       expandedKeys,
+      notice,
+      noticeRetry,
+      fetchSpans,
       onExpand,
       onPage,
       totalRecords,

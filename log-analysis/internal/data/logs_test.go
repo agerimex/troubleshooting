@@ -136,3 +136,19 @@ func TestStatusCodeToStringConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestLimitRows(t *testing.T) {
+	for _, tc := range []struct{ in, want int }{
+		{0, DefaultRowsPerPage},
+		{-1, DefaultRowsPerPage},
+		{10, 10},
+		{MaxRowsPerPage, MaxRowsPerPage},
+		{100000, MaxRowsPerPage},
+	} {
+		f := SpanFilter{RowsPerPage: tc.in}
+		f.LimitRows()
+		if f.RowsPerPage != tc.want {
+			t.Errorf("LimitRows(%d) = %d, want %d", tc.in, f.RowsPerPage, tc.want)
+		}
+	}
+}

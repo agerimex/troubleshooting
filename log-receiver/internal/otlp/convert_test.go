@@ -155,11 +155,14 @@ func TestSpansRejectsInvalidIDs(t *testing.T) {
 	spans, rejected := Spans(request(nil,
 		&tracepb.Span{TraceId: traceID[:8], SpanId: spanID},
 		&tracepb.Span{TraceId: traceID},
+		&tracepb.Span{TraceId: make([]byte, 16), SpanId: spanID},
+		&tracepb.Span{TraceId: traceID, SpanId: make([]byte, 8)},
+		&tracepb.Span{TraceId: traceID, SpanId: spanID, ParentSpanId: parentID[:4]},
 		&tracepb.Span{TraceId: traceID, SpanId: spanID},
 	))
 
-	if len(spans) != 1 || rejected != 2 {
-		t.Errorf("got %d spans, %d rejected; want 1 and 2", len(spans), rejected)
+	if len(spans) != 1 || rejected != 5 {
+		t.Errorf("got %d spans, %d rejected; want 1 and 5", len(spans), rejected)
 	}
 }
 
