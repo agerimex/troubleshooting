@@ -1,4 +1,17 @@
+# Basic auth for the UI and the API is off by default. To enable it, set
+# UI_AUTH=basic, UI_USER and UI_PASSWORD_HASH (the output of
+# `docker run --rm caddy:2 caddy hash-password --plaintext '<password>'`).
+(auth_off) {
+}
+
+(auth_basic) {
+	basic_auth {
+		{$UI_USER} {$UI_PASSWORD_HASH}
+	}
+}
+
 http://:8095 {
+	import auth_{$UI_AUTH:off}
 	root * /dist
 	reverse_proxy /api/* log-analysis-compose:8094
 	file_server

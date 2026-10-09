@@ -1,13 +1,28 @@
 version: '3'
 
+# Settings are read from the shell or a .env file next to this file:
+#   CLICKHOUSE_USER / CLICKHOUSE_PASSWORD   ClickHouse credentials (default user, no password)
+#   TROUBLESHOOTING_TOKEN                   shared token senders must present to the receiver (off when empty)
+#   UI_AUTH=basic, UI_USER, UI_PASSWORD_HASH basic auth for the UI and API (see Caddyfile)
+# ClickHouse and the raw API port are published on 127.0.0.1 only; the UI and
+# the receiver are reachable from the network.
+
 services:
 
  clickhouse-server:
-    image: clickhouse/clickhouse-server
+    # Pinned: new releases have changed how the default user is set up.
+    # Upgrade deliberately and re-test (see CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT).
+    image: clickhouse/clickhouse-server:26.9.13.15
     container_name: logs-clickhouse-server
     ports:
-      - "18123:8123"
-      - "19000:9000"
+      - "127.0.0.1:18123:8123"
+      - "127.0.0.1:19000:9000"
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      # Without this, current images lock "default" with an empty password to
+      # localhost, so the other containers can't connect.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     networks:
       - troubleshooting_network
     ulimits:
@@ -19,7 +34,11 @@ services:
  log-analysis-compose:
     image: 'docker-log-analysis:1'
     ports:
-      - "8094:8094"
+      - "127.0.0.1:8094:8094"
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      TROUBLESHOOTING_TOKEN: ${TROUBLESHOOTING_TOKEN:-}
     networks:
       - troubleshooting_network
     depends_on:
@@ -30,14 +49,24 @@ services:
     image: 'docker-log-receiver:1'
     ports:
       - "50055:50055"
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      TROUBLESHOOTING_TOKEN: ${TROUBLESHOOTING_TOKEN:-}
     networks:
       - troubleshooting_network
+    depends_on:
+      - clickhouse-server
     restart: always
 
  log-ui-compose:
     image: 'docker-log-ui:1'
     ports:
       - "8095:8095"
+    environment:
+      UI_AUTH: ${UI_AUTH:-off}
+      UI_USER: ${UI_USER:-}
+      UI_PASSWORD_HASH: ${UI_PASSWORD_HASH:-}
     networks:
       - troubleshooting_network
     restart: always

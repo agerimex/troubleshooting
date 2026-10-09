@@ -10,16 +10,16 @@ import (
 	"logs-backend/internal/data"
 )
 
-func (app *application) selectAllLogs() ([]*data.Log, error) {
-	ctx := context.Background()
+func (app *application) selectAllLogs(ctx context.Context) ([]*data.Log, error) {
 	return app.models.Log.SelectAllData(ctx)
 }
 
 func (app *application) viewLogs(w http.ResponseWriter, r *http.Request) {
 	// var users data.User
-	all, err := app.selectAllLogs()
+	all, err := app.selectAllLogs(r.Context())
 	if err != nil {
 		app.errorLog.Println(err)
+		app.errorJSON(r.Context(), w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -32,13 +32,11 @@ func (app *application) viewLogs(w http.ResponseWriter, r *http.Request) {
 	app.writeJSON(r.Context(), w, http.StatusOK, payload)
 }
 
-func (app *application) selectAllRootSpans(filter data.SpanFilter) ([]*data.Span, error) {
-	ctx := context.Background()
+func (app *application) selectAllRootSpans(ctx context.Context, filter data.SpanFilter) ([]*data.Span, error) {
 	return app.models.Log.SelectRootSpan(ctx, filter)
 }
 
-func (app *application) selectCountSpans(filter data.SpanFilter) (uint64, error) {
-	ctx := context.Background()
+func (app *application) selectCountSpans(ctx context.Context, filter data.SpanFilter) (uint64, error) {
 	return app.models.Log.SelectCountSpans(ctx, filter)
 }
 
@@ -87,9 +85,10 @@ func (app *application) viewSpans(w http.ResponseWriter, r *http.Request) {
 		requestPayload.ParentId = "0000000000000000"
 	}
 
-	all, err := app.selectAllRootSpans(requestPayload)
+	all, err := app.selectAllRootSpans(r.Context(), requestPayload)
 	if err != nil {
 		app.errorLog.Println(err)
+		app.errorJSON(r.Context(), w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -115,9 +114,10 @@ func (app *application) countSpans(w http.ResponseWriter, r *http.Request) {
 		requestPayload.ParentId = "0000000000000000"
 	}
 
-	count, err := app.selectCountSpans(requestPayload)
+	count, err := app.selectCountSpans(r.Context(), requestPayload)
 	if err != nil {
 		app.errorLog.Println(err)
+		app.errorJSON(r.Context(), w, err, http.StatusInternalServerError)
 		return
 	}
 

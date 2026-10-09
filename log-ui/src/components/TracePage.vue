@@ -6,7 +6,7 @@
           currentPageReportTemplate="{first} - {last} (Total of parents by filter {totalRecords})"
           filterDisplay="row"
           :globalFilterFields="['name','country.name', 'company', 'representative.name']"
-          :loading="loading" @nodeExpand="onExpand" @page="onPage" :totalRecords="totalRecords" v-model:filters="filters" ref="spansTree">
+          :loading="loading" v-model:expandedKeys="expandedKeys" @nodeExpand="onExpand" @page="onPage" :totalRecords="totalRecords" v-model:filters="filters" ref="spansTree">
         <template #header>
           <div style="text-align:left">
             <MultiSelect :modelValue="selectedColumns" @update:modelValue="onToggle" :options="columns" optionLabel="header" class="w-full" display="chip"/>
@@ -129,9 +129,18 @@ export default defineComponent({
     logsApi.init(new Logs()).then(() => { fetchLogs() })
 
     const nodes = ref()
+    // Owned here, not by TreeTable, so it can be cleared when the rows are
+    // replaced; otherwise reloaded rows keep the "expanded" icon without children.
+    const expandedKeys = ref<Record<string, boolean>>({})
     const loading = ref(false)
     const totalRecords = ref(0)
+    // Cursor of the next page: time and spanId of the last row shown.
     const lastRowTime = ref("0")
+    const lastRowSpanId = ref("")
+    function resetCursor() {
+      lastRowTime.value = "0"
+      lastRowSpanId.value = ""
+    }
     const rowsPerPage = ref(25)
     const statuses = ref(['unset', 'error', 'ok'])
     const filterStatus = ref()
@@ -178,10 +187,12 @@ export default defineComponent({
 
     function spanFilter() {
       let timeFrom = filterTimeFrom.value.getTime().toString() + '000000'
+      let afterSpanId = ""
       if (lastRowTime.value !== "0") {
         timeFrom = lastRowTime.value
+        afterSpanId = lastRowSpanId.value
       }
-      const filter: SpanFilter = {timeFrom: timeFrom, rowsPerPage: rowsPerPage.value, status: filterStatus.value, serviceName: filters.value['service'], methodName: filterByMethodName.value }
+      const filter: SpanFilter = {timeFrom: timeFrom, afterSpanId: afterSpanId, rowsPerPage: rowsPerPage.value, status: filterStatus.value, serviceName: filters.value['service'], methodName: filterByMethodName.value }
       return filter
     }
 
@@ -194,6 +205,7 @@ export default defineComponent({
     async function fetchSpans() {
       const filter = spanFilter()
       const [error, res] = await spansApi.viewSpans(filter)
+      expandedKeys.value = {}
       if (error === null && res !== null) {
         spansList.value = res
         nodes.value = await loadNodes(0, spansTree.value.rows)
@@ -238,7 +250,7 @@ export default defineComponent({
       var first = event.first
       if(rowsPerPage.value !== event.rows) {
         rowsPerPage.value = event.rows
-        lastRowTime.value = "0"
+        resetCursor()
         firstRow.value = 0
         first = 0
       }
@@ -281,7 +293,9 @@ export default defineComponent({
         }
       }
       if (spansList.value.length > 0) {
-        lastRowTime.value = spansList.value[spansList.value.length - 1].timeStamp
+        const lastRow = spansList.value[spansList.value.length - 1]
+        lastRowTime.value = lastRow.timeStamp
+        lastRowSpanId.value = lastRow.spanId
       }
       
       return nodes
@@ -305,21 +319,21 @@ export default defineComponent({
     }
 
     async function filterStatusChange () {
-      lastRowTime.value = "0"
+      resetCursor()
       firstRow.value = 0
 
       fetchSpans()
     }
 
     function changeTime () {
-      lastRowTime.value = "0"
+      resetCursor()
       firstRow.value = 0
 
       fetchSpans()
     }
 
     function onRefresh () {
-      lastRowTime.value = "0"
+      resetCursor()
       firstRow.value = 0
 
       fetchSpans()
@@ -357,6 +371,7 @@ export default defineComponent({
       logsList,
       spansList,
       nodes,
+      expandedKeys,
       onExpand,
       onPage,
       totalRecords,

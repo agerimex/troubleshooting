@@ -3,8 +3,8 @@ package data
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +26,10 @@ type SpanFilter struct {
 	Status      string `json:"status"`
 	ServiceName string `json:"service_name"`
 	MethodName  string `json:"method_name"`
+	// AfterSpanId, together with TimeFrom, is the cursor of the next page: the
+	// SpanId of the last row shown. Rows with the same UnixTime as that row are
+	// then paged by SpanId instead of being skipped.
+	AfterSpanId string `json:"after_span_id"`
 }
 
 type Span struct {
@@ -68,11 +72,14 @@ func StatusCodeToString(code string) string {
 	return ReverseStatusCodeMap[code]
 }
 
-func (l *Log) SelectAllData(ctx context.Context) ([]*Log, error) {
-	query := "SELECT * FROM logs order by timestamp desc"
+func (l *Log) SelectAllData(ctx context.Context) (_ []*Log, err error) {
+	query := "SELECT id, timestamp, level, message FROM logs order by timestamp desc"
+	ctx, span := startQuerySpan(ctx, "SELECT logs", query, nil)
+	defer func() { endQuerySpan(span, err) }()
+
 	rows, err := clickhouseDB.Query(ctx, query)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -108,7 +115,11 @@ func addFilter(filter SpanFilter) (string, string) {
 		if !v.Field(i).IsZero() {
 			switch field := v.Type().Field(i).Name; field {
 			case "TimeFrom":
-				condition = append(condition, `"UnixTime" > toInt64({timeFrom:Int64})`)
+				if filter.AfterSpanId != "" {
+					condition = append(condition, `("UnixTime" > toInt64({timeFrom:Int64}) or ("UnixTime" = toInt64({timeFrom:Int64}) and "SpanId" > {afterSpanId:String}))`)
+				} else {
+					condition = append(condition, `"UnixTime" > toInt64({timeFrom:Int64})`)
+				}
 			case "ParentId":
 				condition = append(condition, `"ParentSpanId" = {parent:String}`)
 			case "Status":
@@ -131,11 +142,43 @@ func addFilter(filter SpanFilter) (string, string) {
 	return where, limit
 }
 
-func addSorting() string {
-	return `order by "UnixTime" ASC`
+// filterParams binds every placeholder addFilter may produce, so the span list
+// and the span count always filter identically.
+func filterParams(filter SpanFilter) []any {
+	return []any{
+		clickhouse.Named("rowsPerPage", strconv.Itoa(filter.RowsPerPage)),
+		clickhouse.Named("parent", filter.ParentId),
+		clickhouse.Named("timeFrom", filter.TimeFrom),
+		clickhouse.Named("statusCode", StatusCodeFromString(filter.Status)),
+		clickhouse.Named("serviceName", "%"+filter.ServiceName+"%"),
+		clickhouse.Named("spanName", "%"+filter.MethodName+"%"),
+		clickhouse.Named("afterSpanId", filter.AfterSpanId),
+	}
 }
 
-func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) ([]*Span, error) {
+var sqlPlaceholder = regexp.MustCompile(`\$(\d+)`)
+
+// fillSQLArgs replaces $N placeholders with quoted argument values in a single
+// pass, so $1 never matches inside $10 and values are never re-substituted.
+func fillSQLArgs(statement string, args map[int]string) string {
+	return sqlPlaceholder.ReplaceAllStringFunc(statement, func(placeholder string) string {
+		argNum, err := strconv.Atoi(placeholder[1:])
+		if err != nil {
+			return placeholder
+		}
+		value, ok := args[argNum]
+		if !ok {
+			return placeholder
+		}
+		return "'" + value + "'"
+	})
+}
+
+func addSorting() string {
+	return `order by "UnixTime" ASC, "SpanId" ASC`
+}
+
+func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) (_ []*Span, err error) {
 	query := `SELECT toString("UnixTime") as "Timestamp", "SpanName", "ServiceName", "TraceId", "SpanId", "ParentSpanId",
 	 arrayMap(key -> map('key', key, 'value', SpanAttributes[key]), mapKeys(SpanAttributes)) AS tags,
 	 arrayMap(key -> map('key', key, 'value', ResourceAttributes[key]), mapKeys(ResourceAttributes)) AS serviceTags, "ChildSpanCount", "StatusCode", "StatusMessage", "Duration" FROM otel_traces`
@@ -143,15 +186,13 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) ([]*Span, e
 	where, limit := addFilter(filter)
 	sorting := addSorting()
 	query += where + " " + sorting + " " + limit
-	rows, err := clickhouseDB.Query(ctx, query,
-		clickhouse.Named("rowsPerPage", strconv.Itoa(filter.RowsPerPage)),
-		clickhouse.Named("parent", filter.ParentId),
-		clickhouse.Named("timeFrom", filter.TimeFrom),
-		clickhouse.Named("statusCode", StatusCodeFromString(filter.Status)),
-		clickhouse.Named("serviceName", "%"+filter.ServiceName+"%"),
-		clickhouse.Named("spanName", "%"+filter.MethodName+"%"))
+	params := filterParams(filter)
+	ctx, dbSpan := startQuerySpan(ctx, "SELECT otel_traces", query, params)
+	defer func() { endQuerySpan(dbSpan, err) }()
+
+	rows, err := clickhouseDB.Query(ctx, query, params...)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	defer rows.Close()
 	var spans []*Span
@@ -179,11 +220,15 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) ([]*Span, e
 
 		var msgField string = ""
 		sqlArgs := make(map[int]string)
+		namedParams := make(map[string]string)
 		for _, tag := range span.Tags {
 			if tag["key"] == "db.statement" {
 				msgField = tag["value"]
 			}
 			key := tag["key"]
+			if strings.HasPrefix(key, queryParamPrefix) {
+				namedParams[key[len(queryParamPrefix):]] = tag["value"]
+			}
 			if strings.HasPrefix(tag["key"], "db.sql.args.") {
 				argNum := key[len("db.sql.args."):]
 				value := tag["value"]
@@ -194,10 +239,10 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) ([]*Span, e
 			}
 		}
 		if len(msgField) > 0 && len(sqlArgs) > 0 {
-			for argNum, value := range sqlArgs {
-				placeholder := fmt.Sprintf("$%d", argNum)
-				msgField = strings.ReplaceAll(msgField, placeholder, "'"+value+"'")
-			}
+			msgField = fillSQLArgs(msgField, sqlArgs)
+		}
+		if len(msgField) > 0 && len(namedParams) > 0 {
+			msgField = fillNamedParams(msgField, namedParams)
 		}
 		span.Msg = msgField
 		span.Status = StatusCodeToString(strconv.Itoa(int(span.StatusCode)))
@@ -208,17 +253,17 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) ([]*Span, e
 	return spans, nil
 }
 
-func (l *Log) SelectCountSpans(ctx context.Context, filter SpanFilter) (uint64, error) {
+func (l *Log) SelectCountSpans(ctx context.Context, filter SpanFilter) (_ uint64, err error) {
 	query := `SELECT count(*) FROM otel_traces`
 	where, _ := addFilter(filter)
 	query += " " + where
+	params := filterParams(filter)
+	ctx, span := startQuerySpan(ctx, "SELECT count otel_traces", query, params)
+	defer func() { endQuerySpan(span, err) }()
+
 	var res uint64
-	row := clickhouseDB.QueryRow(ctx, query,
-		clickhouse.Named("parent", filter.ParentId),
-		clickhouse.Named("timeFrom", filter.TimeFrom),
-		clickhouse.Named("statusCode", StatusCodeFromString(filter.Status)),
-		clickhouse.Named("serviceName", filter.ServiceName))
-	err := row.Scan(&res)
+	row := clickhouseDB.QueryRow(ctx, query, params...)
+	err = row.Scan(&res)
 	if err != nil {
 		return 0, err
 	}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -77,24 +76,9 @@ func (app *application) errorJSON(ctx context.Context, w http.ResponseWriter, er
 		statusCode = status[0]
 	}
 
-	var customErr error
-	switch {
-	case strings.Contains(err.Error(), "SQLSTATE 23505"):
-		customErr = errors.New("duplicate value violates unique constraint")
-		statusCode = http.StatusForbidden
-	case strings.Contains(err.Error(), "SQLSTATE 22001"):
-		customErr = errors.New("the value you are trying to insert is too large")
-		statusCode = http.StatusForbidden
-	case strings.Contains(err.Error(), "SQLSTATE 23503"):
-		customErr = errors.New("foreign key violation")
-		statusCode = http.StatusForbidden
-	default:
-		customErr = err
-	}
-
 	var payload jsonResponse
 	payload.Error = true
-	payload.Message = customErr.Error()
+	payload.Message = err.Error()
 
 	app.writeJSON(ctx, w, statusCode, payload)
 }

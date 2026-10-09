@@ -3,7 +3,6 @@ package sender
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -14,8 +13,6 @@ import (
 
 	pb "github.com/agerimex/troubleshooting/protos/logs"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -31,15 +28,6 @@ func NewClickHouseWriter(url string) *ClickHouseWriter {
 	}
 }
 
-const (
-	defaultName = "world"
-)
-
-var (
-	addr = flag.String("addr", "localhost:50051", "the address to connect to")
-	name = flag.String("name", defaultName, "Name to greet")
-)
-
 type LogMessage struct {
 	Level    string    `json:"level"`
 	Time     time.Time `json:"time"`
@@ -50,21 +38,16 @@ type LogMessage struct {
 	Line     int       `json:"line"`
 }
 
-func writeLogToBackend(message []byte) {
-	flag.Parse()
-	conn, err := grpc.Dial(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-	}
-	defer conn.Close()
-	c := pb.NewLogServiceClient(conn)
-
+// writeLogToBackend is not wired up yet (see "UI for find zerolog by trace" in
+// the README). It takes the client so it can share the exporter's connection.
+func writeLogToBackend(ctx context.Context, client pb.LogServiceClient, message []byte) error {
 	var logData LogMessage
-	err = json.Unmarshal(message, &logData)
-	if err != nil {
-		fmt.Printf("Error encoding to JSON: %v\n", err)
+	if err := json.Unmarshal(message, &logData); err != nil {
+		return fmt.Errorf("troubleshooting: decode log message: %w", err)
 	}
 
-	c.LogMessage(context.Background(), &pb.LogMessageRequest{Message: logData.Message, Timestamp: timestamppb.New(logData.Time)})
+	_, err := client.LogMessage(ctx, &pb.LogMessageRequest{Message: logData.Message, Timestamp: timestamppb.New(logData.Time)})
+	return err
 }
 
 func (w *ClickHouseWriter) Write(p []byte) (n int, err error) {

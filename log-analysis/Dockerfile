@@ -1,14 +1,20 @@
+# Build from the repository root (see Makefile): go.mod replaces log-sender
+# and protos with ../log-sender and ../protos.
 FROM golang:1.21 AS builder
 
-WORKDIR /app
+WORKDIR /src
 
-COPY go.mod go.sum ./
+COPY protos/go.mod protos/
+COPY log-sender/go.mod log-sender/go.sum log-sender/
+COPY log-analysis/go.mod log-analysis/go.sum log-analysis/
 
-RUN go mod download
+RUN cd log-analysis && go mod download
 
-COPY . .
+COPY protos/ protos/
+COPY log-sender/ log-sender/
+COPY log-analysis/ log-analysis/
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o log-analysis ./cmd/rest_api
+RUN cd log-analysis && CGO_ENABLED=0 GOOS=linux go build -o /app/log-analysis ./cmd/rest_api
 
 FROM ubuntu:22.04 as base
 
