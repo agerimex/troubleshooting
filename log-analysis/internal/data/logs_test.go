@@ -2,6 +2,7 @@ package data
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,4 +114,25 @@ func TestEarliestChildStart(t *testing.T) {
 	if _, ok := earliestChildStart(nil); ok {
 		t.Errorf("no spans must not produce a bound")
 	}
+}
+
+func TestStatusCodeToString(t *testing.T) {
+	for status, code := range StatusCodeMap {
+		if got := StatusCodeToString(code); got != status {
+			t.Errorf("StatusCodeToString(%q) = %q, want %q", code, got, status)
+		}
+	}
+}
+
+// Concurrent first calls used to race on a lazily filled map; run with -race.
+func TestStatusCodeToStringConcurrent(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			StatusCodeToString("1")
+		}()
+	}
+	wg.Wait()
 }

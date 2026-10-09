@@ -219,6 +219,21 @@ export default defineComponent({
       }
     }
 
+    // replaceNode returns a copy of the tree with the node `key` replaced at any
+    // depth. Only replacing top-level nodes left expanded children without
+    // their loaded grandchildren.
+    function replaceNode(tree: any[], key: string, replacement: any): any[] {
+      return tree.map((n) => {
+        if (n.key === key) {
+          return replacement
+        }
+        if (n.children) {
+          return { ...n, children: replaceNode(n.children, key, replacement) }
+        }
+        return n
+      })
+    }
+
     const onExpand = async (node: any) => {
       if (!node.children) {
         loading.value = true
@@ -232,15 +247,9 @@ export default defineComponent({
             lazyNode.children.push(createItem(res[i]))
           }
 
-          let newNodes = nodes.value.map((n: { key: any }) => {
-            if (n.key === node.key) {
-              n = lazyNode
-            }
-            return n
-          })
-          nodes.value = newNodes
+          nodes.value = replaceNode(nodes.value, node.key, lazyNode)
+          spansList.value = res
         }
-        spansList.value = res
         loading.value = false
       }
     }

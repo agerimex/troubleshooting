@@ -1,5 +1,6 @@
 import { type ISpans } from '@/interfaces/spans.interface'
 import Security from '@/services/security'
+import { requestJSON } from '@/services/request'
 import { type SpanFilter } from '@/types/filter'
 
 let defaultFilter: SpanFilter = {
@@ -21,17 +22,7 @@ export class Spans implements ISpans {
       service_name: filter.serviceName,
       method_name: filter.methodName
     }
-    const [error, res] = await fetch(import.meta.env.VITE_LOGS_APP_API_URL + '/api/v1/view-spans', Security.requestOptions(payload))
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.error) {
-          return data.error
-        } else {
-          return [null, data.data.Spans]
-        }
-      })
-
-    return [error, res]
+    return requestJSON(import.meta.env.VITE_LOGS_APP_API_URL + '/api/v1/view-spans', Security.requestOptions(payload), (data) => data.Spans)
   }
 
   public async countOfSpans (filter: SpanFilter = defaultFilter): Promise<[any, any]> {
@@ -43,16 +34,6 @@ export class Spans implements ISpans {
       service_name: filter.serviceName,
       method_name: filter.methodName
     }
-    const [error, res] = await fetch(import.meta.env.VITE_LOGS_APP_API_URL + '/api/v1/count-spans', Security.requestOptions(payload))
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.error) {
-          return data.error
-        } else {
-          return [null, data.data.Count]
-        }
-      })
-
-    return [error, res]
+    return requestJSON(import.meta.env.VITE_LOGS_APP_API_URL + '/api/v1/count-spans', Security.requestOptions(payload), (data) => data.Count)
   }
 }

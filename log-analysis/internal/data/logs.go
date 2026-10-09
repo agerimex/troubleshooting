@@ -55,20 +55,24 @@ var StatusCodeMap = map[string]string{
 	"ok":    "2",
 }
 
-var ReverseStatusCodeMap map[string]string
+// ReverseStatusCodeMap is built once at startup and only read afterwards, so
+// concurrent requests can use it safely. (It used to be filled lazily on the
+// first call, which raced when requests arrived together.)
+var ReverseStatusCodeMap = reverseMap(StatusCodeMap)
+
+func reverseMap(m map[string]string) map[string]string {
+	reversed := make(map[string]string, len(m))
+	for key, value := range m {
+		reversed[value] = key
+	}
+	return reversed
+}
 
 func StatusCodeFromString(status string) string {
 	return StatusCodeMap[status]
 }
 
 func StatusCodeToString(code string) string {
-	if len(ReverseStatusCodeMap) == 0 {
-		ReverseStatusCodeMap = make(map[string]string)
-		for stringStatus, codeStatus := range StatusCodeMap {
-			ReverseStatusCodeMap[codeStatus] = stringStatus
-		}
-	}
-
 	return ReverseStatusCodeMap[code]
 }
 
