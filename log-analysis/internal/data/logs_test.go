@@ -3,6 +3,7 @@ package data
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
@@ -81,5 +82,35 @@ func TestFilterParamsBindEveryPlaceholder(t *testing.T) {
 		if strings.Contains(where+limit, "{"+name+":") && !bound[name] {
 			t.Errorf("placeholder %q is used but not bound", name)
 		}
+	}
+}
+
+func TestArrayLiteral(t *testing.T) {
+	got := arrayLiteral([]string{"a1b2", `it's`, `back\slash`})
+	want := `['a1b2','it\'s','back\\slash']`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestEarliestChildStart(t *testing.T) {
+	spans := []*Span{
+		{Timestamp: "5000000000"},
+		{Timestamp: "2000000000"}, // earliest start
+		{Timestamp: "4000000000"},
+	}
+
+	from, ok := earliestChildStart(spans)
+
+	want := 2000000000 - int64(time.Minute)
+	if !ok || from != want {
+		t.Errorf("got %d (ok=%v), want %d", from, ok, want)
+	}
+
+	if _, ok := earliestChildStart([]*Span{{Timestamp: "not a number"}}); ok {
+		t.Errorf("an unparsable timestamp must disable the bound")
+	}
+	if _, ok := earliestChildStart(nil); ok {
+		t.Errorf("no spans must not produce a bound")
 	}
 }

@@ -19,6 +19,7 @@ WORKDIR /app
 
 COPY --from=builder /app/grpc_server .
 
-EXPOSE 50055
+# 50055: log-sender, 4317: OTLP/gRPC from any OpenTelemetry SDK
+EXPOSE 50055 4317
 
 ENTRYPOINT ["/app/grpc_server"]

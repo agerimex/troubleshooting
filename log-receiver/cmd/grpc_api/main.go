@@ -15,6 +15,7 @@ import (
 
 	pb "github.com/agerimex/troubleshooting/protos/logs"
 
+	collectortracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -73,6 +74,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
+	// OTLP clients default to port 4317. Both ports serve both services.
+	otlpListenAddr := getenv("OTLP_LISTEN_ADDR", ":4317")
+	otlpLis, err := net.Listen("tcp", otlpListenAddr)
+	if err != nil {
+		log.Fatalf("Failed to listen for OTLP: %v", err)
+	}
 
 	var serverOptions []grpc.ServerOption
 	if token := os.Getenv(tokenEnv); token != "" {
@@ -86,6 +93,7 @@ func main() {
 		models.Log.InsertLogData(context.Background(), batch)
 	})
 	pb.RegisterLogServiceServer(grpcServer, &logServiceServer{models: models, logs: logs})
+	collectortracepb.RegisterTraceServiceServer(grpcServer, &otlpTraceServer{models: models})
 
 	go func() {
 		stop, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -93,6 +101,13 @@ func main() {
 		<-stop.Done()
 		log.Println("Shutting down: finishing in-flight requests")
 		grpcServer.GracefulStop()
+	}()
+
+	go func() {
+		log.Printf("OTLP trace receiver listening on %s", otlpListenAddr)
+		if err := grpcServer.Serve(otlpLis); err != nil {
+			log.Fatalf("Failed to serve OTLP: %v", err)
+		}
 	}()
 
 	log.Printf("Receiver listening on %s", listenAddr)

@@ -178,7 +178,20 @@ func addSorting() string {
 	return `order by "UnixTime" ASC, "SpanId" ASC`
 }
 
-func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) (_ []*Span, err error) {
+// SelectRootSpan returns one page of spans matching filter (root spans unless
+// filter.ParentId says otherwise), with child counts read from the table.
+func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) ([]*Span, error) {
+	spans, err := selectSpans(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if err := fillChildSpanCounts(ctx, spans); err != nil {
+		return nil, err
+	}
+	return spans, nil
+}
+
+func selectSpans(ctx context.Context, filter SpanFilter) (_ []*Span, err error) {
 	query := `SELECT toString("UnixTime") as "Timestamp", "SpanName", "ServiceName", "TraceId", "SpanId", "ParentSpanId",
 	 arrayMap(key -> map('key', key, 'value', SpanAttributes[key]), mapKeys(SpanAttributes)) AS tags,
 	 arrayMap(key -> map('key', key, 'value', ResourceAttributes[key]), mapKeys(ResourceAttributes)) AS serviceTags, "ChildSpanCount", "StatusCode", "StatusMessage", "Duration" FROM otel_traces`
@@ -249,8 +262,94 @@ func (l *Log) SelectRootSpan(ctx context.Context, filter SpanFilter) (_ []*Span,
 		spans = append(spans, &span)
 		id = id + 1
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return spans, nil
+}
+
+// fillChildSpanCounts replaces the stored ChildSpanCount with the number of
+// children actually in the table. OTLP doesn't send that count at all, and the
+// one log-sender sends misses children that start after their parent ends or
+// come from other services. The UI shows the expand arrow from it.
+func fillChildSpanCounts(ctx context.Context, spans []*Span) (err error) {
+	if len(spans) == 0 {
+		return nil
+	}
+	ids := make([]string, len(spans))
+	for i, span := range spans {
+		ids[i] = span.SpanId
+	}
+
+	query := `SELECT "ParentSpanId", toInt32(count()) FROM otel_traces WHERE "ParentSpanId" IN {spanIds:Array(String)}`
+	params := []any{clickhouse.Named("spanIds", arrayLiteral(ids))}
+	// Children never start before their parent, so a lower time bound lets
+	// ClickHouse skip older data via the primary key (UnixTime). There is no
+	// upper bound: children of async work (queues, background jobs) can start
+	// long after their parent ended.
+	if from, ok := earliestChildStart(spans); ok {
+		query += ` AND "UnixTime" >= toInt64({childrenFrom:Int64})`
+		params = append(params, clickhouse.Named("childrenFrom", strconv.FormatInt(from, 10)))
+	}
+	query += ` GROUP BY "ParentSpanId"`
+	ctx, span := startQuerySpan(ctx, "SELECT children otel_traces", query, params)
+	defer func() { endQuerySpan(span, err) }()
+
+	rows, err := clickhouseDB.Query(ctx, query, params...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int32, len(spans))
+	for rows.Next() {
+		var parent string
+		var count int32
+		if err := rows.Scan(&parent, &count); err != nil {
+			return err
+		}
+		counts[parent] = count
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, s := range spans {
+		s.ChildSpanCount = counts[s.SpanId]
+	}
+	return nil
+}
+
+// childClockSkew allows for children recorded by another service whose clock
+// is behind the parent's.
+const childClockSkew = int64(time.Minute)
+
+// earliestChildStart returns the earliest UnixTime (nanoseconds) at which a
+// child of spans can start: the earliest parent start minus childClockSkew.
+// ok is false if a timestamp can't be parsed, and then the query runs without
+// the bound.
+func earliestChildStart(spans []*Span) (from int64, ok bool) {
+	for i, span := range spans {
+		start, err := strconv.ParseInt(span.Timestamp, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		if i == 0 || start < from {
+			from = start
+		}
+	}
+	return from - childClockSkew, len(spans) > 0
+}
+
+// arrayLiteral formats values as a ClickHouse Array(String) literal such as
+// ['a','b']. The driver only accepts strings for query parameters.
+func arrayLiteral(values []string) string {
+	escape := strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = "'" + escape.Replace(v) + "'"
+	}
+	return "[" + strings.Join(quoted, ",") + "]"
 }
 
 func (l *Log) SelectCountSpans(ctx context.Context, filter SpanFilter) (_ uint64, err error) {

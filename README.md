@@ -90,6 +90,20 @@ func (app *application) routers() http.Handler {
 }
 ```
 
+Send traces from any language (OTLP)
+------
+The receiver also accepts the standard OpenTelemetry protocol (OTLP over gRPC) on port 4317, so any application instrumented with an OpenTelemetry SDK (Go, Java, Python, Node.js, .NET, …) or an OpenTelemetry Collector can send traces without log-sender. Usually environment variables are enough:
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_SERVICE_NAME=orders-api
+# if the receiver requires a token:
+OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <token>"
+```
+
+Only traces over gRPC are supported for now (not OTLP/HTTP on port 4318, not logs or metrics). Some SDKs, e.g. Node.js, default to HTTP, so set the protocol explicitly.
+
 Configuration
 ------
 All settings are environment variables; docker-compose reads them from the shell or a `.env` file next to `docker-compose.yml`. Everything works without them.
@@ -99,18 +113,19 @@ All settings are environment variables; docker-compose reads them from the shell
 | `CLICKHOUSE_ADDR` | receiver, analysis | `clickhouse-server:9000` (`localhost:19000` when running a service outside Docker) |
 | `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | ClickHouse, receiver, analysis | `default`, `default`, empty |
 | `LISTEN_ADDR` | receiver, analysis | `:50055`, `:8094` |
+| `OTLP_LISTEN_ADDR` | receiver (OTLP/gRPC) | `:4317` |
 | `TRACE_RECEIVER_ADDR` | analysis (its own traces) | `log-receiver-compose:50055` |
 | `CORS_ALLOWED_ORIGINS` | analysis | `http://localhost:5173,http://127.0.0.1:5173` (Vite dev server) |
 | `APP_ENV` | analysis | empty; `development` pretty-prints JSON |
-| `TROUBLESHOOTING_TOKEN` | receiver, log-sender | empty = no token check |
+| `TROUBLESHOOTING_TOKEN` | receiver (both ports), log-sender | empty = no token check |
 | `UI_AUTH`, `UI_USER`, `UI_PASSWORD_HASH` | UI (Caddy) | `off` |
 
 Security
 ------
-By default there is no authentication, which is convenient for local debugging. ClickHouse and the API port are published on `127.0.0.1` only; the UI (8095) and the receiver (50055) are reachable from the network. On a shared server, turn on:
+By default there is no authentication, which is convenient for local debugging. ClickHouse and the API port are published on `127.0.0.1` only; the UI (8095) and the receiver (50055, 4317) are reachable from the network. On a shared server, turn on:
 
 * Basic auth for the UI and API: `UI_AUTH=basic`, `UI_USER=<name>`, `UI_PASSWORD_HASH=<hash>` where the hash comes from `docker run --rm caddy:2 caddy hash-password --plaintext '<password>'`. In `.env`, wrap the hash in single quotes because it contains `$`.
-* A shared token for the receiver: `TROUBLESHOOTING_TOKEN=<random string>` for the receiver and every application that sends traces.
+* A shared token for the receiver: `TROUBLESHOOTING_TOKEN=<random string>` for the receiver and every application that sends traces. The token travels unencrypted (no TLS), so it keeps out stray senders, not someone who can watch the network.
 * A password for ClickHouse: `CLICKHOUSE_PASSWORD`.
 
 Coming soon

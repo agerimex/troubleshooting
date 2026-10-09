@@ -5,7 +5,7 @@ version: '3'
 #   TROUBLESHOOTING_TOKEN                   shared token senders must present to the receiver (off when empty)
 #   UI_AUTH=basic, UI_USER, UI_PASSWORD_HASH basic auth for the UI and API (see Caddyfile)
 # ClickHouse and the raw API port are published on 127.0.0.1 only; the UI and
-# the receiver are reachable from the network.
+# the receiver (50055 for log-sender, 4317 for OTLP) are reachable from the network.
 
 services:
 
@@ -49,6 +49,7 @@ services:
     image: 'docker-log-receiver:1'
     ports:
       - "50055:50055"
+      - "4317:4317"   # OTLP/gRPC
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
