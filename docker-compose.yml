@@ -25,6 +25,8 @@ services:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     networks:
       - troubleshooting_network
+    volumes:
+      - ./clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml
     ulimits:
       nofile:
         soft: 262144

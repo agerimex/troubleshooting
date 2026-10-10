@@ -58,6 +58,7 @@ Key conventions spanning multiple components:
 - **Cursor pagination**: there's no offset; the UI passes the last row's `UnixTime` as `time_from` and its `SpanId` as `after_span_id`, and the backend returns rows after `(UnixTime, SpanId)`, ordered by both. `UnixTime` is Int64 nanoseconds (the UI appends `'000000'` to JS millisecond timestamps). Paging only moves forward.
 - Status is sent as a string (`unset`/`error`/`ok`) and mapped to `StatusCode` 0/1/2 via `StatusCodeMap`.
 - Tables have a 3-day TTL (`ttl_only_drop_parts`).
+- `clickhouse/low-resources.xml` (mounted into the ClickHouse container) tunes ClickHouse for a small install (idle CPU from ~10% to under 1% of a core): it turns off the internal system logs except `query_log` and `error_log`, and stops threads that poll on short timers (`async_insert_threads`, the async logger).
 - All configuration is environment variables with defaults matching docker-compose (table in README.md). Run a service outside Docker against the compose ClickHouse with `CLICKHOUSE_ADDR=localhost:19000`.
 - Event/link attribute maps travel as one JSON-encoded `pb.Attribute` per event/link (documented in `logs.proto`), to avoid a proto change.
 

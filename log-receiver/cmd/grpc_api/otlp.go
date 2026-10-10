@@ -38,7 +38,7 @@ func (s *otlpTraceServer) Export(ctx context.Context, req *collectortracepb.Expo
 	if rejected > 0 {
 		response.PartialSuccess = &collectortracepb.ExportTracePartialSuccess{
 			RejectedSpans: rejected,
-			ErrorMessage:  fmt.Sprintf("%d spans without a valid trace or span id were dropped", rejected),
+			ErrorMessage:  fmt.Sprintf("%d spans with an invalid trace, span or parent id were dropped", rejected),
 		}
 	}
 	return response, nil
