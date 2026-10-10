@@ -1,0 +1,6 @@
+# Applies to the Go images, which are built with the repository root as context.
+.git
+**/node_modules
+**/dist
+img
+*.tar

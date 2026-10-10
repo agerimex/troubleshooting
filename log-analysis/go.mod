@@ -9,6 +9,7 @@ require (
 	github.com/go-chi/chi/v5 v5.0.10
 	github.com/go-chi/cors v1.2.1
 	go.opentelemetry.io/otel v1.24.0
+	go.opentelemetry.io/otel/sdk v1.24.0
 	go.opentelemetry.io/otel/trace v1.24.0
 )
 
@@ -18,7 +19,6 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/rs/zerolog v1.31.0 // indirect
 	go.opentelemetry.io/otel/metric v1.24.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.24.0 // indirect
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/text v0.9.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230530153820-e85fd2cbaebc // indirect
@@ -47,4 +47,11 @@ require (
 	go.opentelemetry.io/contrib v1.0.0 // indirect
 	golang.org/x/sys v0.17.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
+
+// Build against the code in this repository, not the published versions.
+// Docker builds use the repository root as context (see Makefile).
+replace (
+	github.com/agerimex/troubleshooting/log-sender => ../log-sender
+	github.com/agerimex/troubleshooting/protos => ../protos
 )

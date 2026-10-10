@@ -39,6 +39,10 @@ message OneSpan {
   int64 Duration = 11;
   int32 StatusCode = 12;
   string StatusMessage = 13;
+  // Events_* and Links_* are parallel arrays: element i of each describes the
+  // same event/link. Events_Attributes[i] / Links_Attributes[i] carry the whole
+  // attribute map of that event/link: key = event name (empty for links),
+  // value = the attributes as a JSON object of strings.
   repeated google.protobuf.Timestamp Events_Timestamp = 14;
   repeated string Events_Name = 15;
   repeated Attribute Events_Attributes = 16;

@@ -1,9 +1,10 @@
 VERSION=1
 
+# Go images build from the repository root so they use the local log-sender and protos.
 all:
-	cd ./log-analysis && docker build --tag docker-log-analysis:${VERSION} .
+	docker build --file log-analysis/Dockerfile --tag docker-log-analysis:${VERSION} .
 	cd ./log-ui && docker build --tag docker-log-ui:${VERSION} .
-	cd ./log-receiver && docker build --tag docker-log-receiver:${VERSION} .
+	docker build --file log-receiver/Dockerfile --tag docker-log-receiver:${VERSION} .
 	docker network create troubleshooting_network
 
 save:

@@ -13,7 +13,11 @@ const Security = {
   requestOptions: function (payload: any, type: string = 'POST') {
     const headers = new Headers()
     headers.append('Content-Type', 'application/json')
-    headers.append('Authorization', 'Bearer ' + store.token)
+    // An explicit Authorization header would replace the browser's basic auth
+    // credentials for Caddy, so send it only when there is a real token.
+    if (store.token !== '') {
+      headers.append('Authorization', 'Bearer ' + store.token)
+    }
 
     let res = {}
     if (type === 'GET') {

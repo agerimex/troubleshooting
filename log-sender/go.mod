@@ -26,5 +26,9 @@ require (
 	go.opentelemetry.io/otel/trace v1.16.0
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/sys v0.12.0 // indirect
-	golang.org/x/text v0.9.0
+	golang.org/x/text v0.9.0 // indirect
 )
+
+// Used only when building this module itself; applications importing
+// log-sender ignore it and get the published protos version.
+replace github.com/agerimex/troubleshooting/protos => ../protos

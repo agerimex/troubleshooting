@@ -6,10 +6,14 @@
           currentPageReportTemplate="{first} - {last} (Total of parents by filter {totalRecords})"
           filterDisplay="row"
           :globalFilterFields="['name','country.name', 'company', 'representative.name']"
-          :loading="loading" @nodeExpand="onExpand" @page="onPage" :totalRecords="totalRecords" v-model:filters="filters" ref="spansTree">
+          :loading="loading" v-model:expandedKeys="expandedKeys" @nodeExpand="onExpand" @page="onPage" :totalRecords="totalRecords" v-model:filters="filters" ref="spansTree">
         <template #header>
           <div style="text-align:left">
             <MultiSelect :modelValue="selectedColumns" @update:modelValue="onToggle" :options="columns" optionLabel="header" class="w-full" display="chip"/>
+          </div>
+          <div v-if="notice" class="flex items-center gap-2 mt-2 text-red-600">
+            <span>{{ notice }}</span>
+            <PrimeButton v-if="noticeRetry" type="button" label="Retry" size="small" text @click="fetchSpans" />
           </div>
         </template>
         <template #paginatorstart>
@@ -129,9 +133,27 @@ export default defineComponent({
     logsApi.init(new Logs()).then(() => { fetchLogs() })
 
     const nodes = ref()
+    // Owned here, not by TreeTable, so it can be cleared when the rows are
+    // replaced; otherwise reloaded rows keep the "expanded" icon without children.
+    const expandedKeys = ref<Record<string, boolean>>({})
     const loading = ref(false)
+    // Shown above the table: why a load failed, or that a list was truncated.
+    const notice = ref('')
+    const noticeRetry = ref(false)
+    function showNotice(text: string, retry: boolean) {
+      notice.value = text
+      noticeRetry.value = retry
+    }
+    // Children loaded per expanded node; log-analysis caps a page at 1000 rows.
+    const maxChildren = 1000
     const totalRecords = ref(0)
+    // Cursor of the next page: time and spanId of the last row shown.
     const lastRowTime = ref("0")
+    const lastRowSpanId = ref("")
+    function resetCursor() {
+      lastRowTime.value = "0"
+      lastRowSpanId.value = ""
+    }
     const rowsPerPage = ref(25)
     const statuses = ref(['unset', 'error', 'ok'])
     const filterStatus = ref()
@@ -169,19 +191,14 @@ export default defineComponent({
       }
     }
 
-    async function getchCountSpans(filter: SpanFilter = {}) {
-      const [error, res] = await spansApi.countOfSpans(filter)
-      if (error === null && res !== null) {
-        totalRecords.value = res
-      }
-    }
-
     function spanFilter() {
       let timeFrom = filterTimeFrom.value.getTime().toString() + '000000'
+      let afterSpanId = ""
       if (lastRowTime.value !== "0") {
         timeFrom = lastRowTime.value
+        afterSpanId = lastRowSpanId.value
       }
-      const filter: SpanFilter = {timeFrom: timeFrom, rowsPerPage: rowsPerPage.value, status: filterStatus.value, serviceName: filters.value['service'], methodName: filterByMethodName.value }
+      const filter: SpanFilter = {timeFrom: timeFrom, afterSpanId: afterSpanId, rowsPerPage: rowsPerPage.value, status: filterStatus.value, serviceName: filters.value['service'], methodName: filterByMethodName.value }
       return filter
     }
 
@@ -191,28 +208,79 @@ export default defineComponent({
       return filter
     }
 
+    // Bumped by every fetchSpans. A response is applied only if no newer request
+    // started meanwhile; otherwise a slow response for an old filter would
+    // overwrite the rows of the current one.
+    let requestSeq = 0
+
     async function fetchSpans() {
+      const seq = ++requestSeq
+      loading.value = true
+      // Snapshot both filters now: the user may change them while we wait.
       const filter = spanFilter()
+      const countFilter = spanFilterNoTime()
       const [error, res] = await spansApi.viewSpans(filter)
+      if (seq !== requestSeq) {
+        return
+      }
+      expandedKeys.value = {}
       if (error === null && res !== null) {
         spansList.value = res
         nodes.value = await loadNodes(0, spansTree.value.rows)
-        await getchCountSpans(spanFilterNoTime())
+        notice.value = ''
+        const [countError, count] = await spansApi.countOfSpans(countFilter)
+        if (seq !== requestSeq) {
+          return
+        }
+        if (countError === null && count !== null) {
+          totalRecords.value = count
+        }
         loading.value = false
       } else {
         loading.value = false
         spansList.value = []
         nodes.value = []
         totalRecords.value = 0
+        // Without this an API failure looks the same as "no matching traces".
+        showNotice('Could not load spans: ' + error, true)
       }
+    }
+
+    // replaceNode returns a copy of the tree with the node `key` replaced at any
+    // depth. Only replacing top-level nodes left expanded children without
+    // their loaded grandchildren.
+    function replaceNode(tree: any[], key: string, replacement: any): any[] {
+      return tree.map((n) => {
+        if (n.key === key) {
+          return replacement
+        }
+        if (n.children) {
+          return { ...n, children: replaceNode(n.children, key, replacement) }
+        }
+        return n
+      })
     }
 
     const onExpand = async (node: any) => {
       if (!node.children) {
         loading.value = true
+        const seq = requestSeq
 
-        const [error, res] = await spansApi.viewSpans({parentId: node.key, rowsPerPage: 100000, timeFrom: "0"})
-        if (error === null && res !== null) {
+        const [error, res] = await spansApi.viewSpans({parentId: node.key, rowsPerPage: maxChildren, timeFrom: "0"})
+        if (seq !== requestSeq) {
+          // The rows were reloaded meanwhile; this node is no longer shown.
+          return
+        }
+        if (error !== null || res === null) {
+          // Collapse it again, so the icon matches and the user can retry.
+          const keys = { ...expandedKeys.value }
+          delete keys[node.key]
+          expandedKeys.value = keys
+          showNotice('Could not load child spans: ' + error, false)
+        } else {
+          if (res.length === maxChildren) {
+            showNotice(`Showing only the first ${maxChildren} child spans of ${node.data.name}`, false)
+          }
           let lazyNode = {...node}
 
           lazyNode.children = []
@@ -220,15 +288,9 @@ export default defineComponent({
             lazyNode.children.push(createItem(res[i]))
           }
 
-          let newNodes = nodes.value.map((n: { key: any }) => {
-            if (n.key === node.key) {
-              n = lazyNode
-            }
-            return n
-          })
-          nodes.value = newNodes
+          nodes.value = replaceNode(nodes.value, node.key, lazyNode)
+          spansList.value = res
         }
-        spansList.value = res
         loading.value = false
       }
     }
@@ -238,7 +300,7 @@ export default defineComponent({
       var first = event.first
       if(rowsPerPage.value !== event.rows) {
         rowsPerPage.value = event.rows
-        lastRowTime.value = "0"
+        resetCursor()
         firstRow.value = 0
         first = 0
       }
@@ -281,7 +343,9 @@ export default defineComponent({
         }
       }
       if (spansList.value.length > 0) {
-        lastRowTime.value = spansList.value[spansList.value.length - 1].timeStamp
+        const lastRow = spansList.value[spansList.value.length - 1]
+        lastRowTime.value = lastRow.timeStamp
+        lastRowSpanId.value = lastRow.spanId
       }
       
       return nodes
@@ -305,21 +369,21 @@ export default defineComponent({
     }
 
     async function filterStatusChange () {
-      lastRowTime.value = "0"
+      resetCursor()
       firstRow.value = 0
 
       fetchSpans()
     }
 
     function changeTime () {
-      lastRowTime.value = "0"
+      resetCursor()
       firstRow.value = 0
 
       fetchSpans()
     }
 
     function onRefresh () {
-      lastRowTime.value = "0"
+      resetCursor()
       firstRow.value = 0
 
       fetchSpans()
@@ -357,6 +421,10 @@ export default defineComponent({
       logsList,
       spansList,
       nodes,
+      expandedKeys,
+      notice,
+      noticeRetry,
+      fetchSpans,
       onExpand,
       onPage,
       totalRecords,
