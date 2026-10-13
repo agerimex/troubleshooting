@@ -31,4 +31,8 @@
     <!-- 16 threads poll the async insert queue on a short timer; we never use
          async inserts. -->
     <async_insert_threads>1</async_insert_threads>
+    <!-- At startup ClickHouse hashes its own ~500 MB binary. In a new container
+         under Docker Desktop that read is so slow that the first start took
+         4-10 minutes (restarts of the same container: under a second). -->
+    <skip_binary_checksum_checks>true</skip_binary_checksum_checks>
 </clickhouse>

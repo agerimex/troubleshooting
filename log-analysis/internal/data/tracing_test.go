@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -30,11 +31,12 @@ func TestQuerySpanIsChildAndRecordsUsedParams(t *testing.T) {
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 
 	ctx, parent := provider.Tracer("test").Start(context.Background(), "request")
-	filter := SpanFilter{ParentId: "0000000000000000", RowsPerPage: 25}
-	where, limit := addFilter(filter)
-	query := "SELECT 1 FROM otel_traces" + where + " " + limit
+	filter := SpanFilter{TraceId: "0123456789abcdef0123456789abcdef", ParentId: "0000000000000001"}
+	conds, queryParams := filter.conditions(false)
+	queryParams = append(queryParams, clickhouse.Named("serviceName", "bound but unused"))
+	query := "SELECT 1 FROM otel_traces" + whereClause(conds)
 
-	_, span := startQuerySpan(ctx, "SELECT otel_traces", query, filterParams(filter))
+	_, span := startQuerySpan(ctx, "SELECT otel_traces", query, queryParams)
 	endQuerySpan(span, errors.New("boom"))
 	parent.End()
 
@@ -60,13 +62,13 @@ func TestQuerySpanIsChildAndRecordsUsedParams(t *testing.T) {
 	if attrs["db.statement"] != query {
 		t.Errorf("db.statement = %q", attrs["db.statement"])
 	}
-	want := map[string]string{"parent": "0000000000000000", "rowsPerPage": "25"}
+	want := map[string]string{"traceId": "0123456789abcdef0123456789abcdef", "parentId": "0000000000000001"}
 	for name, value := range want {
 		if attrs[queryParamPrefix+name] != value {
 			t.Errorf("%s = %q, want %q", queryParamPrefix+name, attrs[queryParamPrefix+name], value)
 		}
 	}
-	// Bound but unused parameters (e.g. timeFrom, serviceName) are not recorded.
+	// Bound but unused parameters are not recorded.
 	if _, ok := attrs[queryParamPrefix+"serviceName"]; ok {
 		t.Errorf("unused parameter serviceName was recorded")
 	}
@@ -77,7 +79,7 @@ func TestQuerySpanIsChildAndRecordsUsedParams(t *testing.T) {
 		params[name] = attrs[queryParamPrefix+name]
 	}
 	filled := fillNamedParams(attrs["db.statement"], params)
-	if filled != `SELECT 1 FROM otel_traces where "ParentSpanId" = '0000000000000000' limit 25` {
+	if filled != `SELECT 1 FROM otel_traces WHERE "TraceId" = '0123456789abcdef0123456789abcdef' AND "ParentSpanId" = '0000000000000001'` {
 		t.Errorf("filled statement = %q", filled)
 	}
 }

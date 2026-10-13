@@ -6,8 +6,10 @@ import (
 
 var clickhouseDB driver.Conn // db *sql.DB
 
-func New(clickhousePool driver.Conn) Models {
+// New sets the connection and the limits every query runs with.
+func New(clickhousePool driver.Conn, queryLimits QueryLimits) Models {
 	clickhouseDB = clickhousePool
+	limits = queryLimits
 
 	return Models{
 		Log: Log{},

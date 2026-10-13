@@ -9,11 +9,33 @@ import "google/protobuf/timestamp.proto";
 service LogService {
     rpc LogMessage(LogMessageRequest) returns (LogMessageResponse);
     rpc SendSpans(Spans) returns (LogMessageResponse);
+    // SendLogs stores a batch of log records. It answers only after the whole
+    // batch is written; an error means none of it may be counted as stored,
+    // and the sender retries the same records (same record_id).
+    rpc SendLogs(Logs) returns (LogMessageResponse);
 }
 
 message LogMessageRequest {
     string message = 1;
     google.protobuf.Timestamp timestamp = 2;
+    // Fields 3-8 are optional; senders that only set message and timestamp
+    // keep working, and their records have no correlation.
+    // record_id is the stable identity of one log event: a retry repeats it,
+    // a separate event gets a new one. Empty: the receiver assigns one, so a
+    // retry of that record is stored twice.
+    string record_id = 3;
+    // trace_id (32 hex) and span_id (16 hex) of the span active when the
+    // record was written; empty when there was none.
+    string trace_id = 4;
+    string span_id = 5;
+    // severity: TRACE, DEBUG, INFO, WARN, ERROR or FATAL; empty if unknown.
+    string severity = 6;
+    string service_name = 7;
+    map<string, string> attributes = 8;
+}
+
+message Logs {
+    repeated LogMessageRequest logs = 1;
 }
 
 message LogMessageResponse {

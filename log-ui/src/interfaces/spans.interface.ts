@@ -1,6 +1,6 @@
-import { type SpanFilter } from '@/types/filter'
+import { type SpanFilter, type SpanPage } from '@/types/filter'
 
 export interface ISpans {
-  viewSpans(filter: SpanFilter): Promise<[any, any]>
-  countOfSpans(filter: SpanFilter): Promise<[any, any]>
+  viewSpans(filter: SpanFilter): Promise<[string | null, SpanPage | null]>
+  countOfSpans(filter: SpanFilter): Promise<[string | null, number | null]>
 }

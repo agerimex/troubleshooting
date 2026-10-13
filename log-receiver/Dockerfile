@@ -1,5 +1,5 @@
 # Build from the repository root (see Makefile): go.mod replaces protos with ../protos.
-FROM golang:1.21 AS builder
+FROM golang:1.21.13 AS builder
 
 WORKDIR /src
 

@@ -1,15 +1,20 @@
 import { type ILogs } from '@/interfaces/logs.interface'
+import { type LogFilter, type LogPage, type ReportRequest, type ReportResponse } from '@/types/report'
 
 class LogsService implements ILogs {
-  private instance: any
+  private instance: ILogs | null = null
   async init (options: ILogs) {
-    this.instance = options
-    console.log('init')
+    if (this.instance === null) {
+      this.instance = options
+    }
   }
 
-  public async allLogs (): Promise<[any, any]> {
-    console.log('call')
-    return await this.instance.allLogs()
+  public async searchLogs (filter: LogFilter): Promise<[string | null, LogPage | null]> {
+    return await this.instance!.searchLogs(filter)
+  }
+
+  public async traceReport (request: ReportRequest): Promise<[string | null, ReportResponse | null]> {
+    return await this.instance!.traceReport(request)
   }
 }
 

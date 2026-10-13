@@ -9,15 +9,23 @@ import (
 	pb "github.com/agerimex/troubleshooting/protos/logs"
 )
 
-type Log struct {
-	ID        int64     `json:"id"`
-	Timestamp time.Time `json:"time"`
-	Level     string    `json:"level"`
-	Message   string    `json:"msg"`
-}
+// Log groups the inserts into ClickHouse.
+type Log struct{}
 
+// spanColumns lists the inserted columns in the order Append receives them.
+// The names are unquoted: the driver matches them to the table's columns and
+// only strips backticks.
+const spanColumns = "UnixTime, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, " +
+	"ResourceAttributes, SpanAttributes, Duration, StatusCode, StatusMessage, " +
+	"Events.Timestamp, Events.Name, Events.Attributes, " +
+	"Links.TraceId, Links.SpanId, Links.TraceState, Links.Attributes, ChildSpanCount, ReceivedTime"
+
+// InsertTraceData stores spans with the time they were received (one value
+// per request), which statistics use to decide whether a record arrived in
+// time for its bucket.
 func (l *Log) InsertTraceData(ctx context.Context, data []*pb.OneSpan) error {
-	batch, err := clickhouseDB.PrepareBatch(ctx, "INSERT INTO otel_traces")
+	received := time.Now().UnixNano()
+	batch, err := clickhouseDB.PrepareBatch(ctx, "INSERT INTO otel_traces ("+spanColumns+")")
 	if err != nil {
 		return err
 	}
@@ -46,6 +54,7 @@ func (l *Log) InsertTraceData(ctx context.Context, data []*pb.OneSpan) error {
 			links.traceStates,
 			links.attributes,
 			d.ChildSpanCount,
+			received,
 		)
 		if err != nil {
 			fmt.Println(err)
@@ -113,24 +122,4 @@ func decodeAttributes(encoded []*pb.Attribute, n int) []map[string]string {
 		}
 	}
 	return result
-}
-
-func (l *Log) InsertLogData(ctx context.Context, data []Log) {
-	batch, err := clickhouseDB.PrepareBatch(ctx, "INSERT INTO logs")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	for i, d := range data {
-		// The logs table has 5 columns; spanid is not sent by LogMessageRequest yet.
-		err := batch.Append(
-			int64(i), d.Timestamp, "INFO", d.Message, "",
-		)
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
-	if err := batch.Send(); err != nil {
-		fmt.Println(err)
-	}
 }

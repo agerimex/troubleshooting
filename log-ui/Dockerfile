@@ -1,8 +1,9 @@
-FROM node:18 AS build-frontend
+# Versions are pinned so builds are repeatable; see README (Versions).
+FROM node:20.18.0 AS build-frontend
 
 WORKDIR /app
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 
 COPY .env.production ./
 COPY env.d.ts ./
@@ -17,10 +18,10 @@ COPY index.html ./
 COPY public/ public/
 COPY src/ src/
 
-RUN npm install
+RUN npm ci --no-audit --no-fund
 
 RUN npm run build
 
-FROM caddy:2
+FROM caddy:2.8.4
 
 COPY --from=build-frontend /app/dist/ /dist/
