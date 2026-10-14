@@ -89,15 +89,12 @@ func TestAddRespectsContextWhileWaiting(t *testing.T) {
 func TestCloseFlushesBufferedItems(t *testing.T) {
 	rec := &recorder{}
 	b := New(100, time.Hour, rec.flush)
-	done := make(chan error, 1)
-	go func() { done <- b.Add(context.Background(), 7) }()
-	// Wait until the item is buffered, then close.
-	for len(b.items) > 0 {
-		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(10 * time.Millisecond)
+	// Queue the item on this goroutine (what Add does before it waits), so the
+	// send happens before Close: Add must not race with Close.
+	p := pending[int]{item: 7, result: make(chan error, 1)}
+	b.items <- p
 	b.Close()
-	if err := <-done; err != nil {
+	if err := <-p.result; err != nil {
 		t.Fatal(err)
 	}
 	if got := rec.snapshot(); len(got) != 1 || got[0][0] != 7 {
