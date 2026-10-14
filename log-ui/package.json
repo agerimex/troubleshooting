@@ -7,7 +7,9 @@
     "build": "run-p type-check build-only",
     "preview": "vite preview",
     "build-only": "vite build --mode production",
-    "type-check": "vue-tsc --noEmit -p tsconfig.app.json --composite false"
+    "type-check": "vue-tsc --noEmit -p tsconfig.app.json --composite false",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "autoprefixer": "^10.4.18",

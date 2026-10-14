@@ -27,6 +27,14 @@ services:
       - troubleshooting_network
     volumes:
       - ./clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml
+      # Named, so the data survives "docker compose down" and container
+      # recreation. Only "docker compose down -v" deletes it.
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
     ulimits:
       nofile:
         soft: 262144
@@ -44,7 +52,8 @@ services:
     networks:
       - troubleshooting_network
     depends_on:
-      - clickhouse-server
+      clickhouse-server:
+        condition: service_healthy
     restart: always
 
  log-receiver-compose:
@@ -59,7 +68,8 @@ services:
     networks:
       - troubleshooting_network
     depends_on:
-      - clickhouse-server
+      clickhouse-server:
+        condition: service_healthy
     restart: always
 
  log-ui-compose:
@@ -75,6 +85,9 @@ services:
     restart: always
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+
+volumes:
+  clickhouse-data:
 
 networks:
   troubleshooting_network:

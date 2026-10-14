@@ -39,8 +39,9 @@ var (
 )
 
 type config struct {
-	address string
-	token   string
+	address  string
+	token    string
+	resource map[string]string
 }
 
 // Option configures NewTracer and NewCustomExporter.
@@ -56,6 +57,38 @@ func WithAddress(address string) Option {
 // over the TROUBLESHOOTING_TOKEN environment variable.
 func WithToken(token string) Option {
 	return func(c *config) { c.token = token }
+}
+
+// Attribute keys that statistics group by (log-analysis reads them from the
+// resource or span attributes of a span and from the attributes of a log
+// record). A record without one is counted in an explicit "not recorded"
+// group; nothing is filled in from other records.
+const (
+	AttrServiceVersion  = "service.version"
+	AttrEnvironment     = "deployment.environment.name"
+	AttrInstallation    = "troubleshooting.installation"
+	AttrWorkloadSegment = "troubleshooting.workload_segment"
+	// AttrSamplingPolicy declares how spans were sampled: "unsampled" (every
+	// span recorded) or "head:<ratio>", such as head:0.2. Without it the
+	// sampling is unknown and comparisons give no change signals.
+	AttrSamplingPolicy = "troubleshooting.sampling_policy"
+	// AttrOperation is the operation a log record belongs to.
+	AttrOperation = "operation.name"
+)
+
+// WithResourceAttributes describes the running application, for example
+// {AttrServiceVersion: "1.4.2", AttrEnvironment: "production"}. NewTracer
+// adds them to the resource of every span; a LogExporter adds them to every
+// record that doesn't set the same key itself.
+func WithResourceAttributes(attributes map[string]string) Option {
+	return func(c *config) {
+		if c.resource == nil {
+			c.resource = make(map[string]string, len(attributes))
+		}
+		for k, v := range attributes {
+			c.resource[k] = v
+		}
+	}
 }
 
 func newConfig(opts []Option) config {
@@ -197,13 +230,17 @@ func NewTracer(svcName string, opts ...Option) (trace.Tracer, error) {
 
 	batcher := sdktrace.NewBatchSpanProcessor(customExporter)
 
+	resourceAttrs := []attribute.KeyValue{semconv.ServiceNameKey.String(svcName)}
+	for key, value := range newConfig(opts).resource {
+		if key != string(semconv.ServiceNameKey) {
+			resourceAttrs = append(resourceAttrs, attribute.String(key, value))
+		}
+	}
+
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithSpanProcessor(batcher),
-		sdktrace.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(svcName),
-		)),
+		sdktrace.WithResource(resource.NewWithAttributes(semconv.SchemaURL, resourceAttrs...)),
 	)
 
 	providerMu.Lock()

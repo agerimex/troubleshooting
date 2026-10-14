@@ -1,20 +1,20 @@
 import { type ISpans } from '@/interfaces/spans.interface'
-import { type SpanFilter } from '@/types/filter'
+import { type SpanFilter, type SpanPage } from '@/types/filter'
 
 class SpansService implements ISpans {
-  private instance: any = null
+  private instance: ISpans | null = null
   async init (options: ISpans) {
     if (this.instance === null) {
       this.instance = options
     }
   }
 
-  public async viewSpans (filter: SpanFilter): Promise<[any, any]> {
-    return await this.instance.viewSpans(filter)
+  public async viewSpans (filter: SpanFilter): Promise<[string | null, SpanPage | null]> {
+    return await this.instance!.viewSpans(filter)
   }
 
-  public async countOfSpans(filter: SpanFilter): Promise<[any, any]> {
-    return await this.instance.countOfSpans(filter)
+  public async countOfSpans(filter: SpanFilter): Promise<[string | null, number | null]> {
+    return await this.instance!.countOfSpans(filter)
   }
 }
 

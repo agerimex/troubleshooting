@@ -24,22 +24,48 @@ import (
 const (
 	logBatchSize     = 100
 	logBatchInterval = time.Second
+	logInsertTimeout = 30 * time.Second
 )
 
 type logServiceServer struct {
 	pb.UnimplementedLogServiceServer
-	logs   *batch.Batcher[data.Log]
+	logs   *batch.Batcher[data.LogRecord]
 	models data.Models
 }
 
+// LogMessage stores one record. It is batched with other single records and
+// answers only after its batch was written: an error (or a deadline) means the
+// record is not confirmed, and the sender should retry it with the same
+// record_id.
 func (s *logServiceServer) LogMessage(ctx context.Context, req *pb.LogMessageRequest) (*pb.LogMessageResponse, error) {
-	log.Printf("Received log message: %s", req.Message)
-	err := s.logs.Add(ctx, data.Log{
-		Timestamp: req.Timestamp.AsTime(),
-		Message:   req.Message,
-	})
+	record, err := data.LogRecordFromProto(req)
 	if err != nil {
-		return nil, status.FromContextError(err).Err()
+		return nil, status.Errorf(codes.InvalidArgument, "log record: %v", err)
+	}
+	if err := s.logs.Add(ctx, record); err != nil {
+		if ctx.Err() != nil {
+			return nil, status.FromContextError(err).Err()
+		}
+		return nil, status.Errorf(codes.Unavailable, "insert log record: %v", err)
+	}
+	return &pb.LogMessageResponse{Success: true}, nil
+}
+
+// SendLogs stores a batch in one insert and answers after it was written. An
+// invalid record rejects the whole batch, so nothing is stored partially.
+func (s *logServiceServer) SendLogs(ctx context.Context, req *pb.Logs) (*pb.LogMessageResponse, error) {
+	records := make([]data.LogRecord, 0, len(req.GetLogs()))
+	for i, l := range req.GetLogs() {
+		record, err := data.LogRecordFromProto(l)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "log record %d: %v", i, err)
+		}
+		records = append(records, record)
+	}
+	if err := s.models.Log.InsertLogRecords(ctx, records); err != nil {
+		log.Printf("Failed to insert %d log records: %v", len(records), err)
+		// Unavailable tells the sender the request may be retried.
+		return nil, status.Errorf(codes.Unavailable, "insert log records: %v", err)
 	}
 	return &pb.LogMessageResponse{Success: true}, nil
 }
@@ -65,9 +91,14 @@ func main() {
 		log.Fatalf("Failed to connect to clickhouse: %v", err)
 	}
 
-	ctx := context.Background()
-	driver.CreateTracer(ctx, clickhouse)
-	driver.СreateLogs(ctx, clickhouse)
+	retention, lateness, err := driver.RetentionFromEnv()
+	if err != nil {
+		log.Fatalf("Retention: %v", err)
+	}
+	if err := driver.EnsureSchema(context.Background(), clickhouse, retention); err != nil {
+		log.Fatalf("Schema: %v", err)
+	}
+	log.Printf("Retention: traces %s, logs %s, statistics %s (allowed lateness %s)", retention.Traces, retention.Logs, retention.Stats, lateness)
 
 	listenAddr := getenv("LISTEN_ADDR", ":50055")
 	lis, err := net.Listen("tcp", listenAddr)
@@ -89,8 +120,15 @@ func main() {
 	grpcServer := grpc.NewServer(serverOptions...)
 
 	models := data.New(clickhouse)
-	logs := batch.New(logBatchSize, logBatchInterval, func(batch []data.Log) {
-		models.Log.InsertLogData(context.Background(), batch)
+	go heartbeat(models)
+	logs := batch.New(logBatchSize, logBatchInterval, func(batch []data.LogRecord) error {
+		ctx, cancel := context.WithTimeout(context.Background(), logInsertTimeout)
+		defer cancel()
+		if err := models.Log.InsertLogRecords(ctx, batch); err != nil {
+			log.Printf("Failed to insert %d log records: %v", len(batch), err)
+			return err
+		}
+		return nil
 	})
 	pb.RegisterLogServiceServer(grpcServer, &logServiceServer{models: models, logs: logs})
 	collectortracepb.RegisterTraceServiceServer(grpcServer, &otlpTraceServer{models: models})
@@ -116,4 +154,23 @@ func main() {
 	}
 	// Serve returns after GracefulStop, when no request can add logs any more.
 	logs.Close()
+}
+
+// heartbeatInterval is how often the receiver records that it is running.
+// Statistics treat a minute without a heartbeat as a collection gap.
+const heartbeatInterval = 15 * time.Second
+
+func heartbeat(models data.Models) {
+	name, err := os.Hostname()
+	if err != nil {
+		name = "log-receiver"
+	}
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), heartbeatInterval)
+		if err := models.Log.Heartbeat(ctx, name); err != nil {
+			log.Printf("Heartbeat: %v", err)
+		}
+		cancel()
+		time.Sleep(heartbeatInterval)
+	}
 }

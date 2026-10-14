@@ -130,7 +130,7 @@ func TestSpansRootAndDefaults(t *testing.T) {
 		TraceId:           traceID,
 		SpanId:            spanID,
 		StartTimeUnixNano: 2000,
-		EndTimeUnixNano:   1000, // end before start must not give a negative duration
+		EndTimeUnixNano:   1000, // end before start is not a valid duration
 	}))
 
 	got := spans[0]
@@ -143,8 +143,8 @@ func TestSpansRootAndDefaults(t *testing.T) {
 	if got.SpanKind != "unspecified" {
 		t.Errorf("SpanKind = %q", got.SpanKind)
 	}
-	if got.Duration != 0 {
-		t.Errorf("Duration = %d, want 0", got.Duration)
+	if got.Duration != InvalidDuration {
+		t.Errorf("Duration = %d, want InvalidDuration (never a silent 0)", got.Duration)
 	}
 	if got.Events_Name != nil || got.Links_TraceId != nil {
 		t.Errorf("expected no events or links")

@@ -32,6 +32,9 @@ var statusCodes = map[tracepb.Status_StatusCode]int32{
 	tracepb.Status_STATUS_CODE_ERROR: 1,
 }
 
+// InvalidDuration marks a span whose duration was not recorded validly.
+const InvalidDuration = -1
+
 // spanKinds uses the same names as SpanKind.String() in the OpenTelemetry Go
 // SDK, which is what log-sender stores.
 var spanKinds = map[tracepb.Span_SpanKind]string{
@@ -125,8 +128,13 @@ func convertSpan(span *tracepb.Span, scope *commonpb.InstrumentationScope) *pb.O
 		StatusCode:     statusCodes[span.GetStatus().GetCode()],
 		StatusMessage:  span.GetStatus().GetMessage(),
 	}
-	if end > start {
-		out.Duration = int64((end - start) / 1000) // microseconds, as log-sender sends
+	// Microseconds, as log-sender sends. A span without an end, or ending
+	// before it started, has no valid duration: it is stored as
+	// InvalidDuration (never as 0, which is a valid zero-length span), so
+	// statistics count the call but leave it out of percentiles.
+	out.Duration = InvalidDuration
+	if end >= start && end != 0 {
+		out.Duration = int64((end - start) / 1000)
 	}
 
 	for _, event := range span.GetEvents() {

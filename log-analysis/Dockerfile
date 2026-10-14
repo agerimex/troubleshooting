@@ -1,6 +1,6 @@
 # Build from the repository root (see Makefile): go.mod replaces log-sender
 # and protos with ../log-sender and ../protos.
-FROM golang:1.21 AS builder
+FROM golang:1.21.13 AS builder
 
 WORKDIR /src
 

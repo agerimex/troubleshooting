@@ -1,0 +1,99 @@
+# Isolated stack for the regression fixture (fixtures/regression). It uses its
+# own project name, network, ports and ClickHouse volume, so starting,
+# resetting or breaking it never touches the development stack in
+# docker-compose.yml. Use the Makefile targets (test-stack-up, fixture-load,
+# fixture-check, test-stack-reset) rather than calling it directly.
+#
+# Ports (127.0.0.1 only): ClickHouse 29000, OTLP 24317, log-sender 20055,
+# API 28094, API with tiny query limits 28096, UI 28095.
+name: troubleshooting-test
+
+services:
+
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:26.9.13.15
+    container_name: troubleshooting-test-clickhouse
+    ports:
+      - "127.0.0.1:29000:9000"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ./clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml
+      - test-clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 150
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    restart: unless-stopped
+
+  log-receiver:
+    image: docker-log-receiver:1
+    ports:
+      - "127.0.0.1:20055:50055"
+      - "127.0.0.1:24317:4317"
+    environment:
+      # The milestone 2 fixture policy: 48 h raw, 30 days statistics. The
+      # fixture overrides them to check a retention change (M2-RET-002).
+      TRACE_RETENTION: ${FIXTURE_TRACE_RETENTION:-48h}
+      LOG_RETENTION: ${FIXTURE_LOG_RETENTION:-48h}
+      STATS_RETENTION: ${FIXTURE_STATS_RETENTION:-720h}
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  log-analysis:
+    image: docker-log-analysis:1
+    ports:
+      - "127.0.0.1:28094:8094"
+    environment:
+      TRACE_RECEIVER_ADDR: log-receiver:50055
+      QUERY_TIMEOUT: 10s
+      QUERY_MAX_ROWS_TO_READ: "50000000"
+      QUERY_MAX_MEMORY_BYTES: "1073741824"
+      MAX_SEARCH_WINDOW: 96h
+      # The fixture moves this API's clock to finalize and expire statistics
+      # without waiting days. Never set this on a real installation.
+      TEST_CLOCK_CONTROL: "1"
+    networks:
+      default:
+        # The UI's Caddyfile proxies /api/* to this name.
+        aliases: [log-analysis-compose]
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The same API with a row limit far below the fixture, to show that hitting
+  # a query limit is an explicit error, not a partial result.
+  log-analysis-limited:
+    image: docker-log-analysis:1
+    ports:
+      - "127.0.0.1:28096:8094"
+    environment:
+      TRACE_RECEIVER_ADDR: log-receiver:50055
+      QUERY_MAX_ROWS_TO_READ: "10"
+      STATS_REFRESH: "off"
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  log-ui:
+    image: docker-log-ui:1
+    ports:
+      - "127.0.0.1:28095:8095"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    restart: unless-stopped
+
+volumes:
+  test-clickhouse-data:
+    name: troubleshooting-test-clickhouse-data

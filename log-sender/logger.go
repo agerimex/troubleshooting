@@ -2,25 +2,23 @@ package sender
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"runtime"
 	"time"
 
 	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/trace"
-
-	pb "github.com/agerimex/troubleshooting/protos/logs"
-
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// ClickHouseWriter is an unfinished early integration and stores nothing.
+//
+// Deprecated: use NewLogWriter with a LogExporter.
 type ClickHouseWriter struct {
 	url    string
 	client *http.Client
 }
 
+// Deprecated: use NewLogWriter with a LogExporter.
 func NewClickHouseWriter(url string) *ClickHouseWriter {
 	return &ClickHouseWriter{
 		url:    url,
@@ -28,6 +26,9 @@ func NewClickHouseWriter(url string) *ClickHouseWriter {
 	}
 }
 
+// LogMessage is the JSON shape of the early zerolog integration.
+//
+// Deprecated: use LogRecord.
 type LogMessage struct {
 	Level    string    `json:"level"`
 	Time     time.Time `json:"time"`
@@ -38,23 +39,12 @@ type LogMessage struct {
 	Line     int       `json:"line"`
 }
 
-// writeLogToBackend is not wired up yet (see "UI for find zerolog by trace" in
-// the README). It takes the client so it can share the exporter's connection.
-func writeLogToBackend(ctx context.Context, client pb.LogServiceClient, message []byte) error {
-	var logData LogMessage
-	if err := json.Unmarshal(message, &logData); err != nil {
-		return fmt.Errorf("troubleshooting: decode log message: %w", err)
-	}
-
-	_, err := client.LogMessage(ctx, &pb.LogMessageRequest{Message: logData.Message, Timestamp: timestamppb.New(logData.Time)})
-	return err
-}
-
+// Write discards p.
 func (w *ClickHouseWriter) Write(p []byte) (n int, err error) {
-
 	return len(p), nil
 }
 
+// CustomHook adds the caller's file, function and line to every event.
 type CustomHook struct {
 }
 
@@ -66,21 +56,32 @@ func (h CustomHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
 	e.Int("line", line)
 }
 
+// CustomLogger adds the trace_id and span_id of the span in ctx. With a
+// LogWriter, prefer logger.Info().Ctx(ctx) and TraceHook.
 type CustomLogger struct {
 	zerolog.Logger
 }
 
+func withSpan(e *zerolog.Event, ctx context.Context) *zerolog.Event {
+	// Without a valid span nothing is added: an all-zero id would be rejected.
+	if sc := trace.SpanFromContext(ctx).SpanContext(); sc.IsValid() {
+		e = e.Str("trace_id", sc.TraceID().String()).Str("span_id", sc.SpanID().String())
+	}
+	return e
+}
+
 func (l *CustomLogger) InfoWithContext(ctx context.Context) *zerolog.Event {
-	span := trace.SpanFromContext(ctx)
-	return l.Logger.Info().Str("trace_id", span.SpanContext().TraceID().String())
+	return withSpan(l.Logger.Info(), ctx)
 }
 
 func (l *CustomLogger) DebugWithContext(ctx context.Context) *zerolog.Event {
-	span := trace.SpanFromContext(ctx)
-	return l.Logger.Debug().Str("trace_id", span.SpanContext().TraceID().String())
+	return withSpan(l.Logger.Debug(), ctx)
 }
 
 func (l *CustomLogger) WarningWithContext(ctx context.Context) *zerolog.Event {
-	span := trace.SpanFromContext(ctx)
-	return l.Logger.Warn().Str("trace_id", span.SpanContext().TraceID().String())
+	return withSpan(l.Logger.Warn(), ctx)
+}
+
+func (l *CustomLogger) ErrorWithContext(ctx context.Context) *zerolog.Event {
+	return withSpan(l.Logger.Error(), ctx)
 }
