@@ -448,7 +448,8 @@ func (d dataset) m2Spans() []*collectortracepb.ExportTraceServiceRequest {
 	}
 	reqs = append(reqs, d.m2SmallSpans()...)
 	reqs = append(reqs, d.pwSpans()...)
-	return append(reqs, d.seqSpans()...)
+	reqs = append(reqs, d.seqSpans()...)
+	return append(reqs, d.qgSpans()...)
 }
 
 func (d dataset) m2Logs() []sender.LogRecord {
