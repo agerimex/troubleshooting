@@ -17,7 +17,7 @@ export default defineConfig({
   lastUpdated: true,
   sitemap: { hostname },
   head: [
-    ['meta', { name: 'theme-color', content: '#3c6df0' }],
+    ['meta', { name: 'theme-color', content: '#3f6b12' }],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: name }],
     ['meta', { property: 'og:image', content: hostname + 'screenshots/compare-result.png' }]
