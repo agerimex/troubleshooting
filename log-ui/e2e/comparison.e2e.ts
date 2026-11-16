@@ -212,6 +212,24 @@ test('M2-REP-002 / M2-INV-004: regenerating creates a new revision and the earli
   await expect(page.getByTestId('row-samples')).toContainText('Candidate: 1000 calls')
 })
 
+test('a long saved-comparison title wraps inside the window instead of running past its edge', async ({ page }) => {
+  const title = 'recording-worker / upload_recording / consumer / environment test / version 1.1.0 / installation reference-local / workload segment upload-small against recording-worker / upload_recording / consumer / environment test / version 1.0.0'
+  for (const width of [1440, 360]) {
+    await page.setViewportSize({ width, height: 800 })
+    await openCompare(page, { analyses: () => ({ data: { Analyses: [{ id: 'a1', kind: 'comparison', title, createdAt: '1' }] } }) })
+    await page.getByTestId('saved-analyses').click()
+    const item = page.locator('.saved-analyses-panel .p-dropdown-item', { hasText: 'installation reference-local' })
+    await expect(item).toBeVisible()
+    const panel = await page.locator('.saved-analyses-panel').boundingBox()
+    expect(panel!.x, `left edge at ${width}px`).toBeGreaterThanOrEqual(0)
+    expect(panel!.x + panel!.width, `right edge at ${width}px`).toBeLessThanOrEqual(width)
+    // The whole title is still there, wrapped onto more lines.
+    await expect(item).toContainText('version 1.0.0')
+    expect((await item.boundingBox())!.height).toBeGreaterThan(40)
+    await page.keyboard.press('Escape')
+  }
+})
+
 test('M2-ERR-005 / M2-REP-003: unavailable error evidence is undetermined, never zero', async ({ page }) => {
   const a = regression()
   a.errorGroups = [{ ...DENIED_GROUP, baseline: { occurrences: null, affectedTraces: null, unlinked: null }, candidate: { occurrences: 2, affectedTraces: 2, unlinked: 0 },

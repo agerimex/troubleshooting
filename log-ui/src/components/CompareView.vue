@@ -20,7 +20,7 @@
     <div class="flex flex-wrap items-center gap-2 mt-2 text-sm">
       <span>Saved comparisons:</span>
       <Dropdown v-model="savedId" :options="saved" optionLabel="label" optionValue="id" placeholder="open a saved comparison" class="w-96" style="max-width: 48rem"
-        @update:modelValue="openSaved" data-testid="saved-analyses"/>
+        panelClass="saved-analyses-panel" @update:modelValue="openSaved" data-testid="saved-analyses"/>
       <PrimeButton type="button" icon="pi pi-refresh" size="small" text title="Reload the list" @click="loadSaved" data-testid="saved-reload"/>
     </div>
     <p v-if="error" class="mt-2 text-red-500" data-testid="compare-error">The comparison could not be generated: {{ error }}</p>
@@ -350,4 +350,13 @@ export default defineComponent({
 @media (max-width: 1200px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
 .cmp-table th, .cmp-table td { text-align: left; vertical-align: top; padding: 0.25rem 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
 .message { white-space: pre-wrap; word-break: break-word; }
+</style>
+
+<style>
+/* The saved-comparison panel is appended to <body> and sizes itself to its
+   longest label, which can be wider than the screen: cap it at the viewport
+   and let long labels wrap instead. Not scoped: the panel is outside this
+   component's root. */
+.saved-analyses-panel { max-width: min(48rem, calc(100vw - 2rem)); }
+.saved-analyses-panel .p-dropdown-item { white-space: normal; overflow-wrap: anywhere; }
 </style>
