@@ -880,7 +880,7 @@ func (c *checker) m2Checks(o options) []namedCheck {
 		{"M2-INV-003", "Bounded examples, statistics unchanged", c.m2BoundedExamples},
 		{"M2-INV-004", "Later log in new report, comparison unchanged", func(ctx context.Context) error { return c.m2LaterEvidence(ctx, o) }},
 		{"M2-REP-002", "Reviewed comparison stable; regenerate 1010", func(ctx context.Context) error { return c.m2Revision(ctx, o) }},
-	}, c.pwChecks()...)
+	}, append(c.pwChecks(), c.qgChecks()...)...)
 }
 
 // m2Replay resends every milestone 2 record sent so far, byte for byte.

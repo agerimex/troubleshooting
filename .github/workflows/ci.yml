@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [protos, log-sender, log-receiver, log-analysis, fixtures/regression]
+        module: [protos, log-sender, log-receiver, log-analysis, quality-check, fixtures/regression]
     defaults:
       run:
         working-directory: ${{ matrix.module }}

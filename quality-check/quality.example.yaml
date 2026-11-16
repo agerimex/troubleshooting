@@ -1,0 +1,27 @@
+# Quality rules for troubleshooting-check (quality-gate-v1, docs/quality-gate.md).
+version: 1
+
+# The operation an execution starts with; a check can set its own entry.
+entry:
+  service: recording-api
+  operation: start_session
+  span_kind: server
+
+checks:
+  # p95 of the entry span's duration over the run.
+  - id: startup-p95
+    type: latency
+    percentile: 95
+    max_ms: 800
+    target_ms: 500
+
+  # Recorded database calls (CLIENT spans with db.system) in every execution.
+  - id: db-calls
+    type: db_calls
+    max_per_execution: 3
+    target_per_execution: 2
+
+  # No execution may call this service.
+  - id: no-directory
+    type: forbidden_call
+    to: directory-api

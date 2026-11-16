@@ -52,6 +52,18 @@ The UI has five pages (the product blueprint, `docs/product-blueprint.md`): **Lo
 
 A span's status and a log's severity are what the application recorded. A successful span is not proof that the business task behind it succeeded, and a complete report does not prove every event was instrumented or delivered. A report covers one trace; other traces of the same business operation are not merged into it.
 
+Checking a test run (quality gate)
+------
+A change can pass every functional test and still add twenty database calls per request. Tag the spans of a test run, keep rules next to your code, and check the run from CI or a coding agent (`docs/quality-gate.md`):
+
+```
+OTEL_RESOURCE_ATTRIBUTES=troubleshooting.run=pr-42-1   # on the application under test
+go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@latest
+troubleshooting-check --url http://localhost:8095 --rules quality.yaml --run pr-42-1 --baseline main-118
+```
+
+Rules (`quality-check/quality.example.yaml`): a latency percentile limit for an entry operation, at most N recorded database calls per execution, and services an execution must not call. Each failure names the execution behind it with a link to its timeline or sequence. Exit code 0 passed, 1 failed, 2 not enough data, 3 error. Advisory targets and the baseline are shown but never decide the result; a missing measurement is never a pass.
+
 How to intergate to your golang project
 ------
 ```
