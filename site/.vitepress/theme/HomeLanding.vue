@@ -3,8 +3,8 @@ import { computed, nextTick, ref } from 'vue'
 import { withBase } from 'vitepress'
 
 // Landing page (index.md). Design adapted from the web-agent proposal in
-// spec-16.11/Troubleshooting_GitHub_Pages; only features that exist today are
-// shown, plus one short "next" section.
+// spec-16.11/Troubleshooting_GitHub_Pages. The quality gate is the main story;
+// only features that exist today are shown, plus one section marked planned.
 
 const repo = 'https://github.com/agerimex/troubleshooting'
 const shot = (file: string) => withBase('/landing/' + file)
@@ -25,6 +25,16 @@ interface Tab {
 }
 
 const tabs: Tab[] = [
+  {
+    id: 'quality', label: 'Quality', title: 'Check a run, or open a CI result.',
+    copy: [
+      'Paste the rules from your repository, name the test run and a baseline. Every check shows its value, limit, advisory target and the baseline.',
+      'A CI result.json opens with the same evidence links. When the live spans have expired, the snapshot saved in the result is shown instead.'
+    ],
+    image: 'quality.webp', width: 2160, height: 2594, caption: 'Quality',
+    alt: 'Quality page: rules, run and baseline, a failed gate with three failing checks and their evidence links.',
+    handbook: '/guide/quality', scroll: true
+  },
   {
     id: 'sequence', label: 'Sequence', title: 'See which services talk to each other.',
     copy: [
@@ -84,16 +94,6 @@ const tabs: Tab[] = [
     image: 'releases.webp', width: 2160, height: 2951, caption: 'Release comparison',
     alt: 'Release comparison with baseline and candidate, latency and error deltas, and example traces.',
     handbook: '/guide/releases', scroll: true
-  },
-  {
-    id: 'quality', label: 'Quality gate', title: 'Check a test run against your rules.',
-    copy: [
-      'Paste the rules from your repository, name the test run and a baseline. Every check shows its value, limit, advisory target and the baseline.',
-      'Each failure opens the execution behind it. A CI result file opens the same way.'
-    ],
-    image: 'quality.webp', width: 2160, height: 2594, caption: 'Quality',
-    alt: 'Quality page: rules, run and baseline, a failed gate with three failing checks and their evidence links.',
-    handbook: '/guide/quality', scroll: true
   },
   {
     id: 'rules', label: 'Detection rules', title: 'Decide what deserves attention.',
@@ -188,45 +188,44 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
   <div class="lp">
     <section class="container hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow"><span class="status-dot"></span> OPEN-SOURCE TRACE &amp; LOG INVESTIGATION</p>
-        <h1 id="hero-title">Did the new release make it worse?<br><em>See the calls that prove it.</em></h1>
-        <p class="hero-description">See how your backend actually runs: service calls, execution timelines, correlated logs and release regressions, all connected to the same evidence.</p>
+        <p class="eyebrow"><span class="status-dot"></span> OPEN-SOURCE QUALITY GATE FOR GO &amp; OPENTELEMETRY</p>
+        <h1 id="hero-title">The tests passed.<br><em>Did the change add twenty database calls?</em></h1>
+        <p class="hero-description">Troubleshooting checks every pull request’s test run against latency and call rules kept in your repository, and links each failure to the execution behind it: its spans, its logs, its database calls.</p>
         <div class="hero-actions">
-          <a class="button button-primary" href="#quick-start">Run it locally <span aria-hidden="true">→</span></a>
-          <a class="text-link" :href="link('/guide/getting-started')">Read the handbook</a>
+          <a class="button button-primary" href="#how-it-works">Gate a pull request <span aria-hidden="true">→</span></a>
+          <a class="text-link" :href="link('/articles/catch-n-plus-one-in-a-pull-request')">Follow a failing pull request</a>
         </div>
-        <p class="next-note">New: check every pull request’s test run against latency and call rules kept in your repository, with the execution behind every failure. <a href="#quality-gate">See the quality gate →</a></p>
-        <p class="hero-facts">Self-hosted <span aria-hidden="true">·</span> MIT licensed <span aria-hidden="true">·</span> Go &amp; OpenTelemetry <span aria-hidden="true">·</span> Early-stage project</p>
+        <p class="hero-facts">Self-hosted <span aria-hidden="true">·</span> MIT licensed <span aria-hidden="true">·</span> GitHub Action &amp; CLI <span aria-hidden="true">·</span> Early-stage project</p>
       </div>
 
-      <figure class="architecture-preview">
-        <figcaption class="architecture-caption">
-          <span>Observed runtime architecture</span>
-          <span class="example-label">Fixture trace</span>
+      <figure class="hero-output">
+        <figcaption class="output-caption">
+          <span>A pull request’s test run</span>
+          <span class="example-label">Real output · fixture run</span>
         </figcaption>
-        <div class="architecture-window card-dark">
-          <div class="architecture-header">
-            <div><span class="tiny-label">ENTRY OPERATION</span><strong>publish_recording</strong></div>
-            <span class="architecture-count">3 services · 6 spans</span>
-          </div>
-          <div class="architecture-map">
-            <div class="map-node map-entry"><span>Recording API</span><code>seq-api</code></div>
-            <ol class="map-branches" aria-label="Recorded calls from the recording API">
-              <li class="map-branch">
-                <span class="map-call">GenerateThumbnail</span>
-                <div class="map-node"><span>Thumbnail service</span><code>seq-thumbs</code></div>
-              </li>
-              <li class="map-branch">
-                <span class="map-call">PutObject</span>
-                <div class="map-node"><span>Storage service</span><code>seq-storage</code></div>
-              </li>
-            </ol>
-          </div>
-          <a class="architecture-detail" :href="shot('runtime-architecture.webp')"
-             @click="openShot($event, shot('runtime-architecture.webp'), 'publish_recording sequence diagram')">
-            <span>Open the product’s sequence diagram</span>
-            <span class="external-arrow" aria-hidden="true"></span>
-          </a>
+        <div class="terminal card-dark">
+          <pre class="pre-scroll" tabindex="0" aria-label="Command output of troubleshooting-check"><code><span class="code-dim">$ troubleshooting-check --rules quality.yaml \
+    --run fx…-qg-candidate --baseline fx…-qg-baseline</span>
+<span class="code-fail">Quality gate: FAILED</span>
+
+<span class="code-fail">FAIL</span>    startup-p95  qg-api / start_session (server)
+        p95 910 ms, limit 800 ms, 200 executions
+        baseline: 420 ms (200 executions)
+        evidence: slowest execution: 1010 ms
+
+<span class="code-fail">FAIL</span>    db-calls  qg-api / start_session (server)
+        up to 21 database calls per execution, limit 3,
+        200 executions, 200 over the limit
+        baseline: 2 (200 executions)
+        permission_lookup × 20
+        insert_session × 1
+        evidence: <span class="code-link">…/#/executions?trace=9fc2b374…&amp;view=timeline</span>
+
+<span class="code-fail">FAIL</span>    no-directory  qg-api / start_session (server)
+        call to qg-directory in 200 of 200 executions
+        baseline: 0 (200 executions)
+<span class="code-dim">exit 1</span></code></pre>
+          <p class="code-note">Exit 0 passed, 1 failed, 2 not enough data, 3 error. Service names and links shortened.</p>
         </div>
       </figure>
     </section>
@@ -235,10 +234,99 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
       <div class="container stack-row"><span>Built with</span><b>OpenTelemetry</b><b>ClickHouse</b><b>Go</b><b>Vue + TypeScript</b></div>
     </div>
 
+    <section class="next-band" id="how-it-works" aria-labelledby="qg-title">
+      <div class="section container section-heading qg-heading">
+        <h2 id="qg-title">Catch what a change added.<br><em>Before it ships.</em></h2>
+        <p>A change, written by a person or a coding agent, can pass every functional test and still make a request slower or call what it must not. Three steps put a check on every pull request.</p>
+      </div>
+
+      <div class="container qg-steps">
+        <div class="qg-step">
+          <h3><span>1</span> Tag the test run</h3>
+          <p v-pre>One resource attribute on the service under test. Downstream services join through their recorded parents. In CI, use a new id for every run and attempt (<code>ci-${{ github.run_id }}-${{ github.run_attempt }}</code>): a pull request number repeats on every push.</p>
+          <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="Environment variable"><code>OTEL_RESOURCE_ATTRIBUTES=\
+  troubleshooting.run=pr-42-1</code></pre></div>
+        </div>
+        <div class="qg-step">
+          <h3><span>2</span> Keep the rules in the repository</h3>
+          <p>A strict <code>quality.yaml</code>: a misspelled limit is an error, never silently ignored. <code>run.executions</code> says how many executions the tests make, so lost spans can’t pass.</p>
+          <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="quality.yaml"><code>version: 1
+entry: {service: recording-api,
+        operation: start_session}
+run: {executions: 200}
+checks:
+  - {id: startup-p95, type: latency,
+     max_ms: 800, target_ms: 500}
+  - {id: db-calls, type: db_calls,
+     max_per_execution: 3}
+  - {id: no-directory,
+     type: forbidden_call,
+     to: directory-api}</code></pre></div>
+        </div>
+        <div class="qg-step">
+          <h3><span>3</span> Gate the pull request</h3>
+          <p>The limits come from the base branch, so a pull request can’t loosen its own gate. The Action posts one comment on the pull request, updated on every run, uploads HTML and JSON reports, then fails the step.</p>
+          <div class="terminal card-dark"><pre v-pre class="pre-scroll" tabindex="0" aria-label="GitHub Actions step"><code>- uses: agerimex/troubleshooting/quality-check@main
+  with:
+    url: http://localhost:8095
+    rules: quality.yaml
+    rules-from: base
+    run: pr-42-1     # the id from step 1
+    fail-on: unresolved</code></pre></div>
+        </div>
+      </div>
+
+      <div class="section container split qg-rules">
+        <div>
+          <h3>What a rule can say</h3>
+          <ul class="next-list">
+            <li><b>Latency limits</b> p95 (or any percentile) of an operation within a budget, with an advisory target.</li>
+            <li><b>Call budgets</b> at most N database calls in every execution, not on average.</li>
+            <li><b>Forbidden calls</b> this operation must not call that service, anywhere below it.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Not enough data is not a pass</h3>
+          <ul class="next-list">
+            <li><b>Lost executions</b> fewer executions than the rules declare: spans were not exported, not tagged or outside the window.</li>
+            <li><b>Incomplete executions</b> a span whose parent was never recorded, or an execution that runs past the spans read.</li>
+            <li><b>Nothing to measure</b> no valid durations for a latency limit, no database call at all for a call budget, or spans already expired.</li>
+          </ul>
+          <p class="qg-rules-note">Each of these leaves the gate unresolved, with the reason, and <code>fail-on: unresolved</code> fails the step.</p>
+        </div>
+      </div>
+
+      <div class="container split qg-evidence">
+        <div>
+          <h3>Every failure opens its execution.</h3>
+          <p>The worst execution behind <code>db-calls</code> opens in Timeline &amp; Sequence: twenty <code>permission_lookup</code> calls where the baseline makes one. <b>Back to Quality</b> returns to the result.</p>
+          <p>No Troubleshooting server yet? <code>quality-check/stack</code> starts one inside the CI job. This repository’s CI runs <a :href="repo + '/tree/main/examples/quality-gate'">an example service</a> through it on every push: as written it passes with 2 database calls per request, and a planted change that reads prices one by one and calls <code>legacy-pricing</code> must fail. The API of Troubleshooting itself is checked the same way.</p>
+          <a class="text-link" :href="shot('quality-evidence.webp')" @click="openShot($event, shot('quality-evidence.webp'), 'Evidence of db-calls in the timeline')">Full screenshot <span class="external-arrow" aria-hidden="true"></span></a>
+        </div>
+        <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable evidence screenshot">
+          <figcaption>Evidence of db-calls <span>Fixture data</span></figcaption>
+          <img :src="shot('quality-evidence.webp')" width="2160" height="2300" loading="lazy" alt="Timeline of the execution with the most database calls: start_session with twenty permission_lookup spans, opened from the quality check db-calls.">
+        </figure>
+      </div>
+
+      <div class="section container split qg-evidence">
+        <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable report screenshot">
+          <figcaption>report.html <span>Example application</span></figcaption>
+          <img :src="link('/articles/quality-report-regression.webp')" width="2440" height="1784" loading="lazy" alt="HTML report of a failed gate: the check orders-db-calls with the saved snapshot of the execution with 9 database calls.">
+        </figure>
+        <div>
+          <h3>The pull request keeps the record.</h3>
+          <p>The comment and the reports name what was checked: the tested commit (for a pull request, the merge commit, next to its head), the branch the rules came from, and the rules’ sha256. A comment for an older head is never written over a newer one.</p>
+          <p>The JSON and HTML reports keep a snapshot of each evidence execution, so a failure still shows what happened after the spans have expired, or when the Troubleshooting of the job is gone. The Quality page opens the same <code>result.json</code>.</p>
+          <a class="text-link" :href="link('/guide/quality')">How the quality gate works <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </section>
+
     <section class="section container" id="product" aria-labelledby="product-title">
       <div class="section-heading">
-        <h2 id="product-title">Follow a request<br><em>across services.</em></h2>
-        <p>Investigate one execution, find recurring problems, compare releases, check test runs. Screenshots come from the working application with fixture data.</p>
+        <h2 id="product-title">Then investigate<br><em>what the gate found.</em></h2>
+        <p>Evidence opens in the same views you use for everything else: one execution as a timeline or sequence with its logs, recurring problems, execution shapes. Screenshots come from the working application with fixture data.</p>
       </div>
       <div class="product-tabs" role="tablist" aria-label="Product views">
         <button v-for="(tab, i) in tabs" :key="tab.id" ref="tabButtons" type="button" role="tab"
@@ -267,8 +355,8 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
     <section class="release-band" id="release-demo" aria-labelledby="release-title">
       <div class="section container split">
         <div>
-          <h2 id="release-title">Compare releases<br><em>by operation.</em></h2>
-          <p>Compare latency and error fractions for the same operation across versions. Open a retained example to inspect the spans behind a regression signal.</p>
+          <h2 id="release-title">Beyond pull requests:<br><em>compare releases.</em></h2>
+          <p>The gate checks a test run. In staging or production, compare latency and error fractions for the same operation across versions. Open a retained example to inspect the spans behind a regression signal.</p>
           <a class="text-link" :href="link('/articles/compare-p95-between-releases')">How release comparison works <span aria-hidden="true">→</span></a>
         </div>
         <figure class="comparison" :class="{ fixed: releaseKey === 'fixed' }">
@@ -313,97 +401,19 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
       </div>
     </section>
 
-    <section class="next-band" id="quality-gate" aria-labelledby="qg-title">
+    <section class="planned-band" id="planned" aria-labelledby="planned-title">
       <div class="section container split">
         <div>
-          <p class="eyebrow"><span class="status-dot"></span> NEW · QUALITY GATE</p>
-          <h2 id="qg-title">Catch what a change added.<br><em>Before it ships.</em></h2>
-          <p>A change, written by a person or a coding agent, can pass every functional test and still add twenty database calls per request. Troubleshooting checks the test run against rules kept in your repository and links every failure to the execution behind it.</p>
-          <ul class="next-list">
-            <li><b>Latency limits</b> p95 (or any percentile) of an operation within a budget.</li>
-            <li><b>Call budgets</b> at most N database calls in every execution, not on average.</li>
-            <li><b>Forbidden calls</b> this operation must not call that service.</li>
-            <li><b>Not enough data is not a pass</b> too few executions, incomplete executions or expired spans leave the gate unresolved.</li>
-          </ul>
+          <p class="eyebrow"><span class="outline-dot"></span> PLANNED · NOT BUILT YET</p>
+          <h2 id="planned-title">Requirements,<br><em>and their history.</em></h2>
+          <p>Today a check is a line in <code>quality.yaml</code>. Next, a check can name the requirement it enforces, with an owner and a reason, and every evaluation is kept, so you can see when a requirement started failing and which release fixed it.</p>
+        </div>
+        <div>
+          <p class="planned-ask">Have a regression your tests didn’t catch? Tell us the operation, what must stay true and what broke it: real cases decide what comes next.</p>
           <div class="start-links">
-            <a class="text-link" :href="link('/guide/quality')">How the quality gate works <span aria-hidden="true">→</span></a>
-            <a class="text-link" :href="link('/articles/catch-n-plus-one-in-a-pull-request')">Follow a failing pull request <span aria-hidden="true">→</span></a>
             <a class="text-link next-cta" :href="issueUrl">Bring a real regression <span class="external-arrow" aria-hidden="true"></span></a>
           </div>
         </div>
-        <div class="terminal card-dark">
-          <div class="code-header"><span>troubleshooting-check</span><span class="example-label">Real output · fixture run</span></div>
-          <pre class="pre-scroll" tabindex="0" aria-label="Command output of troubleshooting-check"><code><span class="code-dim">$ troubleshooting-check --rules quality.yaml \
-    --run fx…-qg-candidate --baseline fx…-qg-baseline</span>
-<span class="code-fail">Quality gate: FAILED</span>
-
-<span class="code-fail">FAIL</span>    startup-p95  qg-api / start_session (server)
-        p95 910 ms, limit 800 ms, 200 executions
-        baseline: 420 ms (200 executions)
-        evidence: slowest execution: 1010 ms
-
-<span class="code-fail">FAIL</span>    db-calls  qg-api / start_session (server)
-        up to 21 database calls per execution, limit 3,
-        200 executions, 200 over the limit
-        baseline: 2 (200 executions)
-        permission_lookup × 20
-        insert_session × 1
-        evidence: <span class="code-link">…/#/executions?trace=9fc2b374…&amp;view=timeline</span>
-
-<span class="code-fail">FAIL</span>    no-directory  qg-api / start_session (server)
-        call to qg-directory in 200 of 200 executions
-        baseline: 0 (200 executions)
-<span class="code-dim">exit 1</span></code></pre>
-          <p class="code-note">Exit 0 passed, 1 failed, 2 not enough data, 3 error. Service names and links shortened.</p>
-        </div>
-      </div>
-
-      <div class="container qg-steps">
-        <div class="qg-step">
-          <h3><span>1</span> Tag the test run</h3>
-          <p v-pre>One resource attribute on the service under test. Downstream services join through their recorded parents. In CI, use a new id for every run and attempt (<code>ci-${{ github.run_id }}-${{ github.run_attempt }}</code>): a pull request number repeats on every push.</p>
-          <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="Environment variable"><code>OTEL_RESOURCE_ATTRIBUTES=\
-  troubleshooting.run=pr-42-1</code></pre></div>
-        </div>
-        <div class="qg-step">
-          <h3><span>2</span> Keep the rules in the repository</h3>
-          <p>A strict <code>quality.yaml</code>: a misspelled limit is an error, never silently ignored.</p>
-          <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="quality.yaml"><code>version: 1
-entry: {service: recording-api,
-        operation: start_session}
-checks:
-  - {id: startup-p95, type: latency,
-     max_ms: 800, target_ms: 500}
-  - {id: db-calls, type: db_calls,
-     max_per_execution: 3}
-  - {id: no-directory,
-     type: forbidden_call,
-     to: directory-api}</code></pre></div>
-        </div>
-        <div class="qg-step">
-          <h3><span>3</span> Gate the pull request</h3>
-          <p>The limits come from the base branch, so a pull request can’t loosen its own gate. The Action posts one comment on the pull request, updated on every run, uploads HTML and JSON reports, then fails the step.</p>
-          <div class="terminal card-dark"><pre v-pre class="pre-scroll" tabindex="0" aria-label="GitHub Actions step"><code>- uses: agerimex/troubleshooting/quality-check@main
-  with:
-    url: http://localhost:8095
-    rules: quality.yaml
-    rules-from: base
-    run: pr-42-1     # the id from step 1
-    fail-on: unresolved</code></pre></div>
-        </div>
-      </div>
-
-      <div class="section container split qg-evidence">
-        <div>
-          <h3>Every failure opens its execution.</h3>
-          <p>The worst execution behind <code>db-calls</code> opens in Timeline &amp; Sequence: twenty <code>permission_lookup</code> calls where the baseline makes one. <b>Back to Quality</b> returns to the result. The HTML report keeps a snapshot of each evidence execution, so it still shows what happened after the spans have expired.</p>
-          <p>No Troubleshooting server yet? <code>quality-check/stack</code> starts one inside the CI job. This repository’s CI runs <a :href="repo + '/tree/main/examples/quality-gate'">an example service</a> through it on every push: as written it passes with 2 database calls per request, and a planted change that reads prices one by one and calls <code>legacy-pricing</code> must fail. The API of Troubleshooting itself is checked the same way: ClickHouse queries per request, from the spans of its integration tests.</p>
-          <a class="text-link" :href="shot('quality-evidence.webp')" @click="openShot($event, shot('quality-evidence.webp'), 'Evidence of db-calls in the timeline')">Full screenshot <span class="external-arrow" aria-hidden="true"></span></a>
-        </div>
-        <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable evidence screenshot">
-          <figcaption>Evidence of db-calls <span>Fixture data</span></figcaption>
-          <img :src="shot('quality-evidence.webp')" width="2160" height="2300" loading="lazy" alt="Timeline of the execution with the most database calls: start_session with twenty permission_lookup spans, opened from the quality check db-calls.">
-        </figure>
       </div>
     </section>
 
@@ -433,11 +443,11 @@ checks:
     <section class="section container split faq" aria-labelledby="faq-title">
       <h2 id="faq-title">Before you start</h2>
       <div>
-        <details><summary>Where does my telemetry go?</summary><p>The stack runs on your infrastructure. You operate the receiver and its ClickHouse storage. Review receiver authentication and retention before using it outside a development environment.</p></details>
-        <details><summary>What instrumentation do I need?</summary><p>OpenTelemetry spans from any SDK or Collector over OTLP/gRPC, or the small Go library <code>log-sender</code> for spans plus logs that carry their trace and span. <a :href="link('/guide/getting-started')">Getting started</a> shows both.</p></details>
-        <details><summary>Does the diagram show my entire architecture?</summary><p>It shows recorded service interactions for observed executions. Missing instrumentation, sampling and unexecuted paths limit what can be inferred. Execution shapes group what was observed; they are not a complete static dependency graph.</p></details>
         <details><summary>What does the quality gate need?</summary><p>Spans of your test run tagged with the attribute <code>troubleshooting.run</code> (one environment variable for an OpenTelemetry SDK), a <code>quality.yaml</code> in your repository, and a Troubleshooting the CI job can reach: your own, or one started inside the job with <code>quality-check/stack</code>. Database calls are counted from client spans with <code>db.system</code>; SQL text and logs are never parsed. <a :href="link('/guide/quality')">The handbook page</a> has the details.</p></details>
         <details><summary>Is a pass a guarantee?</summary><p>No. A pass describes the executions of this run: a forbidden call that was not observed is reported as “not observed in this run”. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged.</p></details>
+        <details><summary>Where does my telemetry go?</summary><p>The stack runs on your infrastructure. You operate the receiver and its ClickHouse storage. Review receiver authentication and retention before using it outside a development environment.</p></details>
+        <details><summary>What instrumentation do I need?</summary><p>OpenTelemetry spans from any SDK or Collector over OTLP/gRPC, or the small Go library <code>log-sender</code> for spans plus logs that carry their trace and span. <a :href="link('/guide/getting-started')">Getting started</a> shows both.</p></details>
+        <details><summary>Does the sequence view show my entire architecture?</summary><p>It shows recorded service interactions for observed executions. Missing instrumentation, sampling and unexecuted paths limit what can be inferred. Execution shapes group what was observed; they are not a complete static dependency graph.</p></details>
       </div>
     </section>
 
@@ -533,52 +543,19 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible, summary:focus-v
 h1 { margin: 22px 0 24px; font-size: clamp(38px, 4vw, 56px); font-weight: 520; line-height: 1.075; letter-spacing: -.05em; }
 h2 { font-size: clamp(32px, 4.1vw, 52px); font-weight: 530; line-height: 1.12; letter-spacing: -.045em; }
 h3 { font-size: 26px; font-weight: 560; line-height: 1.2; letter-spacing: -.03em; }
-.hero-description { max-width: 440px; color: var(--muted); font-size: 18px; }
+.hero-description { max-width: 470px; color: var(--muted); font-size: 18px; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: center; margin-top: 30px; }
-.next-note { margin-top: 22px; max-width: 440px; padding-left: 14px; border-left: 2px solid var(--accent); font-size: 13px; color: var(--muted); }
-.next-note a { color: var(--accent); white-space: nowrap; font-weight: 600; }
 .hero-facts { margin-top: 20px; font: 11px/1.5 var(--mono); color: var(--subtle); }
 .hero-facts span { padding-inline: 4px; }
 
-.architecture-preview { min-width: 0; }
-.architecture-caption, .comparison figcaption {
+.hero-output { min-width: 0; }
+.output-caption, .comparison figcaption {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin-bottom: 10px; color: var(--muted); font: 11px/1.5 var(--mono);
 }
 .example-label { border: 1px solid var(--label-border); border-radius: 4px; padding: 3px 6px; color: var(--subtle); font: 10px/1.3 var(--mono); white-space: nowrap; }
-.architecture-window {
-  overflow: hidden; border: 1px solid #445540; border-radius: 8px; background: #161c15; box-shadow: 0 23px 60px #0003;
-}
-.architecture-header {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
-  padding: 15px 20px; border-bottom: 1px solid var(--border); color: var(--muted); font: 11px/1.5 var(--mono);
-}
-.architecture-header strong { color: var(--text); font-size: 14px; font-weight: 500; }
-.architecture-count { white-space: nowrap; }
-.architecture-map {
-  --wire: #728d63; --branch-gap: 16px; --branch-line: 22px;
-  padding: 24px 20px 27px;
-  background: radial-gradient(circle, #4a60464d 1px, transparent 1px) 0 0 / 16px 16px, linear-gradient(140deg, #1c2719, #141914);
-}
-.map-node {
-  display: grid; gap: 2px; min-width: 0; padding: 11px 8px; border: 1px solid #46583e; border-radius: 6px;
-  background: #1c281a; text-align: center; font-size: 14px; line-height: 1.4;
-}
-.map-node code { color: #a6b89d; font: 11px/1.4 var(--mono); overflow-wrap: anywhere; background: none; padding: 0; }
-.map-entry { position: relative; width: min(187px, 70%); margin: 0 auto var(--branch-line); border-color: #779363; background: #263a20; font-weight: 620; }
-.map-entry::after { content: ""; position: absolute; left: 50%; top: 100%; height: calc(var(--branch-line) + 1px); border-left: 1px solid var(--wire); }
-.map-branches { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--branch-gap); padding: 0; margin: 0; list-style: none; }
-.map-branches::before { content: ""; position: absolute; inset: 0 calc((100% - var(--branch-gap)) / 4) auto; border-top: 1px solid var(--wire); }
-.map-branch { position: relative; padding-top: 23px; }
-.map-branch::before { content: ""; position: absolute; top: 0; left: 50%; height: 17px; border-left: 1px solid var(--wire); }
-.map-branch::after { content: ""; position: absolute; top: 16px; left: calc(50% - 3px); border: 4px solid transparent; border-top-color: var(--wire); }
-.map-call { display: block; margin: 4px 0 9px; color: var(--accent); font: 11px/1.4 var(--mono); text-align: center; overflow-wrap: anywhere; }
-.architecture-detail {
-  display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  padding: 13px 20px; border-top: 1px solid var(--border); font-size: 13px;
-}
-.architecture-detail:hover { color: var(--accent); background: #202b1c; }
-.architecture-detail:focus-visible { outline-offset: -4px; }
+.hero-output .terminal { box-shadow: 0 23px 60px #0003; }
+.hero-output pre { font-size: 12.5px; line-height: 1.75; }
 
 /* Stack band */
 .stack-band { border-block: 1px solid var(--border); }
@@ -615,7 +592,7 @@ h3 { font-size: 26px; font-weight: 560; line-height: 1.2; letter-spacing: -.03em
 .screenshot-scroll { max-height: 440px; overflow-y: auto; scrollbar-color: #627656 #141d13; }
 
 /* Split sections */
-.release-band, .next-band { border-top: 1px solid var(--border); background: var(--band); }
+.release-band, .next-band, .planned-band { border-top: 1px solid var(--border); background: var(--band); }
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(32px, 7vw, 92px); align-items: center; }
 .split h2 { margin-top: 14px; }
 .split > div:not(.terminal) > p:not(.eyebrow) { margin-top: 18px; color: var(--muted); max-width: 465px; }
@@ -686,14 +663,22 @@ h3 { font-size: 26px; font-weight: 560; line-height: 1.2; letter-spacing: -.03em
 .code-dim { color: #8d9a86; }
 .code-fail { color: #edbd7d; font-weight: 600; }
 .code-link { color: #a9d27a; }
-.qg-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: calc(-1 * clamp(20px, 3vw, 44px)); }
-.qg-step h3, .qg-evidence h3 { font-size: 17px; font-weight: 650; line-height: 1.35; color: var(--text); }
+.qg-heading { padding-bottom: 0; margin-bottom: 36px; }
+.qg-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.qg-step h3, .qg-evidence h3, .qg-rules h3 { font-size: 17px; font-weight: 650; line-height: 1.35; color: var(--text); }
 .qg-step h3 span { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 50%; background: var(--accent); color: var(--background); font-size: 13px; }
 .qg-step > p { margin: 8px 0 14px; color: var(--muted); font-size: 14px; min-height: 4.8em; }
 .qg-step .terminal pre { font-size: 12.5px; }
-.qg-evidence h3 { font-size: 22px; }
-.qg-evidence { padding-block: 56px clamp(62px, 8vw, 108px); align-items: start; }
-.qg-evidence > div:first-child { padding-top: 40px; }
+.qg-evidence h3, .qg-rules h3 { font-size: 22px; }
+.qg-rules { align-items: start; padding-bottom: 0; }
+.qg-rules .next-list { max-width: none; }
+.qg-rules-note { margin-top: 16px; color: var(--muted); font-size: 14px; }
+.qg-evidence + .qg-evidence { padding-top: 0; }
+.planned-band { background: var(--background); }
+.planned-band .split { align-items: end; }
+.planned-ask { color: var(--muted); max-width: 465px; }
+.qg-evidence { padding-block: clamp(48px, 6vw, 80px); align-items: start; }
+.qg-evidence > div { padding-top: 40px; }
 .qg-evidence .screenshot-frame { max-height: 560px; }
 .qg-evidence p a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 
@@ -751,7 +736,9 @@ code { font: inherit; }
   .hero, .section-heading, .product-panel, .split { grid-template-columns: minmax(0, 1fr); }
   .hero { row-gap: 36px; padding-block: 40px 55px; }
   h1 { font-size: clamp(36px, 8.5vw, 56px); }
-  .architecture-preview, .comparison { width: 100%; max-width: 600px; }
+  .hero-output, .comparison { width: 100%; max-width: 640px; }
+  .qg-evidence > figure { order: 2; }
+  .qg-evidence > div { padding-top: 0; }
   .stack-row { justify-content: start; }
   .section-heading p { max-width: 470px; }
   .product-panel { align-items: start; }
@@ -763,10 +750,6 @@ code { font: inherit; }
   .hero-actions { gap: 14px; }
   .button-primary { padding-inline: 14px; font-size: 13px; }
   .hero-facts { font-size: 10px; }
-  .architecture-header, .architecture-detail { padding-inline: 13px; }
-  .architecture-map { --branch-gap: 10px; padding-inline: 13px; }
-  .architecture-count, .map-call { font-size: 10px; }
-  .map-node { font-size: 12px; }
   .window-bar { gap: 8px; font-size: 10px; }
   .metric-grid > div + div { padding-left: 10px; }
   .metric-grid small { font-size: 10px; }
