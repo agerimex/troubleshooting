@@ -16,7 +16,7 @@ Give the spans of the run an id with the attribute `troubleshooting.run`, prefer
 OTEL_RESOURCE_ATTRIBUTES=troubleshooting.run=pr-42-1
 ```
 
-With `log-sender`: `sender.WithResourceAttributes(map[string]string{"troubleshooting.run": "pr-42-1"})`. Only the entry service needs it: spans of downstream services belong to the run through their recorded parent in the same trace. Use a new id for every CI run and attempt, `ci-${{ github.run_id }}-${{ github.run_attempt }}` (plus the job name when a matrix runs the same tests): a pull request number repeats on every push, and two runs with one id mix their executions.
+With `log-sender`: `sender.WithResourceAttributes(map[string]string{"troubleshooting.run": "pr-42-1"})`. Only the entry service needs it: spans of downstream services belong to the run through their recorded parent in the same trace. Use a new id for every CI run and attempt, <span v-pre>`ci-${{ github.run_id }}-${{ github.run_attempt }}`</span> (plus the job name when a matrix runs the same tests): a pull request number repeats on every push, and two runs with one id mix their executions.
 
 ## 2. Write the rules
 
