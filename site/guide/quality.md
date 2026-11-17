@@ -1,5 +1,5 @@
 ---
-description: Check a test run against latency limits, database calls per execution and forbidden calls kept in your repository, in CI or on the Quality page, with the execution behind every failure.
+description: Check a test run against latency limits, database calls per execution and forbidden calls kept in your repository, in CI or on the Quality page, with the execution behind every failure; name the requirements the checks enforce and keep their history.
 ---
 
 # Quality gate
@@ -94,12 +94,14 @@ FAIL    db-calls  fx…-qg-api / start_session (server)
     since: 1h
     rules-from: base                    # the rules of the pull request's base branch
     fail-on: unresolved                 # or "failed", or "never" (report only)
+    record: auto                        # keep the result as history on push events
 ```
 
 The action builds the CLI, checks the run, writes the Markdown summary to the job page and as a pull request comment, uploads `result.json`, `report.html` and `summary.md` as an artifact, and then applies the gate. With `fail-on: unresolved` (the default) the step fails when the gate failed or had not enough data; an error always fails it. Outputs: `gate` and `exit-code`.
 
 - **The limits come from the base branch** with `rules-from: base`, so a pull request can’t loosen its own gate. When it changes the rules file, the summary says that the base’s rules were used. Without `rules-from`, the checked-out file decides.
-- **Every result names what was tested**: the commit (a pull request’s head), the branch, the CI run, and the rules file with its SHA-256.
+- **Every result names what was tested**: the commit that was checked out (for a pull request its merge commit, shown with the head it merges), the branch, the CI run, and the rules file with its SHA-256.
+- **Pushes are recorded** (`record: auto`) as the history of the project's requirements; see [Requirements and their history](#requirements-and-their-history).
 - **One comment per pull request**, updated on every run instead of adding new ones, and never posted for a commit that is no longer the head. The job needs `pull-requests: write`; for a pull request from a fork the token is read-only, so the comment is skipped and the result stays in the job summary.
 - **The report keeps the evidence.** `report.html` contains a snapshot of each evidence execution (its spans as a small timeline), so it still shows what happened after the raw spans have expired.
 
@@ -143,7 +145,42 @@ Every check shows its value, the limit with the advisory target, the baseline an
 ![Evidence opened from the quality check](/landing/quality-evidence.webp)
 *The execution with the most database calls: twenty `permission_lookup` calls where the baseline makes one.*
 
-**Open a result file** shows a CI `result.json` the same way, so a failed build can be investigated in the UI. Its evidence opens live while the raw spans are retained; when they are gone (expired, or recorded by a Troubleshooting started inside the job) **Open timeline** and **Open sequence** show the saved snapshot from the file instead, marked as such: the spans with their names, services, kinds, times and status, without logs, attributes or events. **Export JSON** and **Export HTML** save the result as shown. The rules and run ids are remembered in this browser only; evaluations are not stored.
+**Open a result file** shows a CI `result.json` the same way, so a failed build can be investigated in the UI. Its evidence opens live while the raw spans are retained; when they are gone (expired, or recorded by a Troubleshooting started inside the job) **Open timeline** and **Open sequence** show the saved snapshot from the file instead, marked as such: the spans with their names, services, kinds, times and status, without logs, attributes or events. **Export JSON** and **Export HTML** save the result as shown. The rules and run ids are remembered in this browser only, and a check made on the page is not recorded.
+
+## Requirements and their history
+
+Checks say *what* is measured; **requirements** say *why*, and who cares. They live in the same `quality.yaml`, so a change to a requirement is reviewed like code:
+
+```yaml
+project: recording      # optional; default: the entry's service
+requirements:
+  - id: REQ-START
+    title: A recording session starts within 800 ms
+    owner: recording-team
+    why: Participants leave a session that takes more than a second to start.
+    checks: [startup-p95, db-calls]
+  - id: REQ-OUTAGE
+    title: Recording continues during an analytics outage
+    owner: platform-team      # no checks yet: listed, never met
+```
+
+A requirement's status comes from its own checks, in the same run:
+
+| Status | When |
+| --- | --- |
+| Violated | One of its checks failed (a missing measurement of another is still named) |
+| Not enough data | None failed, but one had not enough data |
+| Met | Every one of its checks passed |
+| Not evaluated | It has no checks yet: written down, never met |
+
+The gate itself is still decided by the checks. The CLI, the job summary, the pull request comment and the HTML report list the requirements above the checks.
+
+**Record** an evaluation to give each requirement a history: `troubleshooting-check --record`, or the Action's `record` input, which is on for **push** events by default (so the history follows `main` and your tags, not every pull request push). Troubleshooting then keeps the result exactly as it was, the rules text it used with its sha256, the tested commit and CI run, and a snapshot of every evidence execution, so a failure from months ago still shows what happened after its spans expired. A retried CI step records once; a new attempt is a new record. Recording needs a Troubleshooting that outlives the job, not `quality-check/stack`.
+
+On the **Quality** page, **Requirements** shows a project's catalogue: every requirement of the latest recorded evaluation with its owner and reason, its checks, since when its status holds (“Violated since commit 9be31d07a4c2 (2 evaluations); met before.”) and its history, oldest on the left. A cell opens that evaluation; a cell is outlined where the rules changed. **History** lists every recorded evaluation, and **Copy link** on an opened one gives a link that reopens it.
+
+![Requirements on the Quality page](/landing/quality-requirements.webp)
+*Six recorded evaluations of `main`: the regression violated both requirements, a run with too few executions couldn't decide REQ-START, the fix met them again. REQ-OUTAGE has no check yet.*
 
 ## How to read a result
 

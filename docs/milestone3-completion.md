@@ -197,8 +197,8 @@ Tests: `TestQualityIncompleteExecutions` (sibling, past the read end),
 
 # Stage 4: verdicts that stand on enough evidence; saved evidence in the UI
 
-Implementation: branch `feat/quality-stage-4` after `37d337d`, uncommitted at
-the time of writing (2026-11-17). It answers the web agent's review of `main`
+Implementation: branch `feat/quality-stage-4` after `37d337d`, merged as
+`9d25d40` (#15, 2026-11-17). It answers the web agent's review of `main`
 (missing telemetry turning a failure into a pass, CI identity, saved evidence
 the UI couldn't show) and fixes the flaky milestone 2 fixture.
 
@@ -257,8 +257,75 @@ the UI couldn't show) and fixes the flaky milestone 2 fixture.
 
 ## Not done yet
 
-- Requirements catalogue and evaluation history (the web agent's step 3).
 - A branch that was never recorded at all can't be detected from spans; the
   declarations narrow it, the result never claims more than "not observed".
-- Website: whether the quality gate becomes the main story is still the
-  owner's decision.
+- Website: the quality gate became the main story (#16, `40bf01d`).
+
+# Stage 5: requirements and their history
+
+Implementation: branch `feat/quality-stage-5` after `40bf01d`, uncommitted at
+the time of writing (2026-11-17). The web agent's step 3: named requirements
+linked to checks, with an owner and a reason, and a saved history of results.
+
+## What changed
+
+- **Requirements in the rules file.** `requirements:` (id, title, owner, why,
+  checks) and `project:` in `quality.yaml`; Git stays the authoring path. A
+  requirement's status comes from its own checks: violated, insufficient, met,
+  or not evaluated without checks (never met). Every result has `project` and
+  `requirements`; the CLI's text, Markdown and HTML reports list them.
+- **Recording.** `record: true` stores the evaluation (result, exact rules text
+  and sha256, `source`, evidence snapshots from the spans already read) in
+  `quality_evaluations` (receiver schema, no TTL); the id is derived from the
+  inputs, so a retry records once. CLI `--record` (prints the link), action
+  input `record` (auto: push events). The CLI now sends the rules file as text
+  (`rules_yaml`) and skips snapshots the API already made.
+- **History API.** `quality/projects`, `quality/evaluations` (paged by
+  recorded time), `quality/evaluations/{id}`, `quality/requirements` (the
+  catalogue: the latest evaluation's requirements with up to 30 history points
+  and since when their status holds).
+- **Quality page.** Tabs Requirements, History, Check a run; the catalogue
+  with status, owner, reason, check statuses, streak text and history cells
+  (rules changes marked); the history list; an opened evaluation with its
+  rules and a link `#/quality?evaluation=<id>`. The result view is one
+  component (`quality/QualityResult.vue`) for checked, file and recorded
+  results.
+- **Rules files.** The example, the example application and this repository's
+  own `.github/quality.yaml` declare requirements; a Go test validates all
+  three with the API.
+- Found on the way: a `{name:String}` query parameter can't carry newlines
+  (ClickHouse parses it as escaped text), so the record is a native batch
+  insert. The older stored JSON (analyses, detection rules) goes through such
+  parameters too; no stored row is damaged, but a body with an escaped quote
+  would be (backlog).
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-REQ-001 | `TestQualityRequirementStatuses`; fixture QG-HIST-001 (statuses of three runs) | Go unit; fixture |
+| QG-REQ-002 | `TestQualityRequirementValidation`, `TestQualityRepositoryRulesFiles` | Go unit |
+| QG-HIST-001 | fixture QG-HIST-001; `TestQualityCatalogue`, `TestQualityRecordSnapshots` | fixture; Go unit |
+| QG-HIST-002 | fixture QG-HIST-001 (retry, and every later `check`); `TestQualityEvaluationID` | fixture; Go unit |
+| QG-HIST-003 | `TestRequirementsAndRecord`, `TestRecordErrorWarns`; the action's `record` input | CLI; manual |
+| QG-UI-006 | `e2e/qualityHistory.e2e.ts` QG-UI-006; `qualityHistory.spec.ts` | Playwright; Vitest |
+| QG-UI-007 | `e2e/qualityHistory.e2e.ts` QG-UI-007; `qualityHistory.spec.ts` (routes) | Playwright; Vitest |
+| QG-UI-008 | `e2e/qualityHistory.e2e.ts` QG-UI-008 | Playwright |
+
+## Verification run (2026-11-17)
+
+- `go test ./...` in log-analysis, log-receiver, quality-check; `go vet` in
+  fixtures/regression: pass. `npx vitest run` (102 tests), `npx playwright
+  test` (97 tests), `npm run type-check`: pass.
+- The fixture on the test ClickHouse with this branch's receiver and API
+  (native): 66 checks pass, QG-HIST-001 included, and again on two more
+  `check` runs (recording stays idempotent).
+- The CLI with `--record` against the same API: recorded, link printed; the
+  link opens the evaluation in the UI, its evidence opens in Timeline &
+  Sequence and Back returns.
+
+## Not done yet
+
+- Requirement revisions with digests and a diff between them, kinds and
+  support relations, catalogue filters, deleting records from the UI.
+- Validation on one external application (the web agent's step 4).

@@ -63,6 +63,14 @@ inputs:
   github-token:
     description: Token for the pull request comment.
     default: ${{ github.token }}
+  record:
+    description: >-
+      Record the evaluation in Troubleshooting as the project's history (the
+      requirements catalogue on the Quality page): "auto" (default) on push
+      events, so the history follows your branches and tags, not every pull
+      request push; "true" or "false". Useful with a Troubleshooting that
+      outlives the job, not with quality-check/stack.
+    default: auto
   artifact:
     description: >-
       Name of the uploaded report artifact (empty to skip the upload). It
@@ -104,6 +112,8 @@ runs:
         TC_COMMIT: ${{ inputs.commit }}
         TC_PR_HEAD: ${{ inputs.pr-head }}
         TC_REF: ${{ inputs.ref }}
+        TC_RECORD: ${{ inputs.record }}
+        TC_EVENT: ${{ github.event_name }}
         TC_CI_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
       run: |
         out="$RUNNER_TEMP/quality-report"
@@ -156,6 +166,7 @@ runs:
         if [ -n "$TC_BASELINE" ]; then args+=(--baseline "$TC_BASELINE"); fi
         if [ -n "$TC_BASELINE_SINCE" ]; then args+=(--baseline-since "$TC_BASELINE_SINCE"); fi
         if [ -n "$TC_UI" ]; then args+=(--ui "$TC_UI"); fi
+        if [ "$TC_RECORD" = true ] || { [ "$TC_RECORD" = auto ] && [ "$TC_EVENT" = push ]; }; then args+=(--record); fi
         set +e
         "$RUNNER_TEMP/troubleshooting-check" "${args[@]}"
         code=$?
@@ -205,7 +216,12 @@ runs:
         TC_GATE: ${{ steps.check.outputs.gate }}
         TC_FAIL_ON: ${{ inputs.fail-on }}
         TC_COMMENT: ${{ inputs.comment }}
+        TC_RECORD: ${{ inputs.record }}
       run: |
+        case "$TC_RECORD" in
+          auto|true|false) ;;
+          *) echo "::error title=Quality gate::record must be auto, true or false, not '$TC_RECORD'"; exit 1 ;;
+        esac
         case "$TC_FAIL_ON" in
           unresolved|failed|never) ;;
           *) echo "::error title=Quality gate::fail-on must be unresolved, failed or never, not '$TC_FAIL_ON'"; exit 1 ;;

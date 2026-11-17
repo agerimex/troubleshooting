@@ -16,7 +16,7 @@
       @open-execution="openExecution" @back="returnToOrigin" @include="include"/>
     <ProblemsView v-if="visited.problems" v-show="page === 'problems'" :rulesRevision="rulesRevision" @open-execution="openExecution" @open-settings="go('settings')"/>
     <ReleasesView v-if="visited.releases" v-show="page === 'releases'" :included="included" @open-report="openFromRelease" @remove-included="removeIncluded"/>
-    <QualityView v-if="visited.quality" v-show="page === 'quality'" @open-execution="openExecution"/>
+    <QualityView v-if="visited.quality" v-show="page === 'quality'" :evaluationRoute="evaluationRoute" @open-execution="openExecution" @navigate="qualityRoute"/>
     <SettingsView v-if="visited.settings" v-show="page === 'settings'" @rules-saved="rulesRevision++"/>
   </main>
 </template>
@@ -56,6 +56,9 @@ export default defineComponent({
     const targetKey = ref(0)
     const rulesRevision = ref(0)
     const routeError = ref('')
+    // A recorded quality evaluation to open (#/quality?evaluation=<id>); n
+    // changes on every navigation, so the same link opens it again.
+    const evaluationRoute = ref<{ id: string, n: number } | null>(null)
 
     function show (p: Page) {
       page.value = p
@@ -84,6 +87,12 @@ export default defineComponent({
       show('executions')
       setHash(investigationHash(t))
     }
+    // The Quality page names what it shows: a recorded evaluation or the page.
+    function qualityRoute (hash: string) {
+      if (page.value === 'quality') {
+        setHash(hash)
+      }
+    }
     function returnToOrigin () {
       go(target.value?.origin?.page ?? 'logs')
     }
@@ -99,6 +108,9 @@ export default defineComponent({
       lastHash = h
       const route = parseRoute(h)
       routeError.value = route.error
+      if (route.evaluation) {
+        evaluationRoute.value = { id: route.evaluation, n: (evaluationRoute.value?.n ?? 0) + 1 }
+      }
       if (route.target && !sameTarget(target.value, route.target)) {
         targetKey.value++
         target.value = route.target
@@ -139,7 +151,7 @@ export default defineComponent({
       included.value = { ...included.value, [analysisId]: list }
     }
     return {
-      PAGES, page, visited, go, target, targetKey, openExecution, returnToOrigin, openFromRelease, rulesRevision, routeError,
+      PAGES, page, visited, go, target, targetKey, openExecution, returnToOrigin, openFromRelease, rulesRevision, routeError, evaluationRoute, qualityRoute,
       included, isIncluded, include, removeIncluded
     }
   },

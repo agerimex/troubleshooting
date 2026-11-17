@@ -88,13 +88,24 @@ export function investigationLink (base: string, t: ExecutionTarget): string {
 // parseRoute reads a hash route. '#/executions?trace=…' opens an execution;
 // the legacy '#/investigate' and 'view=timing' are kept. Invalid identifiers
 // open the page without an execution instead of guessing one.
-export function parseRoute (hash: string): { page: Page, target: ExecutionTarget | null, error: string } {
+export function parseRoute (hash: string): { page: Page, target: ExecutionTarget | null, error: string, evaluation?: string } {
   const m = /^#\/([a-z]+)(?:\?(.*))?$/.exec(hash)
   if (!m) {
     return { page: 'logs', target: null, error: '' }
   }
   const name = m[1] === 'investigate' || m[1] === 'investigations' ? 'executions' : m[1]
   const page = PAGES.some((p) => p.value === name) ? name as Page : 'logs'
+  // '#/quality?evaluation=<id>' opens a recorded quality evaluation.
+  if (page === 'quality' && m[2]) {
+    const id = new URLSearchParams(m[2]).get('evaluation') ?? ''
+    if (!id) {
+      return { page, target: null, error: '' }
+    }
+    if (!/^[0-9a-f]{24}$/.test(id)) {
+      return { page, target: null, error: 'The evaluation link is invalid: it needs an evaluation id of 24 hex digits.' }
+    }
+    return { page, target: null, error: '', evaluation: id }
+  }
   if (page !== 'executions' || !m[2]) {
     return { page, target: null, error: '' }
   }

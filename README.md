@@ -77,6 +77,8 @@ In GitHub Actions:
 
 The step writes the summary to the job page and as one pull request comment (updated on re-runs), uploads the reports (with a snapshot of each evidence execution, kept after raw spans expire) and fails when the gate failed or had not enough data. No Troubleshooting server needed: `agerimex/troubleshooting/quality-check/stack` starts one inside the job (`examples/quality-gate/` shows a whole application, `docs/quality-gate.md` the workflow). This repository's own CI does the same for its API (`.github/quality.yaml`: database queries per request). The UI's **Quality** page checks a run interactively and opens a CI `result.json` with its evidence.
 
+Requirements name what must stay true, with an owner and a reason, next to the checks that enforce them (`requirements:` in `quality.yaml`); a requirement is met only when its own checks pass. With `--record` (the action records push events by default) Troubleshooting keeps each evaluation with its rules and evidence snapshots, and the Quality page shows every requirement with its history: when it started failing and which commit fixed it.
+
 How to intergate to your golang project
 ------
 ```

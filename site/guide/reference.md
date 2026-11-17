@@ -53,3 +53,5 @@ All configuration is environment variables; the defaults match `docker-compose.y
 | Revision | A stored version of a comparison, statistics bucket or rule set |
 | Run | The spans of one test run, tagged with one `troubleshooting.run` id; the quality gate checks a run against `quality.yaml` |
 | Gate | The quality gate's verdict for a run: failed, unresolved (not enough data) or passed |
+| Requirement | A named intent in `quality.yaml` with an owner, a reason and the checks that enforce it: met, violated, not enough data, or not evaluated when no check enforces it yet |
+| Recorded evaluation | A quality gate result kept by Troubleshooting with its rules and evidence snapshots (`--record`, the Action's `record`): the history of a project's requirements |

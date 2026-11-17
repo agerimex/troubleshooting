@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"html"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,36 @@ var statusTitle = map[string]string{"pass": "pass", "fail": "FAIL", "insufficien
 var statusIcon = map[string]string{"pass": "✅", "fail": "❌", "insufficient": "⚠️"}
 
 var gateIcon = map[string]string{"passed": "✅", "failed": "❌", "unresolved": "⚠️"}
+
+var requirementWord = map[string]string{"met": "MET", "violated": "VIOLATED", "insufficient": "NO DATA", "not_evaluated": "NOT EVALUATED"}
+
+var requirementTitle = map[string]string{"met": "met", "violated": "violated", "insufficient": "not enough data", "not_evaluated": "not evaluated"}
+
+var requirementIcon = map[string]string{"met": "✅", "violated": "❌", "insufficient": "⚠️", "not_evaluated": "➖"}
+
+// requirementCounts is e.g. "1 violated, 1 met, 1 not evaluated", worst first.
+func requirementCounts(rs []RequirementResult) string {
+	n := map[string]int{}
+	for _, r := range rs {
+		n[r.Status]++
+	}
+	var parts []string
+	for _, st := range []string{"violated", "insufficient", "met", "not_evaluated"} {
+		if n[st] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n[st], requirementTitle[st]))
+			delete(n, st)
+		}
+	}
+	other := make([]string, 0, len(n))
+	for st := range n {
+		other = append(other, st)
+	}
+	sort.Strings(other)
+	for _, st := range other {
+		parts = append(parts, fmt.Sprintf("%d %s", n[st], st))
+	}
+	return strings.Join(parts, ", ")
+}
 
 func titleOf(m map[string]string, k string) string {
 	if v, ok := m[k]; ok {
@@ -91,6 +122,14 @@ func markdownReport(ev Evaluation, htmlName string) string {
 		fmt.Fprintf(&b, " [CI run](%s)", mdURL.Replace(ev.Source.CIRun))
 	}
 	b.WriteString("\n\n")
+	if len(ev.Requirements) > 0 {
+		fmt.Fprintf(&b, "**Requirements:** %s\n\n| | Requirement | Owner | Status |\n|---|---|---|---|\n", requirementCounts(ev.Requirements))
+		for _, r := range ev.Requirements {
+			fmt.Fprintf(&b, "| %s | **%s** %s | %s | %s: %s |\n", titleOf(requirementIcon, r.Status), mdText(r.ID), mdText(r.Title),
+				mdText(r.Owner), titleOf(requirementTitle, r.Status), mdText(r.Summary))
+		}
+		b.WriteString("\n")
+	}
 	if hasBaseline {
 		b.WriteString("| | Check | Value | Limit | Baseline | Executions |\n|---|---|---|---|---|---|\n")
 	} else {
@@ -131,7 +170,7 @@ func markdownReport(ev Evaluation, htmlName string) string {
 }
 
 const htmlStyle = `body{font:14px/1.5 system-ui,sans-serif;margin:24px;color:#1b2316;background:#fff}
-h1{font-size:22px;margin:0 0 4px}table{border-collapse:collapse;margin:16px 0;width:100%}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:18px 0 0}table{border-collapse:collapse;margin:16px 0;width:100%}
 th,td{border:1px solid #d5dccf;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f3f6ef}
 .pass{color:#2f6b12}.fail{color:#a1260d;font-weight:600}.insufficient{color:#8a5a00;font-weight:600}
 .meta{color:#5a6553;font-size:12px}code{font-size:12px}li{margin:2px 0}td.chk{min-width:170px}table.res>tbody>tr>td:not(.chk):not(:last-child){white-space:nowrap}
@@ -160,6 +199,16 @@ func htmlReport(ev Evaluation) string {
 		fmt.Fprintf(&b, ` · <a href="%s">CI run</a>`, e(ev.Source.CIRun))
 	}
 	b.WriteString(`</p>`)
+	if len(ev.Requirements) > 0 {
+		fmt.Fprintf(&b, `<h2>Requirements: %s</h2><table class="req"><thead><tr><th>Status</th><th>Requirement</th><th>Owner</th><th>Why</th><th>Checks</th></tr></thead><tbody>`,
+			e(requirementCounts(ev.Requirements)))
+		rcls := map[string]string{"met": "pass", "violated": "fail", "insufficient": "insufficient"}
+		for _, r := range ev.Requirements {
+			fmt.Fprintf(&b, `<tr><td class="%s">%s</td><td class="chk"><b>%s</b><br>%s</td><td>%s</td><td>%s</td><td>%s<br><span class="meta">%s</span></td></tr>`,
+				rcls[r.Status], e(titleOf(requirementTitle, r.Status)), e(r.ID), e(r.Title), e(r.Owner), e(r.Why), e(strings.Join(r.Checks, ", ")), e(r.Summary))
+		}
+		b.WriteString(`</tbody></table><h2>Checks</h2>`)
+	}
 	b.WriteString(`<table class="res"><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>`)
 	if ev.Baseline != "" {
 		b.WriteString(`<th>Baseline</th>`)

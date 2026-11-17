@@ -267,6 +267,28 @@ const detectionRulesSQL = `
 	ENGINE = MergeTree
 	ORDER BY ("Scope", "Revision")`
 
+// quality_evaluations keeps the recorded quality gate evaluations (log-analysis
+// quality_history.go): the result with its evidence snapshots, the exact
+// rules text and a compact summary for history lists. It has no TTL: it is
+// the history of a project's requirements, one row per recorded evaluation.
+const qualityEvaluationsSQL = `
+	CREATE TABLE IF NOT EXISTS quality_evaluations
+	(
+		"Id" String,
+		"Project" String,
+		"RecordedAt" Int64,
+		"Run" String,
+		"Ref" String,
+		"Commit" String,
+		"Gate" LowCardinality(String),
+		"RulesSHA256" String,
+		"Rules" String CODEC(ZSTD(3)),
+		"Summary" String CODEC(ZSTD(3)),
+		"Body" String CODEC(ZSTD(3))
+	)
+	ENGINE = MergeTree
+	ORDER BY ("Project", "RecordedAt", "Id")`
+
 type table struct {
 	name   string
 	create string
@@ -311,6 +333,9 @@ func EnsureSchema(ctx context.Context, conn driver.Conn, r Retention) error {
 	}
 	if err := conn.Exec(ctx, detectionRulesSQL); err != nil {
 		return fmt.Errorf("create detection_rules: %w", err)
+	}
+	if err := conn.Exec(ctx, qualityEvaluationsSQL); err != nil {
+		return fmt.Errorf("create quality_evaluations: %w", err)
 	}
 	for _, name := range []string{"otel_traces", "log_records"} {
 		err := conn.Exec(ctx, `ALTER TABLE `+name+` ADD COLUMN IF NOT EXISTS "ReceivedTime" Int64 DEFAULT 0 CODEC(Delta(8), ZSTD(1))`)

@@ -52,14 +52,18 @@ type reportSpan struct {
 // snapshotReaders bounds the trace reports read at the same time.
 const snapshotReaders = 4
 
-// addSnapshots reads the spans of every evidence: one request per distinct
-// trace and window, up to snapshotReaders at a time.
+// addSnapshots reads the spans of every evidence that has no snapshot yet (a
+// recorded evaluation comes with the API's): one request per distinct trace
+// and window, up to snapshotReaders at a time.
 func addSnapshots(o options, ev *Evaluation) {
 	type window struct{ trace, from, to string }
 	snaps := map[window]*Snapshot{}
 	var order []window
 	for _, c := range ev.Checks {
 		for _, e := range c.Evidence {
+			if e.Snapshot != nil {
+				continue
+			}
 			w := window{e.TraceID, e.TimeFrom, e.TimeTo}
 			if _, ok := snaps[w]; !ok {
 				snaps[w] = nil
@@ -86,7 +90,9 @@ func addSnapshots(o options, ev *Evaluation) {
 	for i := range ev.Checks {
 		for j := range ev.Checks[i].Evidence {
 			e := &ev.Checks[i].Evidence[j]
-			e.Snapshot = snaps[window{e.TraceID, e.TimeFrom, e.TimeTo}]
+			if e.Snapshot == nil {
+				e.Snapshot = snaps[window{e.TraceID, e.TimeFrom, e.TimeTo}]
+			}
 		}
 	}
 }
