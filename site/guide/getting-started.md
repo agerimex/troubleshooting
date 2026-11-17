@@ -6,11 +6,12 @@ description: Install Troubleshooting with Docker, send spans and correlated logs
 
 Troubleshooting shows what one request did across your services: its spans and its log records together, in a table, a timeline or a sequence diagram. On top of that it groups recurring problems and compares call statistics, latency percentiles and error groups between releases.
 
-It is for developers and support engineers of Go services (or any OpenTelemetry-instrumented service) who need to answer three questions fast:
+It is for developers and support engineers of Go services (or any OpenTelemetry-instrumented service) who need to answer four questions fast:
 
 - **What happened in this execution?** [Log Analysis](./log-analysis) and [Timeline & Sequence](./timeline-sequence).
 - **What keeps going wrong?** [Problems](./problems).
 - **Did the new release make it better or worse?** [Releases](./releases).
+- **Does this change keep its limits?** [Quality gate](./quality), in CI.
 
 ## How data gets in
 
@@ -43,6 +44,7 @@ The header has five pages, in this order:
 | Timeline & Sequence | Browse execution shapes and open one execution as a timeline or sequence diagram |
 | Problems | See recurring error groups, slow calls and release regressions of one service |
 | Releases | Compare two releases, and view statistics of one population |
+| Quality | Check a test run against rules from your repository, or open a CI result |
 | Settings | Edit problem detection rules, view retention |
 
 A page keeps its state when you switch away and back. Any page can open one execution. The browser address then names it (`#/executions?trace=…&from=…&to=…&span=…&view=…`), so you can copy the link and send it to a colleague. Links carry identifiers only, never log text.

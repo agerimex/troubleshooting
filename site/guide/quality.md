@@ -1,0 +1,134 @@
+---
+description: Check a test run against latency limits, database calls per execution and forbidden calls kept in your repository, in CI or on the Quality page, with the execution behind every failure.
+---
+
+# Quality gate
+
+The quality gate answers “does this change keep its limits?” before it ships. Your tests run against the instrumented application; Troubleshooting then checks that **test run** against rules kept in your repository and links every failure to the execution behind it. It works from the command line, as a GitHub Action, and on the **Quality** page.
+
+A change can pass every functional test and still add twenty database calls per request, or call a service it must not. The gate measures what the run actually did, from its spans.
+
+## 1. Tag the test run
+
+Give the spans of the run an id with the attribute `troubleshooting.run`, preferably on the resource, so the application needs no code change:
+
+```
+OTEL_RESOURCE_ATTRIBUTES=troubleshooting.run=pr-42-1
+```
+
+With `log-sender`: `sender.WithResourceAttributes(map[string]string{"troubleshooting.run": "pr-42-1"})`. Only the entry service needs it: spans of downstream services belong to the run through their recorded parent in the same trace. Use a new id per CI attempt, e.g. `pr-<number>-<attempt>`.
+
+## 2. Write the rules
+
+Keep a `quality.yaml` next to the code:
+
+```yaml
+version: 1
+entry:                       # the operation an execution starts with
+  service: recording-api
+  operation: start_session
+  span_kind: server          # optional
+checks:
+  - id: startup-p95
+    type: latency
+    percentile: 95           # default 95
+    max_ms: 800              # the limit: decides the gate
+    target_ms: 500           # optional, advisory
+  - id: db-calls
+    type: db_calls
+    max_per_execution: 3
+    target_per_execution: 2  # optional, advisory
+  - id: no-directory
+    type: forbidden_call
+    to: directory-api
+    from: recording-api      # optional: only calls from this service
+```
+
+| Check | Measures | Passes when |
+| --- | --- | --- |
+| `latency` | The percentile of the entry spans’ own durations (exact nearest rank) | The value is at most `max_ms` (equal passes), over at least `min_executions` (default 20) |
+| `db_calls` | Client spans with `db.system` (or `db.system.name`) per execution | **Every** execution has at most `max_per_execution`, not on average |
+| `forbidden_call` | A span of service `to` called from another service, or a client span naming it in `peer.service` / `server.address` | No execution calls it: “not observed in this run” |
+
+A check can have its own `entry`, and `advisory: true` shows it without letting it decide. Unknown and duplicate keys are errors, so a misspelled limit is never silently ignored. SQL text and logs are never parsed.
+
+## 3. Check the run
+
+```
+go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@latest
+troubleshooting-check --url http://localhost:8095 --rules quality.yaml \
+    --run pr-42-1 --baseline main-118 --since 1h \
+    --json result.json --html report.html --markdown summary.md
+```
+
+The exit code is the gate: **0** passed, **1** failed, **2** unresolved (not enough data), **3** error (invalid rules, unreachable API, …). Real output, from the reference fixture’s candidate run:
+
+```
+Quality gate: FAILED
+run fx…-qg-candidate, baseline fx…-qg-baseline, 3 checks
+
+FAIL    db-calls  fx…-qg-api / start_session (server)
+        up to 21 database calls per execution, limit 3, 200 executions, 200 over the limit
+        baseline: 2 (200 executions)
+        target 2 per execution not met yet (advisory)
+        permission_lookup × 20
+        insert_session × 1
+        evidence: execution with the most database calls: 21
+        http://localhost:8095/#/executions?from=…&span=…&to=…&trace=…&view=timeline
+```
+
+`--html` writes a self-contained report without scripts; `--markdown` a summary for a CI job page or a pull request comment.
+
+## In GitHub Actions
+
+```yaml
+- name: Quality gate
+  uses: agerimex/troubleshooting/quality-check@main   # pin a commit for real use
+  with:
+    url: http://localhost:8095          # where your Troubleshooting runs
+    run: pr-${{ github.event.number }}-${{ github.run_attempt }}
+    rules: quality.yaml
+    baseline: main-latest               # optional
+    since: 1h
+    fail-on: unresolved                 # or "failed", or "never" (report only)
+```
+
+The action builds the CLI, checks the run, writes the Markdown summary to the job page, uploads `result.json`, `report.html` and `summary.md` as an artifact, and then applies the gate. With `fail-on: unresolved` (the default) the step fails when the gate failed or had not enough data; an error always fails it. Outputs: `gate` and `exit-code`.
+
+::: warning Trust
+The rules are read from the checked-out commit, so a pull request can change its own limits. The change is visible in the diff, but the action does not prevent it. To keep the limits independent of the change, read them from the base branch (`git show origin/main:quality.yaml > /tmp/quality.yaml`) and pass that file.
+:::
+
+Troubleshooting’s own CI is the first user: its integration job tags the API’s spans with the CI run id and checks the ClickHouse queries per request (`trace-report`, `view-spans`, `stats/calls`, `compare`, `quality/evaluate`) against `.github/quality.yaml`. A change that adds a query per row fails the build, with the request behind it.
+
+## The Quality page
+
+The **Quality** page checks a run interactively: paste the rules, name the run and optionally a baseline, pick a window (last 15 minutes to 24 hours) and click **Check run**. The rules are sent as typed and parsed as strictly as the CLI does.
+
+![Quality page](/landing/quality.webp)
+*The fixture’s candidate run against its baseline: all three checks fail.*
+
+Every check shows its value, the limit with the advisory target, the baseline and the number of executions, then the details and the evidence. **Open timeline** and **Open sequence** open the evidence execution in Timeline & Sequence; **Back to Quality** returns to the result.
+
+![Evidence opened from the quality check](/landing/quality-evidence.webp)
+*The execution with the most database calls: twenty `permission_lookup` calls where the baseline makes one.*
+
+**Open a result file** shows a CI `result.json` the same way, so a failed build can be investigated in the UI; its evidence buttons work while the raw spans are retained. **Export JSON** and **Export HTML** save the result as shown. The rules and run ids are remembered in this browser only; evaluations are not stored.
+
+## How to read a result
+
+| Status | Meaning |
+| --- | --- |
+| Pass | The run kept the limit |
+| Fail | The run broke the limit; the evidence names an execution that did |
+| Not enough data | No executions, fewer than needed, spans outside retention, or a query limit. Never a pass |
+
+- **Gate**: any failed blocking check → *failed*; otherwise any check without enough data → *unresolved*; otherwise *passed*.
+- **Targets** are *met* or *open* and never change a status. **Advisory** checks are shown and never decide.
+- **The baseline** is evaluated with the same rules and shown next to each value; it never changes a status. A pass is not “every number improved”.
+- A pass describes this run only. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged.
+- Each span counts once, so retries and replays of the same spans never change a number.
+
+Limits: a window is at most 24 hours and within raw span retention; at most 50 checks and 200 000 spans per run (more is “not enough data”, never a partial pass).
+
+The full contract (`quality-gate-v1`) is in [`docs/quality-gate.md`](https://github.com/agerimex/troubleshooting/blob/main/docs/quality-gate.md).
