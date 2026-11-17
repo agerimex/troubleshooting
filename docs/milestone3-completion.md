@@ -102,9 +102,8 @@ Implementation: commit `932c1f9` (branch `feat/quality-review-stage-2`,
 
 # Stage 3: trusted rules, provenance, PR comment, an application's CI
 
-Implementation: branch `feat/quality-review-stage-2` after `35c2821`,
-uncommitted at the time of writing (2026-11-17). **Fill in the commit after
-committing.**
+Implementation: commit `2c8b27b` on branch `feat/quality-review-stage-2`
+(2026-11-17).
 
 ## What changed
 
