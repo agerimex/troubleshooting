@@ -90,13 +90,40 @@ FAIL    db-calls  fx…-qg-api / start_session (server)
     rules: quality.yaml
     baseline: main-latest               # optional
     since: 1h
+    rules-from: base                    # the rules of the pull request's base branch
     fail-on: unresolved                 # or "failed", or "never" (report only)
 ```
 
-The action builds the CLI, checks the run, writes the Markdown summary to the job page, uploads `result.json`, `report.html` and `summary.md` as an artifact, and then applies the gate. With `fail-on: unresolved` (the default) the step fails when the gate failed or had not enough data; an error always fails it. Outputs: `gate` and `exit-code`.
+The action builds the CLI, checks the run, writes the Markdown summary to the job page and as a pull request comment, uploads `result.json`, `report.html` and `summary.md` as an artifact, and then applies the gate. With `fail-on: unresolved` (the default) the step fails when the gate failed or had not enough data; an error always fails it. Outputs: `gate` and `exit-code`.
+
+- **The limits come from the base branch** with `rules-from: base`, so a pull request can’t loosen its own gate. When it changes the rules file, the summary says that the base’s rules were used. Without `rules-from`, the checked-out file decides.
+- **Every result names what was tested**: the commit (a pull request’s head), the branch, the CI run, and the rules file with its SHA-256.
+- **One comment per pull request**, updated on every run instead of adding new ones, and never posted for a commit that is no longer the head. The job needs `pull-requests: write`; for a pull request from a fork the token is read-only, so the comment is skipped and the result stays in the job summary.
+- **The report keeps the evidence.** `report.html` contains a snapshot of each evidence execution (its spans as a small timeline), so it still shows what happened after the raw spans have expired.
+
+### No Troubleshooting server? Start one in the job
+
+`quality-check/stack` starts a private Troubleshooting inside the CI job (ClickHouse, receiver and API; Linux runners). Your tests export their spans to it with the standard OpenTelemetry variables:
+
+```yaml
+- id: troubleshooting
+  uses: agerimex/troubleshooting/quality-check/stack@main
+- run: go test ./...
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
+    OTEL_EXPORTER_OTLP_INSECURE: "true"
+    OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=pr-${{ github.run_id }}-${{ github.run_attempt }}
+- uses: agerimex/troubleshooting/quality-check@main
+  with:
+    url: ${{ steps.troubleshooting.outputs.url }}
+    run: pr-${{ github.run_id }}-${{ github.run_attempt }}
+    rules-from: base
+```
+
+[`examples/quality-gate`](https://github.com/agerimex/troubleshooting/tree/main/examples/quality-gate) is a complete example: a small orders service with its `quality.yaml`. Troubleshooting’s CI runs it on every push, once as written (2 database calls per request: passed) and once with a planted change that reads prices one by one and calls `legacy-pricing` (9 database calls and a forbidden call: failed).
 
 ::: warning Trust
-The rules are read from the checked-out commit, so a pull request can change its own limits. The change is visible in the diff, but the action does not prevent it. To keep the limits independent of the change, read them from the base branch (`git show origin/main:quality.yaml > /tmp/quality.yaml`) and pass that file.
+The workflow file is part of the pull request too. Protect `main` and review changes under `.github/`. Don’t run untrusted fork code with secrets that reach a private Troubleshooting.
 :::
 
 Troubleshooting’s own CI is the first user: its integration job tags the API’s spans with the CI run id and checks the ClickHouse queries per request (`trace-report`, `view-spans`, `stats/calls`, `compare`, `quality/evaluate`) against `.github/quality.yaml`. A change that adds a query per row fails the build, with the request behind it.
@@ -121,7 +148,7 @@ Every check shows its value, the limit with the advisory target, the baseline an
 | --- | --- |
 | Pass | The run kept the limit |
 | Fail | The run broke the limit; the evidence names an execution that did |
-| Not enough data | No executions, fewer than needed, spans outside retention, or a query limit. Never a pass |
+| Not enough data | No executions, fewer than needed, incomplete executions (a span below the entry names a parent that was not recorded), spans outside retention, or a query limit. Never a pass |
 
 - **Gate**: any failed blocking check → *failed*; otherwise any check without enough data → *unresolved*; otherwise *passed*.
 - **Targets** are *met* or *open* and never change a status. **Advisory** checks are shown and never decide.

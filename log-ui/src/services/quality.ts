@@ -1,6 +1,6 @@
 import { type ExecutionTarget, type ExecutionView } from '@/services/navigation'
 import { escapeHtml, htmlPage } from '@/services/report'
-import { type CheckStatus, type Gate, type QualityCheckResult, type QualityEvaluation, type QualityEvidence } from '@/types/quality'
+import { type CheckStatus, type Gate, type QualityCheckResult, type QualityEvaluation, type QualityEvidence, type QualitySource } from '@/types/quality'
 
 // Pure parts of the Quality page (docs/quality-gate.md): windows, labels,
 // evidence targets, reading a CLI result file and the HTML export.
@@ -150,7 +150,7 @@ export function exportHtml (ev: QualityEvaluation): string {
       `<td>${e(c.executions)}</td><td>${e(c.summary)}${items.length ? '<ul>' + items.join('') + '</ul>' : ''}</td></tr>`
   }).join('')
   const body = `<h1>Quality gate: ${e(gateLabel(ev.gate))}</h1>
-<p>Run <code>${e(ev.run)}</code>, ${e(nsToIso(ev.time_from))} to ${e(nsToIso(ev.time_to))}${hasBaseline ? `; baseline <code>${e(ev.baseline)}</code>, ${e(nsToIso(ev.baseline_time_from))} to ${e(nsToIso(ev.baseline_time_to))}` : ''}. ${e(ev.contract)}, evaluated ${e(ev.evaluated_at)}.</p>
+<p>Run <code>${e(ev.run)}</code>, ${e(nsToIso(ev.time_from))} to ${e(nsToIso(ev.time_to))}${hasBaseline ? `; baseline <code>${e(ev.baseline)}</code>, ${e(nsToIso(ev.baseline_time_from))} to ${e(nsToIso(ev.baseline_time_to))}` : ''}. ${e(ev.contract)}, evaluated ${e(ev.evaluated_at)}.</p>${sourceText(ev.source) ? `\n<p>${e(sourceText(ev.source))}</p>` : ''}
 <table><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>${hasBaseline ? '<th>Baseline</th>' : ''}<th>Executions</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table>
 <p>${e(ev.method)}. Statuses describe this run only: a pass means "not observed in this run", not a guarantee; a missing measurement is never a pass.</p>`
   return htmlPage('Quality gate: ' + gateLabel(ev.gate), body)
@@ -158,4 +158,35 @@ export function exportHtml (ev: QualityEvaluation): string {
 
 export function exportJson (ev: QualityEvaluation): string {
   return JSON.stringify(ev, null, 2) + '\n'
+}
+
+const short = (s: string) => s.slice(0, 12)
+
+// sourceText says what was tested and which rules decided (the CLI's
+// "source", absent for a check made on this page), e.g.
+// "commit 0123456789ab (feat/x) · rules main@89ab01234567:quality.yaml, sha256 d80ff3781a3d".
+export function sourceText (s: QualitySource | undefined | null): string {
+  if (!s || typeof s !== 'object') {
+    return ''
+  }
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  const parts: string[] = []
+  const commit = str(s.commit)
+  const ref = str(s.ref)
+  if (commit) {
+    parts.push('commit ' + short(commit) + (ref ? ' (' + ref + ')' : ''))
+  } else if (ref) {
+    parts.push('ref ' + ref)
+  }
+  const rules = str(s.rules_ref) || str(s.rules)
+  if (rules) {
+    parts.push('rules ' + rules + (str(s.rules_sha256) ? ', sha256 ' + short(str(s.rules_sha256)) : ''))
+  }
+  return parts.join(' · ')
+}
+
+// ciRunLink is the CI run's link, only if it is http(s).
+export function ciRunLink (s: QualitySource | undefined | null): string {
+  const u = s && typeof s.ci_run === 'string' ? s.ci_run : ''
+  return /^https?:\/\//i.test(u) ? u : ''
 }

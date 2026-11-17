@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  baselineText, evidenceTarget, evidenceView, exportHtml, exportJson, gateLabel, limitText, parseResult, presetWindow, statusLabel, valueText
+  baselineText, ciRunLink, evidenceTarget, evidenceView, exportHtml, exportJson, gateLabel, limitText, parseResult, presetWindow, sourceText, statusLabel, valueText
 } from '@/services/quality'
 import { type QualityCheckResult, type QualityEvaluation } from '@/types/quality'
 
@@ -88,5 +88,20 @@ describe('quality page logic', () => {
     expect(html).toContain('<th>Baseline</th>')
     expect(html).toContain('permission_lookup × 20')
     expect(JSON.parse(exportJson(ev))).toEqual(ev)
+  })
+})
+
+describe('the CLI source of a result file', () => {
+  it('names the commit, the rules and their digest; only http(s) CI links', () => {
+    const s = { commit: '0123456789abcdef0123', ref: 'feat/x', ci_run: 'https://ci.example/runs/7', rules: '/tmp/q.yaml', rules_ref: 'main@89ab01234567:quality.yaml', rules_sha256: 'd80ff3781a3d0000' }
+    expect(sourceText(s)).toBe('commit 0123456789ab (feat/x) · rules main@89ab01234567:quality.yaml, sha256 d80ff3781a3d')
+    expect(sourceText({ rules: 'quality.yaml' })).toBe('rules quality.yaml')
+    expect(sourceText(undefined)).toBe('')
+    expect(sourceText({ commit: 5 } as any)).toBe('')
+    expect(ciRunLink(s)).toBe('https://ci.example/runs/7')
+    expect(ciRunLink({ ci_run: 'javascript:alert(1)' })).toBe('')
+    const [err, ev] = parseResult(JSON.stringify({ contract: 'quality-gate-v1', gate: 'failed', checks: [], run: 'r', source: s }))
+    expect(err).toBeNull()
+    expect(exportHtml(ev!)).toContain('<p>commit 0123456789ab (feat/x) · rules main@89ab01234567:quality.yaml, sha256 d80ff3781a3d</p>')
   })
 })

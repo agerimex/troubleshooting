@@ -60,6 +60,8 @@ export interface QualityEvaluation {
   gate: Gate
   checks: QualityCheckResult[]
   evaluated_at: string
+  // Added by the CLI: the tested commit and the rules that decided.
+  source?: QualitySource
 }
 
 export interface QualityRequest {
@@ -70,4 +72,13 @@ export interface QualityRequest {
   baseline?: string
   baselineFrom?: string
   baselineTo?: string
+}
+
+export interface QualitySource {
+  commit?: string
+  ref?: string
+  ci_run?: string
+  rules?: string
+  rules_ref?: string
+  rules_sha256?: string
 }

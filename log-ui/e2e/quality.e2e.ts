@@ -84,10 +84,16 @@ test('QG-UI-002: invalid rules show the API message and no result', async ({ pag
 
 test('QG-UI-003: a CI result file opens with its evidence; other files are refused', async ({ page }) => {
   await setup(page, () => ({ status: 500, body: {} }))
-  const ev = evaluation('unresolved')
+  const ev = { ...evaluation('unresolved'), source: { commit: '0123456789abcdef', ref: 'feat/x', ci_run: 'https://ci.example/runs/7', rules: '/tmp/q.yaml', rules_ref: 'main@89ab01234567:quality.yaml', rules_sha256: 'd80ff3781a3d00' } }
   await page.getByTestId('quality-file').setInputFiles({ name: 'result.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(ev)) })
   await expect(page.getByTestId('quality-gate')).toHaveText('Quality gate: Unresolved: not enough data')
   await expect(page.getByTestId('quality-gate-box')).toContainText('From the file result.json')
+  await expect(page.getByTestId('quality-source')).toHaveText('commit 0123456789ab (feat/x) · rules main@89ab01234567:quality.yaml, sha256 d80ff3781a3d · CI run')
+  await expect(page.getByTestId('quality-source').getByRole('link', { name: 'CI run' })).toHaveAttribute('href', 'https://ci.example/runs/7')
+  const bad = { ...ev, source: { ...ev.source, ci_run: 'javascript:alert(1)' } }
+  await page.getByTestId('quality-file').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bad)) })
+  await expect(page.getByTestId('quality-source')).not.toContainText('CI run')
+  await expect(page.getByTestId('quality-source').getByRole('link')).toHaveCount(0)
   await page.getByTestId('quality-file').setInputFiles({ name: 'other.json', mimeType: 'application/json', buffer: Buffer.from('{"contract":"x"}') })
   await expect(page.getByTestId('quality-error')).toContainText('other.json: The file is not a quality-gate-v1 evaluation')
 })

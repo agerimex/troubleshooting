@@ -59,8 +59,8 @@ phases, the limited API.
 
 # Stage 2: reports, Quality page, GitHub Action, own CI
 
-Implementation: branch `feat/quality-review-stage-2`, uncommitted at the time
-of writing (2026-11-17). **Fill in the commit after committing.**
+Implementation: commit `932c1f9` (branch `feat/quality-review-stage-2`,
+2026-11-17).
 
 ## What changed
 
@@ -99,3 +99,48 @@ of writing (2026-11-17). **Fill in the commit after committing.**
 - Real stack as above. Not run: the action inside GitHub Actions (it runs on
   the first push of this branch), the fixture's outage/recreate/retention
   phases with the tagged API.
+
+# Stage 3: trusted rules, provenance, PR comment, an application's CI
+
+Implementation: branch `feat/quality-review-stage-2` after `35c2821`,
+uncommitted at the time of writing (2026-11-17). **Fill in the commit after
+committing.**
+
+## What changed
+
+- **log-analysis**: incomplete executions (`missingBelow`, `requireComplete`
+  in `quality.go`): `db_calls` and `forbidden_call` are `insufficient`
+  (`incomplete_executions`) instead of passing when spans below the entry may
+  be missing.
+- **quality-check**: `source` in the result (`--commit`, `--ref`, `--ci-run`,
+  `--rules-ref`, rules sha256); evidence snapshots (`snapshot.go`,
+  `--no-snapshot`); `troubleshooting-check comment` (`comment.go`); the action
+  gets `rules-from`, `commit`, `ref`, `comment`, `github-token`; new
+  `quality-check/stack/action.yml`.
+- **examples/quality-gate**: an example application (new module, in the Go
+  test matrix and `make test-go`).
+- **log-ui**: the source line on the Quality page and in its HTML export.
+- **CI**: the `integration` job uses `rules-from: base` and may comment
+  (`pull-requests: write`); new job `quality-example`.
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-INC-001 | `TestQualityIncompleteExecutions` | Go unit |
+| QG-SRC-001 | `TestSourceRecorded`; UI `quality.spec.ts` (source), `e2e/quality.e2e.ts` QG-UI-003 | CLI; Vitest; Playwright |
+| QG-CI-003 | the action's check script, extracted from `action.yml` and run against a local git origin: base rules used with a note when changed, no note for unchanged CRLF files, introduction without base rules, push, unknown ref = error | manual run, 2026-11-17 (GitHub on push) |
+| QG-CI-004 | `TestCommentPostsThenUpdates`, `TestCommentSkips`, `TestCommentBodyFits` (fake GitHub API) | CLI |
+| QG-CI-005 | CI job `quality-example`; locally: the stack script from `quality-check/stack/action.yml` (ClickHouse, receiver, API), the example's tests over OTLP, the CLI: good run passed (2 database calls, 41 executions), regression failed (9 calls, `legacy-pricing` in 40 of 41) | real services; CI once pushed |
+| QG-OUT-002 | `TestEvidenceSnapshot`; a real `report.html` of the regression run | CLI; manual |
+
+## Verification run (2026-11-17)
+
+- `go test ./...` in protos, log-sender, log-receiver, log-analysis,
+  quality-check and examples/quality-gate; `go vet` in fixtures/regression:
+  pass. `npx vitest run` (94 tests), `npx playwright test` (93 tests),
+  `npm run type-check`, `npm run build-only`: pass.
+- The regression fixture's QG checks (QG-REF-001/002, QG-EVD-001,
+  QG-VAL-001) against the new API on the test stack: pass.
+- Not run: anything inside GitHub Actions (the stack action, the comment, the
+  `quality-example` job and `rules-from: base` run on the first push).

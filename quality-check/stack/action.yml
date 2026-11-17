@@ -1,0 +1,98 @@
+name: Troubleshooting for this CI job
+description: >-
+  Start a private Troubleshooting (ClickHouse, receiver and API) inside the
+  CI job, so the tests can send their spans to it and the quality gate can
+  check them, without a Troubleshooting server the job must reach. Linux
+  runners with Docker (e.g. ubuntu-latest). See docs/quality-gate.md.
+inputs:
+  otlp-port:
+    description: OTLP/gRPC port the tests send spans to (127.0.0.1).
+    default: '4317'
+  sender-port:
+    description: Port of the log-sender protocol (spans and logs from log-sender).
+    default: '50055'
+  api-port:
+    description: Port of the API the quality gate checks against.
+    default: '8094'
+  clickhouse-port:
+    description: ClickHouse native port (127.0.0.1).
+    default: '19000'
+  clickhouse-image:
+    description: ClickHouse image (the version Troubleshooting is tested with).
+    default: clickhouse/clickhouse-server:26.9.13.15
+outputs:
+  url:
+    description: API URL, for the quality gate's `url` input.
+    value: ${{ steps.start.outputs.url }}
+  otlp-endpoint:
+    description: OTLP/gRPC endpoint, for OTEL_EXPORTER_OTLP_ENDPOINT (plain text, so also set OTEL_EXPORTER_OTLP_INSECURE=true).
+    value: ${{ steps.start.outputs.otlp-endpoint }}
+  sender-address:
+    description: Address for log-sender's WithAddress.
+    value: ${{ steps.start.outputs.sender-address }}
+  logs:
+    description: Directory with the services' logs (upload it when the job fails).
+    value: ${{ steps.start.outputs.logs }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/../../log-analysis/go.mod
+        cache: false
+    - name: Start Troubleshooting
+      id: start
+      shell: bash
+      env:
+        TS_ROOT: ${{ github.action_path }}/../..
+        TS_OTLP_PORT: ${{ inputs.otlp-port }}
+        TS_SENDER_PORT: ${{ inputs.sender-port }}
+        TS_API_PORT: ${{ inputs.api-port }}
+        TS_CH_PORT: ${{ inputs.clickhouse-port }}
+        TS_CH_IMAGE: ${{ inputs.clickhouse-image }}
+      run: |
+        set -euo pipefail
+        for p in "$TS_OTLP_PORT" "$TS_SENDER_PORT" "$TS_API_PORT" "$TS_CH_PORT"; do
+          case "$p" in ''|*[!0-9]*) echo "::error title=Troubleshooting::ports must be numbers, not '$p'"; exit 1 ;; esac
+        done
+        dir="$RUNNER_TEMP/troubleshooting"
+        mkdir -p "$dir/bin"
+        echo "logs=$dir" >> "$GITHUB_OUTPUT"
+
+        # ClickHouse first: pulling and starting it overlaps with the builds.
+        docker run -d --name troubleshooting-clickhouse \
+          -p "127.0.0.1:$TS_CH_PORT:9000" \
+          -e CLICKHOUSE_USER=default -e CLICKHOUSE_PASSWORD= -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+          -v "$TS_ROOT/clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml:ro" \
+          --ulimit nofile=262144:262144 "$TS_CH_IMAGE" > /dev/null
+
+        (cd "$TS_ROOT/log-receiver" && go build -o "$dir/bin/receiver" ./cmd/grpc_api)
+        (cd "$TS_ROOT/log-analysis" && go build -o "$dir/bin/api" ./cmd/rest_api)
+
+        wait_for() { # what, seconds, command...
+          local what=$1 secs=$2; shift 2
+          for _ in $(seq "$secs"); do
+            if "$@" > /dev/null 2>&1; then return 0; fi
+            sleep 1
+          done
+          echo "::error title=Troubleshooting::$what did not start in ${secs}s (logs: $dir)"
+          docker logs troubleshooting-clickhouse > "$dir/clickhouse.log" 2>&1 || true
+          tail -n 40 "$dir"/*.log || true
+          exit 1
+        }
+        wait_for ClickHouse 300 docker exec troubleshooting-clickhouse clickhouse-client --query "SELECT 1"
+
+        export CLICKHOUSE_ADDR="127.0.0.1:$TS_CH_PORT" CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=
+        # The receiver creates the schema, so it starts before the API.
+        LISTEN_ADDR="127.0.0.1:$TS_SENDER_PORT" OTLP_LISTEN_ADDR="127.0.0.1:$TS_OTLP_PORT" \
+          nohup "$dir/bin/receiver" > "$dir/receiver.log" 2>&1 &
+        wait_for "The receiver" 120 bash -c "exec 3<>/dev/tcp/127.0.0.1/$TS_OTLP_PORT"
+        # Statistics refresh is off: a CI job only needs raw spans.
+        LISTEN_ADDR="127.0.0.1:$TS_API_PORT" TRACE_RECEIVER_ADDR="127.0.0.1:$TS_SENDER_PORT" STATS_REFRESH=off \
+          nohup "$dir/bin/api" > "$dir/api.log" 2>&1 &
+        wait_for "The API" 120 curl -fsS "http://127.0.0.1:$TS_API_PORT/api/v1/retention"
+
+        echo "url=http://127.0.0.1:$TS_API_PORT" >> "$GITHUB_OUTPUT"
+        echo "otlp-endpoint=http://127.0.0.1:$TS_OTLP_PORT" >> "$GITHUB_OUTPUT"
+        echo "sender-address=127.0.0.1:$TS_SENDER_PORT" >> "$GITHUB_OUTPUT"
+        echo "Troubleshooting is running: API http://127.0.0.1:$TS_API_PORT, OTLP 127.0.0.1:$TS_OTLP_PORT"
