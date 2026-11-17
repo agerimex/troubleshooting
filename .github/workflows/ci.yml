@@ -85,7 +85,7 @@ jobs:
         uses: ./quality-check
         with:
           url: http://127.0.0.1:28094
-          ui: http://127.0.0.1:28095
+          ui: none # the test stack is removed after the job; report.html keeps the evidence
           rules: .github/quality.yaml
           rules-from: base # a pull request cannot loosen its own limits
           run: ${{ env.TROUBLESHOOTING_RUN }}
@@ -128,6 +128,7 @@ jobs:
         uses: ./quality-check
         with:
           url: ${{ steps.troubleshooting.outputs.url }}
+          ui: ${{ steps.troubleshooting.outputs.ui }}
           run: ${{ env.RUN_ID }}
           rules: examples/quality-gate/quality.yaml
           since: 30m
@@ -146,6 +147,7 @@ jobs:
         uses: ./quality-check
         with:
           url: ${{ steps.troubleshooting.outputs.url }}
+          ui: ${{ steps.troubleshooting.outputs.ui }}
           run: ${{ env.RUN_ID }}-regression
           baseline: ${{ env.RUN_ID }}
           rules: examples/quality-gate/quality.yaml

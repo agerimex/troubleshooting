@@ -57,7 +57,7 @@ func referenceRun(run, kind string, p95 float64) []qSpan {
 		trace := traceHex(run, i)
 		start := qBase + int64(i)*int64(time.Second)
 		dur := int64(p95ms(i, p95) * 1000)
-		entry := qSpan{TraceID: trace, SpanID: spanHex(1), Parent: rootParent, Service: "recording-api", Name: "start_session",
+		entry := qSpan{TraceID: trace, SpanID: spanHex(1), Parent: RootParentSpanID, Service: "recording-api", Name: "start_session",
 			Kind: "server", Start: start, Duration: dur, Run: run}
 		out = append(out, entry)
 		id := 2
@@ -276,7 +276,7 @@ func TestQualityGatePrecedence(t *testing.T) {
 func TestQualityForbiddenCall(t *testing.T) {
 	tr := strings.Repeat("a", 32)
 	spans := []qSpan{
-		{TraceID: tr, SpanID: spanHex(1), Parent: rootParent, Service: "api", Name: "start", Kind: "server", Start: qBase, Duration: 1000, Run: "r"},
+		{TraceID: tr, SpanID: spanHex(1), Parent: RootParentSpanID, Service: "api", Name: "start", Kind: "server", Start: qBase, Duration: 1000, Run: "r"},
 		{TraceID: tr, SpanID: spanHex(2), Parent: spanHex(1), Service: "api", Name: "call billing", Kind: "client", Start: qBase + 1, Peer: "billing", Run: "r"},
 		{TraceID: tr, SpanID: spanHex(3), Parent: spanHex(1), Service: "worker", Name: "job", Kind: "server", Start: qBase + 2},
 		{TraceID: tr, SpanID: spanHex(4), Parent: spanHex(3), Service: "worker", Name: "inner", Kind: "internal", Start: qBase + 3},
@@ -306,7 +306,7 @@ func TestQualityForbiddenCall(t *testing.T) {
 // orphans outside the entry's duration don't make it incomplete.
 func TestQualityIncompleteExecutions(t *testing.T) {
 	tr := strings.Repeat("b", 32)
-	entry := qSpan{TraceID: tr, SpanID: spanHex(1), Parent: rootParent, Service: "api", Name: "start", Kind: "server", Start: qBase, Duration: 1000, Run: "r"}
+	entry := qSpan{TraceID: tr, SpanID: spanHex(1), Parent: RootParentSpanID, Service: "api", Name: "start", Kind: "server", Start: qBase, Duration: 1000, Run: "r"}
 	db := func(id int, parent string, start int64) qSpan {
 		return qSpan{TraceID: tr, SpanID: spanHex(id), Parent: parent, Service: "api", Name: "lookup", Kind: "client", DB: true, Start: start, Duration: 10}
 	}
@@ -363,6 +363,40 @@ func TestQualityIncompleteExecutions(t *testing.T) {
 	if r = eval(open, late); r[0].Status != CheckInsufficient {
 		t.Errorf("invalid duration: %+v", r[0])
 	}
+
+	// Not incomplete: a sibling of the entry under the same unrecorded parent
+	// (the uninstrumented gateway also calls another service meanwhile) is
+	// beside the entry, not below it.
+	sibling := orphanCall
+	sibling.Parent = gateway.Parent
+	if r = eval(gateway, db(2, spanHex(1), qBase+2), sibling); r[0].Status != CheckPass || r[1].Status != CheckPass {
+		t.Errorf("sibling under the entry's missing parent: %+v / %+v", r[0], r[1])
+	}
+
+	// An execution running past the spans read (window end + lookahead) is
+	// incomplete: its last calls were not read.
+	long := entry
+	long.Start = qBase + int64(time.Hour) - int64(time.Second)
+	long.Duration = int64(10*time.Minute) / 1000 // microseconds
+	r = eval(long, db(2, spanHex(1), long.Start+1))
+	if r[0].Status != CheckInsufficient || r[0].Reason != "incomplete_executions" || r[1].Status != CheckInsufficient ||
+		!strings.Contains(r[0].Evidence[0].Note, "runs past the spans read") || !strings.Contains(strings.Join(r[0].Details, "|"), "end the window later") {
+		t.Errorf("execution past the spans read: %+v / %+v", r[0], r[1])
+	}
+	short := long
+	short.Duration = int64(time.Minute) / 1000
+	if r = eval(short, db(2, spanHex(1), short.Start+1)); r[0].Status != CheckPass {
+		t.Errorf("execution ending within the lookahead: %+v", r[0])
+	}
+}
+
+// A field of another check type is an error, never silently ignored.
+func TestQualityForeignFields(t *testing.T) {
+	c := QualityCheck{ID: "db", Type: CheckDBCalls, MaxPerExecution: ip(3), MaxMs: fp(200), To: "x"}
+	err := validateCheck(&c, &QualityEntry{Service: "s", Operation: "o"})
+	if err == nil || err.Error() != "max_ms, to don't apply to a db_calls check" {
+		t.Errorf("foreign fields: %v", err)
+	}
 }
 
 func TestQualityValidate(t *testing.T) {
@@ -383,25 +417,28 @@ func TestQualityValidate(t *testing.T) {
 		t.Errorf("baseline window default: %v %+v", err, req)
 	}
 	for name, mutate := range map[string]func(*QualityRequest){
-		"no run":            func(q *QualityRequest) { q.Run = " " },
-		"same baseline":     func(q *QualityRequest) { q.Baseline = "r" },
-		"window":            func(q *QualityRequest) { q.TimeTo = q.TimeFrom },
-		"long window":       func(q *QualityRequest) { q.TimeTo = num(qBase + int64(25*time.Hour)) },
-		"baseline no run":   func(q *QualityRequest) { q.BaselineFrom = q.TimeFrom },
-		"version":           func(q *QualityRequest) { q.Rules.Version = 2 },
-		"no checks":         func(q *QualityRequest) { q.Rules.Checks = nil },
-		"duplicate id":      func(q *QualityRequest) { q.Rules.Checks[1].ID = q.Rules.Checks[0].ID },
-		"bad id":            func(q *QualityRequest) { q.Rules.Checks[0].ID = "a b" },
-		"no entry":          func(q *QualityRequest) { q.Rules.Entry = nil },
-		"type":              func(q *QualityRequest) { q.Rules.Checks[0].Type = "sql" },
-		"target above max":  func(q *QualityRequest) { q.Rules.Checks[0].TargetMs = fp(900) },
-		"no max":            func(q *QualityRequest) { q.Rules.Checks[0].MaxMs = nil },
-		"percentile":        func(q *QualityRequest) { q.Rules.Checks[0].Percentile = 101 },
-		"db target":         func(q *QualityRequest) { q.Rules.Checks[1].TargetPer = ip(4) },
-		"db no max":         func(q *QualityRequest) { q.Rules.Checks[1].MaxPerExecution = nil },
-		"forbidden no to":   func(q *QualityRequest) { q.Rules.Checks[2].To = "" },
-		"forbidden from=to": func(q *QualityRequest) { q.Rules.Checks[2].From = "directory-api" },
-		"negative min":      func(q *QualityRequest) { q.Rules.Checks[0].MinExecutions = -1 },
+		"no run":                  func(q *QualityRequest) { q.Run = " " },
+		"same baseline":           func(q *QualityRequest) { q.Baseline = "r" },
+		"window":                  func(q *QualityRequest) { q.TimeTo = q.TimeFrom },
+		"long window":             func(q *QualityRequest) { q.TimeTo = num(qBase + int64(25*time.Hour)) },
+		"baseline no run":         func(q *QualityRequest) { q.BaselineFrom = q.TimeFrom },
+		"version":                 func(q *QualityRequest) { q.Rules.Version = 2 },
+		"no checks":               func(q *QualityRequest) { q.Rules.Checks = nil },
+		"duplicate id":            func(q *QualityRequest) { q.Rules.Checks[1].ID = q.Rules.Checks[0].ID },
+		"bad id":                  func(q *QualityRequest) { q.Rules.Checks[0].ID = "a b" },
+		"no entry":                func(q *QualityRequest) { q.Rules.Entry = nil },
+		"type":                    func(q *QualityRequest) { q.Rules.Checks[0].Type = "sql" },
+		"target above max":        func(q *QualityRequest) { q.Rules.Checks[0].TargetMs = fp(900) },
+		"no max":                  func(q *QualityRequest) { q.Rules.Checks[0].MaxMs = nil },
+		"percentile":              func(q *QualityRequest) { q.Rules.Checks[0].Percentile = 101 },
+		"db target":               func(q *QualityRequest) { q.Rules.Checks[1].TargetPer = ip(4) },
+		"db no max":               func(q *QualityRequest) { q.Rules.Checks[1].MaxPerExecution = nil },
+		"forbidden no to":         func(q *QualityRequest) { q.Rules.Checks[2].To = "" },
+		"forbidden from=to":       func(q *QualityRequest) { q.Rules.Checks[2].From = "directory-api" },
+		"negative min":            func(q *QualityRequest) { q.Rules.Checks[0].MinExecutions = -1 },
+		"max_ms on db_calls":      func(q *QualityRequest) { q.Rules.Checks[1].MaxMs = fp(100) },
+		"to on latency":           func(q *QualityRequest) { q.Rules.Checks[0].To = "x" },
+		"percentile on forbidden": func(q *QualityRequest) { q.Rules.Checks[2].Percentile = 50 },
 	} {
 		q := ok()
 		mutate(&q)

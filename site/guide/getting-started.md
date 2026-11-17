@@ -1,5 +1,5 @@
 ---
-description: Install Troubleshooting with Docker, send spans and correlated logs from Go or any OpenTelemetry SDK, and find your way around the five pages.
+description: Install Troubleshooting with Docker, send spans and correlated logs from Go or any OpenTelemetry SDK, and find your way around the six pages.
 ---
 
 # Getting started
@@ -36,7 +36,7 @@ You need Docker and `make`.
 
 ## Navigation
 
-The header has five pages, in this order:
+The header has six pages, in this order:
 
 | Page | Use it to |
 | --- | --- |

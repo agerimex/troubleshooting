@@ -31,7 +31,7 @@ inputs:
     description: Window of the baseline run, ending now (default the run's window).
     default: ''
   ui:
-    description: Origin for evidence links, if it differs from url.
+    description: Origin for evidence links, if it differs from url; `none` for no links (a Troubleshooting started inside the job).
     default: ''
   commit:
     description: The tested commit, recorded in the result (default a pull request's head, else the pushed commit).

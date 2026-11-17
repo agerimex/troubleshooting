@@ -60,8 +60,10 @@ load and outage experiments, and an enforced CI trust model (see "Trust" below).
        advisory: true           # shown, never fails the gate
    ```
 
-   Unknown keys and duplicate keys are errors (a misspelled limit is never
-   silently ignored).
+   Unknown keys and duplicate keys are errors, and so is a field of another
+   check type (e.g. `max_ms` on a `db_calls` check): a misspelled or misplaced
+   limit is never silently ignored. A file holds one YAML document of at most
+   64 KiB; the CLI and the API apply the same limits.
 
 3. Run the tests against your instrumented application, then:
 
@@ -78,7 +80,9 @@ load and outage experiments, and an enforced CI trust model (see "Trust" below).
    request comment: a table of every check, details only for the checks that
    failed or lack data.
    `--url` is the UI origin (which serves `/api`) or the API itself; `--ui`
-   sets the origin of evidence links if it differs. `--from`/`--to` (RFC 3339)
+   sets the origin of evidence links if it differs (`none`: no links, for a
+   Troubleshooting that is gone after the job; the evidence then names its
+   trace and its snapshot in report.html). `--from`/`--to` (RFC 3339)
    replace `--since`; `--baseline-since`/`--baseline-from`/`--baseline-to` give
    the baseline its own window (default: the run's). With Caddy basic auth set
    `TROUBLESHOOTING_BASIC_AUTH=user:password`.
@@ -113,7 +117,7 @@ the gate.
     url: http://localhost:8095          # where your Troubleshooting runs
     run: pr-${{ github.event.number }}-${{ github.run_attempt }}
     rules: quality.yaml
-    baseline: main-latest               # optional
+    baseline: main-118                  # optional: the id of a run you tagged earlier
     since: 1h
     rules-from: base                    # read the rules from the PR's base branch
     fail-on: unresolved                 # or "failed", or "never" (report only)
@@ -144,7 +148,9 @@ Quality page shows it for an opened result file. CLI flags `--commit`,
 
 **Pull request comment.** `troubleshooting-check comment` posts the Markdown
 summary as one comment and updates that same comment on later runs (found by
-a hidden marker per `artifact` name; comments by people are never edited), so
+a hidden marker per `artifact` name and the token's own author: the
+github-actions bot for `GITHUB_TOKEN`, the token's user for a personal access
+token; comments by anyone else are never edited), so
 retries never add a second, contradicting comment. It posts nothing when the
 pull request's head is no longer the tested commit. The job needs
 `pull-requests: write`; without it (a pull request from a fork gets a
@@ -183,6 +189,7 @@ jobs:
       - uses: agerimex/troubleshooting/quality-check@main
         with:
           url: ${{ steps.troubleshooting.outputs.url }}
+          ui: ${{ steps.troubleshooting.outputs.ui }}   # none: no links to a server that is gone after the job
           run: pr-${{ github.run_id }}-${{ github.run_attempt }}
           rules-from: base
 ```
@@ -264,10 +271,14 @@ trace names a parent that was not recorded (lost, sampled out, not
 instrumented) and starts within the entry's duration (from its start on if
 the duration is invalid), so it may belong below the entry. The entry's own
 missing parent (e.g. an uninstrumented gateway above it) doesn't count: it
-hides nothing below the entry. `db_calls` and `forbidden_call` can't pass
-with incomplete executions: they are `insufficient` with reason
+hides nothing below the entry, and neither do the entry's siblings under that
+same missing parent (the gateway's other calls). An execution is also
+incomplete when it runs past the spans read (the window's end plus 5
+minutes): calls at its end were not read; end the window later.
+`db_calls` and `forbidden_call` can't pass with incomplete executions: they are `insufficient` with reason
 `incomplete_executions`, the first incomplete execution as evidence (its
-orphaned span selected) and the value counted so far. A failure stands, since
+orphaned span selected, or the entry for one that runs past the spans read)
+and the value counted so far. A failure stands, since
 the calls it counted were recorded. Latency is the entry's own duration and
 is unaffected.
 
@@ -276,8 +287,11 @@ trace once (`trace-report`, at most 200 spans) and keeps it as `snapshot` in
 the result; `report.html` shows it as a static timeline (start offset,
 duration bar, nesting, the evidence span highlighted). Raw spans expire, so a
 link in an old pull request stops working; the snapshot still shows what the
-execution did. A failed read is noted and never changes a status.
-`--no-snapshot` skips it.
+execution did. A failed read (including a query limit, which returns no
+spans) is noted and never changes a status; up to 4 traces are read at the
+same time. `--no-snapshot` skips it. With `--ui none` (a Troubleshooting
+started inside the job) the evidence has no link, and the Markdown points to
+the HTML report for the snapshot only when one is written.
 
 **Gate.** Any failed blocking check → `failed`; otherwise any blocking check
 with insufficient data → `unresolved`; otherwise `passed`. Advisory checks are

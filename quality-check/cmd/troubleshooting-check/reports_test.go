@@ -37,7 +37,7 @@ func TestReportsEscapeRecordedText(t *testing.T) {
 		`content="default-src 'none'; style-src 'unsafe-inline'"`,
 		"&lt;script&gt;alert(1)&lt;/script&gt;|x",
 		`<a href="http://ui:8095/#/executions?trace=abc&amp;view=timeline">worst &lt;b&gt;</a>`,
-		"bad link (trace <code>def</code>)",
+		"bad link, trace <code>def</code>",
 		"<b>p95</b> (advisory)",
 		"Quality gate: Failed",
 	} {
@@ -45,14 +45,14 @@ func TestReportsEscapeRecordedText(t *testing.T) {
 			t.Errorf("html is missing %q", want)
 		}
 	}
-	m := markdownReport(ev)
+	m := markdownReport(ev, "report.html")
 	for _, want := range []string{
 		"### ❌ Quality gate: Failed",
 		"Run `pr'42` against baseline `main`, 2 checks.",
 		"| | Check | Value | Limit | Baseline | Executions |",
 		`| ❌ | **db**<br>api / &lt;script&gt;alert(1)&lt;/script&gt;\|x | 21 | 3 | 2 | 200 |`,
 		"| ⚠️ | **p95 (advisory)**<br> /  | - | - |  | 0 |",
-		"- Evidence: bad link (trace `def`)",
+		"- Evidence: bad link, trace `def`",
 		"- &lt;img src=x onerror=alert(1)&gt;",
 		"- Evidence: [worst &lt;b&gt;](http://ui:8095/#/executions?trace=abc&view=timeline)",
 		`**db** FAIL: up to 21 \| calls`,
@@ -80,7 +80,20 @@ func TestReportFilesWritten(t *testing.T) {
 }
 
 func TestMarkdownNeverLinksScripts(t *testing.T) {
-	if m := markdownReport(hostileEvaluation()); strings.Contains(m, "javascript:") {
+	if m := markdownReport(hostileEvaluation(), "report.html"); strings.Contains(m, "javascript:") {
 		t.Errorf("markdown links a script:\n%s", m)
+	}
+}
+
+func TestWindowText(t *testing.T) {
+	cases := map[[2]string]string{
+		{"1794915505760540711", "1794917305760540711"}: "2026-11-17 11:38:25 to 12:08:25 UTC",
+		{"1794915505760540711", "1795001905760540711"}: "2026-11-17 11:38:25 to 2026-11-18 11:38:25 UTC",
+		{"x", "1"}: "[x, 1)",
+	}
+	for in, want := range cases {
+		if got := windowText(in[0], in[1]); got != want {
+			t.Errorf("windowText(%q, %q) = %q, want %q", in[0], in[1], got, want)
+		}
 	}
 }

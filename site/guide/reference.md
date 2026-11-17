@@ -14,6 +14,8 @@ All configuration is environment variables; the defaults match `docker-compose.y
 | `LISTEN_ADDR` | receiver, API | `:50055`, `:8094` |
 | `OTLP_LISTEN_ADDR` | receiver (OTLP/gRPC) | `:4317` |
 | `TROUBLESHOOTING_TOKEN` | receiver, log-sender | empty = no token check |
+| `TROUBLESHOOTING_RUN` | API: tags its own spans with `troubleshooting.run` (for checking the API itself with the quality gate) | empty = untagged |
+| `CORS_ALLOWED_ORIGINS` | API: browser origins allowed to call it directly | `http://localhost:5173,http://127.0.0.1:5173` (Vite dev server) |
 | `UI_AUTH`, `UI_USER`, `UI_PASSWORD_HASH` | UI (Caddy basic auth) | `off` |
 | `QUERY_TIMEOUT` | API, per query | `10s` |
 | `QUERY_MAX_ROWS_TO_READ` | API, per query | `50000000` |
@@ -49,3 +51,5 @@ All configuration is environment variables; the defaults match `docker-compose.y
 | Population | Service + window + optional dimensions, the unit statistics are computed for |
 | Bucket | One UTC hour of statistics; provisional until the allowed lateness has passed, then final |
 | Revision | A stored version of a comparison, statistics bucket or rule set |
+| Run | The spans of one test run, tagged with one `troubleshooting.run` id; the quality gate checks a run against `quality.yaml` |
+| Gate | The quality gate's verdict for a run: failed, unresolved (not enough data) or passed |

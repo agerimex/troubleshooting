@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Report files: Markdown for a CI job summary or a pull request comment, and
@@ -67,7 +69,13 @@ func limitText(c CheckResult) string {
 	return s
 }
 
-func markdownReport(ev Evaluation) string {
+// mdURL escapes the characters that would end a Markdown link target.
+var mdURL = strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E")
+
+// markdownReport is the summary for a job page or a pull request comment;
+// htmlName names the HTML report written next to it ("" if none), where
+// evidence without a link points for its snapshot.
+func markdownReport(ev Evaluation, htmlName string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "### %s Quality gate: %s\n\n", titleOf(gateIcon, ev.Gate), titleOf(gateTitle, ev.Gate))
 	fmt.Fprintf(&b, "Run `%s`", strings.ReplaceAll(ev.Run, "`", "'"))
@@ -80,7 +88,7 @@ func markdownReport(ev Evaluation) string {
 		fmt.Fprintf(&b, " %s.", mdText(s))
 	}
 	if ev.Source != nil && webLink(ev.Source.CIRun) {
-		fmt.Fprintf(&b, " [CI run](%s)", strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E").Replace(ev.Source.CIRun))
+		fmt.Fprintf(&b, " [CI run](%s)", mdURL.Replace(ev.Source.CIRun))
 	}
 	b.WriteString("\n\n")
 	if hasBaseline {
@@ -111,9 +119,9 @@ func markdownReport(ev Evaluation) string {
 		}
 		for _, e := range c.Evidence {
 			if webLink(e.Link) {
-				fmt.Fprintf(&b, "- Evidence: [%s](%s)\n", mdText(e.Note), strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E").Replace(e.Link))
+				fmt.Fprintf(&b, "- Evidence: [%s](%s)\n", mdText(e.Note), mdURL.Replace(e.Link))
 			} else {
-				fmt.Fprintf(&b, "- Evidence: %s (trace `%s`)\n", mdText(e.Note), e.TraceID)
+				fmt.Fprintf(&b, "- Evidence: %s, trace `%s`%s\n", mdText(e.Note), e.TraceID, snapshotNote(e.Snapshot, htmlName))
 			}
 		}
 	}
@@ -126,7 +134,7 @@ const htmlStyle = `body{font:14px/1.5 system-ui,sans-serif;margin:24px;color:#1b
 h1{font-size:22px;margin:0 0 4px}table{border-collapse:collapse;margin:16px 0;width:100%}
 th,td{border:1px solid #d5dccf;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f3f6ef}
 .pass{color:#2f6b12}.fail{color:#a1260d;font-weight:600}.insufficient{color:#8a5a00;font-weight:600}
-.meta{color:#5a6553;font-size:12px}code{font-size:12px}li{margin:2px 0}
+.meta{color:#5a6553;font-size:12px}code{font-size:12px}li{margin:2px 0}td.chk{min-width:170px}table.res>tbody>tr>td:not(.chk):not(:last-child){white-space:nowrap}
 details.snap{margin:6px 0 10px}details.snap summary{cursor:pointer;color:#3f6b12}
 table.snap{margin:6px 0;font-size:12px}table.snap td{padding:3px 6px;white-space:nowrap}table.snap tr.hl td{background:#fff4d6}
 table.snap td.bar,table.snap th.bar{width:40%;min-width:120px}td.bar i{display:block;height:8px;background:#7aa45a;border-radius:2px}`
@@ -140,9 +148,9 @@ func htmlReport(ev Evaluation) string {
 	fmt.Fprintf(&b, "<title>Quality gate: %s</title><style>%s</style></head><body>", e(titleOf(gateTitle, ev.Gate)), htmlStyle)
 	cls := map[string]string{"passed": "pass", "failed": "fail", "unresolved": "insufficient"}[ev.Gate]
 	fmt.Fprintf(&b, `<h1 class="%s">Quality gate: %s</h1>`, cls, e(titleOf(gateTitle, ev.Gate)))
-	fmt.Fprintf(&b, `<p class="meta">Run <code>%s</code> [%s, %s)`, e(ev.Run), e(ev.TimeFrom), e(ev.TimeTo))
+	fmt.Fprintf(&b, `<p class="meta">Run <code>%s</code>, %s`, e(ev.Run), e(windowText(ev.TimeFrom, ev.TimeTo)))
 	if ev.Baseline != "" {
-		fmt.Fprintf(&b, ` · baseline <code>%s</code> [%s, %s)`, e(ev.Baseline), e(ev.BaselineFrom), e(ev.BaselineTo))
+		fmt.Fprintf(&b, ` · baseline <code>%s</code>, %s`, e(ev.Baseline), e(windowText(ev.BaselineFrom, ev.BaselineTo)))
 	}
 	fmt.Fprintf(&b, ` · %s · evaluated %s`, e(ev.Contract), e(ev.EvaluatedAt))
 	if s := sourceText(ev.Source); s != "" {
@@ -152,7 +160,7 @@ func htmlReport(ev Evaluation) string {
 		fmt.Fprintf(&b, ` · <a href="%s">CI run</a>`, e(ev.Source.CIRun))
 	}
 	b.WriteString(`</p>`)
-	b.WriteString(`<table><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>`)
+	b.WriteString(`<table class="res"><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>`)
 	if ev.Baseline != "" {
 		b.WriteString(`<th>Baseline</th>`)
 	}
@@ -162,7 +170,7 @@ func htmlReport(ev Evaluation) string {
 		if c.Advisory {
 			adv = " (advisory)"
 		}
-		fmt.Fprintf(&b, `<tr><td class="%s">%s</td><td><b>%s</b>%s<br><span class="meta">%s</span></td><td>%s</td><td>%s</td>`,
+		fmt.Fprintf(&b, `<tr><td class="%s">%s</td><td class="chk"><b>%s</b>%s<br><span class="meta">%s</span></td><td>%s</td><td>%s</td>`,
 			e(c.Status), e(titleOf(statusTitle, c.Status)), e(c.ID), adv, e(entryText(c.Entry)), e(valueText(c)), e(limitText(c)))
 		if ev.Baseline != "" {
 			fmt.Fprintf(&b, `<td>%s</td>`, e(baselineText(c)))
@@ -177,7 +185,7 @@ func htmlReport(ev Evaluation) string {
 				if webLink(ev.Link) {
 					fmt.Fprintf(&b, `<li>Evidence: <a href="%s">%s</a>%s</li>`, e(ev.Link), e(ev.Note), snapshotHTML(ev.Snapshot, ev.SpanID))
 				} else {
-					fmt.Fprintf(&b, `<li>Evidence: %s (trace <code>%s</code>)%s</li>`, e(ev.Note), e(ev.TraceID), snapshotHTML(ev.Snapshot, ev.SpanID))
+					fmt.Fprintf(&b, `<li>Evidence: %s, trace <code>%s</code>%s</li>`, e(ev.Note), e(ev.TraceID), snapshotHTML(ev.Snapshot, ev.SpanID))
 				}
 			}
 			b.WriteString(`</ul>`)
@@ -225,4 +233,30 @@ func short(s string) string {
 		return s[:12]
 	}
 	return s
+}
+
+// windowText shows a [from, to) window of Unix nanoseconds in UTC, e.g.
+// "2026-11-17 12:05:05 to 12:08:25 UTC"; values that aren't nanoseconds are
+// shown as they are.
+func windowText(from, to string) string {
+	f, err1 := strconv.ParseInt(from, 10, 64)
+	t, err2 := strconv.ParseInt(to, 10, 64)
+	if err1 != nil || err2 != nil {
+		return "[" + from + ", " + to + ")"
+	}
+	ft, tt := time.Unix(0, f).UTC(), time.Unix(0, t).UTC()
+	end := tt.Format("2006-01-02 15:04:05")
+	if ft.Format("2006-01-02") == tt.Format("2006-01-02") {
+		end = tt.Format("15:04:05")
+	}
+	return ft.Format("2006-01-02 15:04:05") + " to " + end + " UTC"
+}
+
+// snapshotNote points an evidence without a link to its snapshot in the HTML
+// report, if one is written and the snapshot has spans.
+func snapshotNote(s *Snapshot, htmlName string) string {
+	if s == nil || len(s.Spans) == 0 || htmlName == "" {
+		return ""
+	}
+	return "; its spans are in " + htmlName
 }

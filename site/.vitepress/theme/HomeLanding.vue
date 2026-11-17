@@ -323,10 +323,11 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
             <li><b>Latency limits</b> p95 (or any percentile) of an operation within a budget.</li>
             <li><b>Call budgets</b> at most N database calls in every execution, not on average.</li>
             <li><b>Forbidden calls</b> this operation must not call that service.</li>
-            <li><b>Not enough data is not a pass</b> too few executions or expired spans leave the gate unresolved.</li>
+            <li><b>Not enough data is not a pass</b> too few executions, incomplete executions or expired spans leave the gate unresolved.</li>
           </ul>
           <div class="start-links">
             <a class="text-link" :href="link('/guide/quality')">How the quality gate works <span aria-hidden="true">→</span></a>
+            <a class="text-link" :href="link('/articles/catch-n-plus-one-in-a-pull-request')">Follow a failing pull request <span aria-hidden="true">→</span></a>
             <a class="text-link next-cta" :href="issueUrl">Bring a real regression <span class="external-arrow" aria-hidden="true"></span></a>
           </div>
         </div>
@@ -360,7 +361,7 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
       <div class="container qg-steps">
         <div class="qg-step">
           <h3><span>1</span> Tag the test run</h3>
-          <p>One resource attribute on the service under test. Downstream services join through their recorded parents.</p>
+          <p>One resource attribute on the service under test. Downstream services join through their recorded parents. Use a new id for every CI attempt.</p>
           <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="Environment variable"><code>OTEL_RESOURCE_ATTRIBUTES=\
   troubleshooting.run=pr-42-1</code></pre></div>
         </div>
@@ -381,12 +382,13 @@ checks:
         </div>
         <div class="qg-step">
           <h3><span>3</span> Gate the pull request</h3>
-          <p>The GitHub Action writes the summary to the job page, uploads HTML and JSON reports, then fails the step.</p>
+          <p>The limits come from the base branch, so a pull request can’t loosen its own gate. The Action posts one comment on the pull request, updated on every run, uploads HTML and JSON reports, then fails the step.</p>
           <div class="terminal card-dark"><pre v-pre class="pre-scroll" tabindex="0" aria-label="GitHub Actions step"><code>- uses: agerimex/troubleshooting/quality-check@main
   with:
     url: http://localhost:8095
     rules: quality.yaml
-    run: pr-${{ github.event.number }}-1
+    rules-from: base
+    run: pr-42-1     # the id from step 1
     fail-on: unresolved</code></pre></div>
         </div>
       </div>
@@ -394,7 +396,8 @@ checks:
       <div class="section container split qg-evidence">
         <div>
           <h3>Every failure opens its execution.</h3>
-          <p>The worst execution behind <code>db-calls</code> opens in Timeline &amp; Sequence: twenty <code>permission_lookup</code> calls where the baseline makes one. <b>Back to Quality</b> returns to the result. This repository’s own CI checks its API this way: ClickHouse queries per request, from the spans of its integration tests.</p>
+          <p>The worst execution behind <code>db-calls</code> opens in Timeline &amp; Sequence: twenty <code>permission_lookup</code> calls where the baseline makes one. <b>Back to Quality</b> returns to the result. The HTML report keeps a snapshot of each evidence execution, so it still shows what happened after the spans have expired.</p>
+          <p>No Troubleshooting server yet? <code>quality-check/stack</code> starts one inside the CI job. This repository’s CI runs <a :href="repo + '/tree/main/examples/quality-gate'">an example service</a> through it on every push: as written it passes with 2 database calls per request, and a planted change that reads prices one by one and calls <code>legacy-pricing</code> must fail. The API of Troubleshooting itself is checked the same way: ClickHouse queries per request, from the spans of its integration tests.</p>
           <a class="text-link" :href="shot('quality-evidence.webp')" @click="openShot($event, shot('quality-evidence.webp'), 'Evidence of db-calls in the timeline')">Full screenshot <span class="external-arrow" aria-hidden="true"></span></a>
         </div>
         <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable evidence screenshot">
@@ -433,7 +436,7 @@ checks:
         <details><summary>Where does my telemetry go?</summary><p>The stack runs on your infrastructure. You operate the receiver and its ClickHouse storage. Review receiver authentication and retention before using it outside a development environment.</p></details>
         <details><summary>What instrumentation do I need?</summary><p>OpenTelemetry spans from any SDK or Collector over OTLP/gRPC, or the small Go library <code>log-sender</code> for spans plus logs that carry their trace and span. <a :href="link('/guide/getting-started')">Getting started</a> shows both.</p></details>
         <details><summary>Does the diagram show my entire architecture?</summary><p>It shows recorded service interactions for observed executions. Missing instrumentation, sampling and unexecuted paths limit what can be inferred. Execution shapes group what was observed; they are not a complete static dependency graph.</p></details>
-        <details><summary>What does the quality gate need?</summary><p>Spans of your test run tagged with the attribute <code>troubleshooting.run</code> (one environment variable for an OpenTelemetry SDK), a Troubleshooting the CI job can reach, and a <code>quality.yaml</code> in your repository. Database calls are counted from client spans with <code>db.system</code>; SQL text and logs are never parsed. <a :href="link('/guide/quality')">The handbook page</a> has the details.</p></details>
+        <details><summary>What does the quality gate need?</summary><p>Spans of your test run tagged with the attribute <code>troubleshooting.run</code> (one environment variable for an OpenTelemetry SDK), a <code>quality.yaml</code> in your repository, and a Troubleshooting the CI job can reach: your own, or one started inside the job with <code>quality-check/stack</code>. Database calls are counted from client spans with <code>db.system</code>; SQL text and logs are never parsed. <a :href="link('/guide/quality')">The handbook page</a> has the details.</p></details>
         <details><summary>Is a pass a guarantee?</summary><p>No. A pass describes the executions of this run: a forbidden call that was not observed is reported as “not observed in this run”. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged.</p></details>
       </div>
     </section>
@@ -692,6 +695,7 @@ h3 { font-size: 26px; font-weight: 560; line-height: 1.2; letter-spacing: -.03em
 .qg-evidence { padding-block: 56px clamp(62px, 8vw, 108px); align-items: start; }
 .qg-evidence > div:first-child { padding-top: 40px; }
 .qg-evidence .screenshot-frame { max-height: 560px; }
+.qg-evidence p a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 
 /* Terminal cards */
 .terminal { min-width: 0; background: #131a12; border: 1px solid #44513d; border-radius: 8px; overflow: hidden; }

@@ -24,6 +24,9 @@ outputs:
   url:
     description: API URL, for the quality gate's `url` input.
     value: ${{ steps.start.outputs.url }}
+  ui:
+    description: For the quality gate's `ui` input. Always `none` (no evidence links), because this Troubleshooting has no UI and is gone after the job; report.html keeps a snapshot of each evidence execution.
+    value: ${{ 'none' }}
   otlp-endpoint:
     description: OTLP/gRPC endpoint, for OTEL_EXPORTER_OTLP_ENDPOINT (plain text, so also set OTEL_EXPORTER_OTLP_INSECURE=true).
     value: ${{ steps.start.outputs.otlp-endpoint }}
