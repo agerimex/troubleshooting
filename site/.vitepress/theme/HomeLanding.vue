@@ -86,6 +86,16 @@ const tabs: Tab[] = [
     handbook: '/guide/releases', scroll: true
   },
   {
+    id: 'quality', label: 'Quality gate', title: 'Check a test run against your rules.',
+    copy: [
+      'Paste the rules from your repository, name the test run and a baseline. Every check shows its value, limit, advisory target and the baseline.',
+      'Each failure opens the execution behind it. A CI result file opens the same way.'
+    ],
+    image: 'quality.webp', width: 2160, height: 2594, caption: 'Quality',
+    alt: 'Quality page: rules, run and baseline, a failed gate with three failing checks and their evidence links.',
+    handbook: '/guide/quality', scroll: true
+  },
+  {
     id: 'rules', label: 'Detection rules', title: 'Decide what deserves attention.',
     copy: [
       'Set thresholds for affected calls, slow operations and p95 release regressions. Every save is a revision.',
@@ -185,7 +195,7 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
           <a class="button button-primary" href="#quick-start">Run it locally <span aria-hidden="true">→</span></a>
           <a class="text-link" :href="link('/guide/getting-started')">Read the handbook</a>
         </div>
-        <p class="next-note">Next: check a pull request against your latency and architecture rules, with the execution behind every failure. <a href="#next">What’s planned →</a></p>
+        <p class="next-note">New: check every pull request’s test run against latency and call rules kept in your repository, with the execution behind every failure. <a href="#quality-gate">See the quality gate →</a></p>
         <p class="hero-facts">Self-hosted <span aria-hidden="true">·</span> MIT licensed <span aria-hidden="true">·</span> Go &amp; OpenTelemetry <span aria-hidden="true">·</span> Early-stage project</p>
       </div>
 
@@ -228,7 +238,7 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
     <section class="section container" id="product" aria-labelledby="product-title">
       <div class="section-heading">
         <h2 id="product-title">Follow a request<br><em>across services.</em></h2>
-        <p>Investigate one execution, find recurring problems, compare releases. Screenshots come from the working application with fixture data.</p>
+        <p>Investigate one execution, find recurring problems, compare releases, check test runs. Screenshots come from the working application with fixture data.</p>
       </div>
       <div class="product-tabs" role="tablist" aria-label="Product views">
         <button v-for="(tab, i) in tabs" :key="tab.id" ref="tabButtons" type="button" role="tab"
@@ -303,29 +313,94 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
       </div>
     </section>
 
-    <section class="next-band" id="next" aria-labelledby="next-title">
+    <section class="next-band" id="quality-gate" aria-labelledby="qg-title">
       <div class="section container split">
         <div>
-          <p class="eyebrow"><span class="outline-dot"></span> NEXT · PLANNED</p>
-          <h2 id="next-title">Catch what a change added.<br><em>Before it ships.</em></h2>
-          <p>A change, written by a person or a coding agent, can pass every functional test and still add twenty database calls per request. Next, Troubleshooting will check a test run against rules kept in your repository and link every failure to the execution behind it.</p>
+          <p class="eyebrow"><span class="status-dot"></span> NEW · QUALITY GATE</p>
+          <h2 id="qg-title">Catch what a change added.<br><em>Before it ships.</em></h2>
+          <p>A change, written by a person or a coding agent, can pass every functional test and still add twenty database calls per request. Troubleshooting checks the test run against rules kept in your repository and links every failure to the execution behind it.</p>
           <ul class="next-list">
-            <li><b>Latency limits</b> p95 of an operation within a budget.</li>
-            <li><b>Call budgets</b> at most N database calls per execution.</li>
-            <li><b>Forbidden calls</b> service A must not call service B.</li>
+            <li><b>Latency limits</b> p95 (or any percentile) of an operation within a budget.</li>
+            <li><b>Call budgets</b> at most N database calls in every execution, not on average.</li>
+            <li><b>Forbidden calls</b> this operation must not call that service.</li>
+            <li><b>Not enough data is not a pass</b> too few executions or expired spans leave the gate unresolved.</li>
           </ul>
-          <a class="text-link next-cta" :href="issueUrl">Bring a real regression. Help shape the first checks <span class="external-arrow" aria-hidden="true"></span></a>
+          <div class="start-links">
+            <a class="text-link" :href="link('/guide/quality')">How the quality gate works <span aria-hidden="true">→</span></a>
+            <a class="text-link next-cta" :href="issueUrl">Bring a real regression <span class="external-arrow" aria-hidden="true"></span></a>
+          </div>
         </div>
         <div class="terminal card-dark">
-          <div class="code-header"><span>Planned output</span><span class="example-label">Illustrative</span></div>
-          <pre class="pre-scroll" tabindex="0" aria-label="Planned command output"><code><span class="code-dim">$ troubleshooting-check --rules quality.yaml --run pr-42</span>
-<span class="code-fail">FAIL</span>  start_session p95        910 ms   limit 800 ms
-<span class="code-fail">FAIL</span>  db calls / execution     21       limit 3
-      ↳ permission_lookup × 20       trace 4bf92f35…
-<span class="code-fail">FAIL</span>  forbidden call   recording-api → directory-api
-<span class="code-dim">3 checks failed · exit 1</span></code></pre>
-          <p class="code-note">Not in the application yet. A missing measurement is reported as “not enough data”, never as a pass.</p>
+          <div class="code-header"><span>troubleshooting-check</span><span class="example-label">Real output · fixture run</span></div>
+          <pre class="pre-scroll" tabindex="0" aria-label="Command output of troubleshooting-check"><code><span class="code-dim">$ troubleshooting-check --rules quality.yaml \
+    --run fx…-qg-candidate --baseline fx…-qg-baseline</span>
+<span class="code-fail">Quality gate: FAILED</span>
+
+<span class="code-fail">FAIL</span>    startup-p95  qg-api / start_session (server)
+        p95 910 ms, limit 800 ms, 200 executions
+        baseline: 420 ms (200 executions)
+        evidence: slowest execution: 1010 ms
+
+<span class="code-fail">FAIL</span>    db-calls  qg-api / start_session (server)
+        up to 21 database calls per execution, limit 3,
+        200 executions, 200 over the limit
+        baseline: 2 (200 executions)
+        permission_lookup × 20
+        insert_session × 1
+        evidence: <span class="code-link">…/#/executions?trace=9fc2b374…&amp;view=timeline</span>
+
+<span class="code-fail">FAIL</span>    no-directory  qg-api / start_session (server)
+        call to qg-directory in 200 of 200 executions
+        baseline: 0 (200 executions)
+<span class="code-dim">exit 1</span></code></pre>
+          <p class="code-note">Exit 0 passed, 1 failed, 2 not enough data, 3 error. Service names and links shortened.</p>
         </div>
+      </div>
+
+      <div class="container qg-steps">
+        <div class="qg-step">
+          <h3><span>1</span> Tag the test run</h3>
+          <p>One resource attribute on the service under test. Downstream services join through their recorded parents.</p>
+          <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="Environment variable"><code>OTEL_RESOURCE_ATTRIBUTES=\
+  troubleshooting.run=pr-42-1</code></pre></div>
+        </div>
+        <div class="qg-step">
+          <h3><span>2</span> Keep the rules in the repository</h3>
+          <p>A strict <code>quality.yaml</code>: a misspelled limit is an error, never silently ignored.</p>
+          <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="quality.yaml"><code>version: 1
+entry: {service: recording-api,
+        operation: start_session}
+checks:
+  - {id: startup-p95, type: latency,
+     max_ms: 800, target_ms: 500}
+  - {id: db-calls, type: db_calls,
+     max_per_execution: 3}
+  - {id: no-directory,
+     type: forbidden_call,
+     to: directory-api}</code></pre></div>
+        </div>
+        <div class="qg-step">
+          <h3><span>3</span> Gate the pull request</h3>
+          <p>The GitHub Action writes the summary to the job page, uploads HTML and JSON reports, then fails the step.</p>
+          <div class="terminal card-dark"><pre v-pre class="pre-scroll" tabindex="0" aria-label="GitHub Actions step"><code>- uses: agerimex/troubleshooting/quality-check@main
+  with:
+    url: http://localhost:8095
+    rules: quality.yaml
+    run: pr-${{ github.event.number }}-1
+    fail-on: unresolved</code></pre></div>
+        </div>
+      </div>
+
+      <div class="section container split qg-evidence">
+        <div>
+          <h3>Every failure opens its execution.</h3>
+          <p>The worst execution behind <code>db-calls</code> opens in Timeline &amp; Sequence: twenty <code>permission_lookup</code> calls where the baseline makes one. <b>Back to Quality</b> returns to the result. This repository’s own CI checks its API this way: ClickHouse queries per request, from the spans of its integration tests.</p>
+          <a class="text-link" :href="shot('quality-evidence.webp')" @click="openShot($event, shot('quality-evidence.webp'), 'Evidence of db-calls in the timeline')">Full screenshot <span class="external-arrow" aria-hidden="true"></span></a>
+        </div>
+        <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable evidence screenshot">
+          <figcaption>Evidence of db-calls <span>Fixture data</span></figcaption>
+          <img :src="shot('quality-evidence.webp')" width="2160" height="2300" loading="lazy" alt="Timeline of the execution with the most database calls: start_session with twenty permission_lookup spans, opened from the quality check db-calls.">
+        </figure>
       </div>
     </section>
 
@@ -358,7 +433,8 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
         <details><summary>Where does my telemetry go?</summary><p>The stack runs on your infrastructure. You operate the receiver and its ClickHouse storage. Review receiver authentication and retention before using it outside a development environment.</p></details>
         <details><summary>What instrumentation do I need?</summary><p>OpenTelemetry spans from any SDK or Collector over OTLP/gRPC, or the small Go library <code>log-sender</code> for spans plus logs that carry their trace and span. <a :href="link('/guide/getting-started')">Getting started</a> shows both.</p></details>
         <details><summary>Does the diagram show my entire architecture?</summary><p>It shows recorded service interactions for observed executions. Missing instrumentation, sampling and unexecuted paths limit what can be inferred. Execution shapes group what was observed; they are not a complete static dependency graph.</p></details>
-        <details><summary>What is planned next?</summary><p>Rule checks on test runs: latency limits, call budgets and forbidden calls, each failure linked to its trace, usable from CI. They are not in the application yet; everything else on this page is.</p></details>
+        <details><summary>What does the quality gate need?</summary><p>Spans of your test run tagged with the attribute <code>troubleshooting.run</code> (one environment variable for an OpenTelemetry SDK), a Troubleshooting the CI job can reach, and a <code>quality.yaml</code> in your repository. Database calls are counted from client spans with <code>db.system</code>; SQL text and logs are never parsed. <a :href="link('/guide/quality')">The handbook page</a> has the details.</p></details>
+        <details><summary>Is a pass a guarantee?</summary><p>No. A pass describes the executions of this run: a forbidden call that was not observed is reported as “not observed in this run”. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged.</p></details>
       </div>
     </section>
 
@@ -606,6 +682,16 @@ h3 { font-size: 26px; font-weight: 560; line-height: 1.2; letter-spacing: -.03em
 .next-cta { color: var(--accent); }
 .code-dim { color: #8d9a86; }
 .code-fail { color: #edbd7d; font-weight: 600; }
+.code-link { color: #a9d27a; }
+.qg-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: calc(-1 * clamp(20px, 3vw, 44px)); }
+.qg-step h3, .qg-evidence h3 { font-size: 17px; font-weight: 650; line-height: 1.35; color: var(--text); }
+.qg-step h3 span { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 50%; background: var(--accent); color: var(--background); font-size: 13px; }
+.qg-step > p { margin: 8px 0 14px; color: var(--muted); font-size: 14px; min-height: 4.8em; }
+.qg-step .terminal pre { font-size: 12.5px; }
+.qg-evidence h3 { font-size: 22px; }
+.qg-evidence { padding-block: 56px clamp(62px, 8vw, 108px); align-items: start; }
+.qg-evidence > div:first-child { padding-top: 40px; }
+.qg-evidence .screenshot-frame { max-height: 560px; }
 
 /* Terminal cards */
 .terminal { min-width: 0; background: #131a12; border: 1px solid #44513d; border-radius: 8px; overflow: hidden; }
@@ -653,6 +739,8 @@ code { font: inherit; }
   .window-bar, .release-picker, .demo-controls { padding-inline: 14px; }
   .comparison-result, .metric-grid, .chart-heading { margin-inline: 14px; }
   .chart { margin-right: 14px; }
+  .qg-steps { grid-template-columns: minmax(0, 1fr); }
+  .qg-step > p { min-height: 0; }
 }
 @media (max-width: 790px) {
   .container { width: calc(100% - 32px); }

@@ -10,7 +10,7 @@ export default defineConfig({
   lang: 'en-US',
   title: name,
   description:
-    'Open-source trace and log investigation for Go and OpenTelemetry services: one execution as a timeline or sequence, recurring problems, and release-to-release comparison of p95 latency and error groups.',
+    'Open-source trace and log investigation for Go and OpenTelemetry services: one execution as a timeline or sequence, recurring problems, release-to-release comparison of p95 latency and error groups, and a quality gate that checks test runs in CI.',
   // Served from https://agerimex.github.io/troubleshooting/
   base: '/troubleshooting/',
   cleanUrls: true,
@@ -38,6 +38,7 @@ export default defineConfig({
             { text: 'Timeline & Sequence', link: '/guide/timeline-sequence' },
             { text: 'Problems', link: '/guide/problems' },
             { text: 'Releases', link: '/guide/releases' },
+            { text: 'Quality gate', link: '/guide/quality' },
             { text: 'Settings', link: '/guide/settings' },
             { text: 'Reference', link: '/guide/reference' }
           ]
