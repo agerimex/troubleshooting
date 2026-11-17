@@ -6,7 +6,7 @@
 // Usage:
 //
 //	troubleshooting-check --url http://localhost:8095 --rules quality.yaml \
-//	    --run pr-42-1 [--baseline main-118] [--since 1h] [--json result.json]
+//	    --run pr-42-1 [--baseline main-118] [--since 1h] [--json result.json] [--html report.html] [--markdown summary.md]
 //
 // The run is the value of the troubleshooting.run attribute on the spans of
 // the test run (e.g. OTEL_RESOURCE_ATTRIBUTES=troubleshooting.run=pr-42-1).
@@ -128,11 +128,11 @@ type Evaluation struct {
 }
 
 type options struct {
-	url, ui, rules, run, baseline, jsonPath string
-	from, to, baselineFrom, baselineTo      string
-	since, baselineSince                    time.Duration
-	timeout                                 time.Duration
-	basicAuth                               string
+	url, ui, rules, run, baseline, jsonPath, htmlPath, mdPath string
+	from, to, baselineFrom, baselineTo                        string
+	since, baselineSince                                      time.Duration
+	timeout                                                   time.Duration
+	basicAuth                                                 string
 }
 
 func main() {
@@ -155,6 +155,8 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs.StringVar(&o.baselineFrom, "baseline-from", "", "baseline window start, RFC 3339")
 	fs.StringVar(&o.baselineTo, "baseline-to", "", "baseline window end, RFC 3339 (default now)")
 	fs.StringVar(&o.jsonPath, "json", "", "write the evaluation as JSON to this file")
+	fs.StringVar(&o.htmlPath, "html", "", "write a self-contained HTML report to this file")
+	fs.StringVar(&o.mdPath, "markdown", "", "write a Markdown summary (for a CI job summary or a PR comment) to this file")
 	fs.DurationVar(&o.timeout, "timeout", 2*time.Minute, "request timeout")
 	o.basicAuth = os.Getenv("TROUBLESHOOTING_BASIC_AUTH")
 	if err := fs.Parse(args); err != nil {
@@ -174,9 +176,14 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 		return exitError
 	}
 	addLinks(&ev, o.ui)
-	if o.jsonPath != "" {
-		b, _ := json.MarshalIndent(ev, "", "  ")
-		if err := os.WriteFile(o.jsonPath, append(b, '\n'), 0o644); err != nil {
+	b, _ := json.MarshalIndent(ev, "", "  ")
+	for _, f := range []struct{ path, body string }{
+		{o.jsonPath, string(b) + "\n"}, {o.htmlPath, htmlReport(ev)}, {o.mdPath, markdownReport(ev)},
+	} {
+		if f.path == "" {
+			continue
+		}
+		if err := os.WriteFile(f.path, []byte(f.body), 0o644); err != nil {
 			fmt.Fprintln(stderr, "error:", err)
 			return exitError
 		}

@@ -1,0 +1,45 @@
+# This repository's own quality gate (docs/quality-gate.md): the API's
+# requests during the regression fixture, tagged with TROUBLESHOOTING_RUN.
+# Limits are the database calls measured on 2026-11-17 plus headroom, so a
+# change that adds a query per row (N+1) fails while normal variation does
+# not. Latency is advisory: CI machines are too noisy for a hard limit.
+version: 1
+entry:
+  service: LogAnalysis
+  operation: /api/v1/trace-report
+  span_kind: server
+checks:
+  # Measured: up to 12 (spans and logs sections, their counts, retries).
+  - id: trace-report-queries
+    type: db_calls
+    max_per_execution: 16
+    target_per_execution: 12
+  - id: trace-report-p95
+    type: latency
+    max_ms: 3000
+    advisory: true
+
+  # Measured: up to 5 (page candidates, canonical rows, child counts).
+  - id: view-spans-queries
+    type: db_calls
+    entry: {service: LogAnalysis, operation: /api/v1/view-spans, span_kind: server}
+    max_per_execution: 8
+    target_per_execution: 5
+
+  # Measured: up to 3.
+  - id: stats-calls-queries
+    type: db_calls
+    entry: {service: LogAnalysis, operation: /api/v1/stats/calls, span_kind: server}
+    max_per_execution: 6
+
+  # Measured: 14.
+  - id: compare-queries
+    type: db_calls
+    entry: {service: LogAnalysis, operation: /api/v1/compare, span_kind: server}
+    max_per_execution: 20
+
+  # Measured: 2 (the run and the baseline).
+  - id: quality-evaluate-queries
+    type: db_calls
+    entry: {service: LogAnalysis, operation: /api/v1/quality/evaluate, span_kind: server}
+    max_per_execution: 3

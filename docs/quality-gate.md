@@ -1,18 +1,18 @@
-# Quality gate (milestone 3, stage 1)
+# Quality gate (milestone 3)
 
 Check one **test run** against rules kept in your repository, and get the
 execution behind every failure. Contract `quality-gate-v1`. Acceptance scope:
 `features/milestone_3/quality_gate.feature`; scenario-to-test map:
 `docs/milestone3-completion.md`.
 
-This is the first, small slice of the direction proposed in
+It is a small, working slice of the direction proposed in
 `spec-16.11/Troubleshooting_Implementation_Spec` (not committed). From that
 spec it keeps: separate pass / fail / not-enough-data states, limits apart
 from advisory targets, a baseline that is shown but never decides, call counts
 per execution (never from shape edges), and "not observed" instead of
 "impossible". It leaves out for now: imported, digest-pinned requirement
-revisions, a run registry and lifecycle, stored evaluations, a Quality page,
-load and outage experiments, and the CI trust model.
+revisions, a run registry and lifecycle, stored evaluations,
+load and outage experiments, and an enforced CI trust model (see "Trust" below).
 
 ## How it works
 
@@ -73,6 +73,10 @@ load and outage experiments, and the CI trust model.
 
    Exit code: **0** passed, **1** failed, **2** unresolved (not enough
    data), **3** error (no usable result: invalid rules, unreachable API, …).
+   `--html report.html` writes a self-contained page (no scripts, recorded
+   text escaped) and `--markdown summary.md` a summary for a CI job or a pull
+   request comment: a table of every check, details only for the checks that
+   failed or lack data.
    `--url` is the UI origin (which serves `/api`) or the API itself; `--ui`
    sets the origin of evidence links if it differs. `--from`/`--to` (RFC 3339)
    replace `--since`; `--baseline-since`/`--baseline-from`/`--baseline-to` give
@@ -94,6 +98,58 @@ FAIL    db-calls  fx…-qg-api / start_session (server)
         evidence: execution with the most database calls: 21
         http://localhost:8095/#/executions?from=…&span=…&to=…&trace=…&view=timeline
 ```
+
+## In GitHub Actions
+
+`quality-check/action.yml` is a composite action: it builds the CLI, checks
+the run, appends the Markdown summary to the job summary, uploads
+`result.json`, `report.html` and `summary.md` as an artifact and then applies
+the gate.
+
+```yaml
+- name: Quality gate
+  uses: agerimex/troubleshooting/quality-check@main   # pin a commit for real use
+  with:
+    url: http://localhost:8095          # where your Troubleshooting runs
+    run: pr-${{ github.event.number }}-${{ github.run_attempt }}
+    rules: quality.yaml
+    baseline: main-latest               # optional
+    since: 1h
+    fail-on: unresolved                 # or "failed", or "never" (report only)
+```
+
+Outputs: `gate` (passed / failed / unresolved / error) and `exit-code`.
+Inputs reach the scripts only as environment variables. `fail-on:
+unresolved` (the default) fails the step when the gate failed or had not
+enough data; an error always fails it.
+
+Trust: the rules are read from the checked-out commit, so a pull request can
+change its own limits; that change is visible in the diff, but the action
+does not prevent it. To keep the limits independent of the candidate, read
+the rules from the base branch (e.g. `git show origin/main:quality.yaml >
+/tmp/quality.yaml`) and pass that file. Don't run untrusted fork code with
+secrets to reach a private Troubleshooting.
+
+**This repository is the first user.** The CI job `integration` runs the test
+stack with `TROUBLESHOOTING_RUN=ci-<run id>-<attempt>`, so the API tags its
+own spans; after the regression fixture the action checks those requests
+against `.github/quality.yaml`: at most 16 ClickHouse queries per
+`trace-report`, 8 per `view-spans`, 6 per `stats/calls`, 20 per `compare`, 3
+per `quality/evaluate` (measured 12, 5, 3, 14, 2) and an advisory p95. A
+change that adds a query per row fails the build with the request behind it.
+
+## The Quality page
+
+The UI's **Quality** page (between Releases and Settings) checks a run
+interactively: paste the rules, name the run and optionally a baseline, pick a
+window (last 15 minutes to 24 hours), **Check run**. The result shows the
+gate, every check with value, limit, target, baseline and executions, the
+details and the evidence; **Open timeline** / **Open sequence** open the
+execution in Timeline & Sequence, and "Back to Quality" returns. **Open a
+result file** shows a CI result (`result.json` of the CLI or the action)
+the same way, with working evidence buttons while its raw spans are retained.
+**Export JSON / HTML** save the result as shown. The rules and run ids are
+remembered in the browser only; evaluations are not stored.
 
 ## Semantics (quality-gate-v1)
 
@@ -152,6 +208,10 @@ pass). The usual query limits apply (`QUERY_TIMEOUT`, …).
  "baseline": "main-118", "baseline_time_from": "<ns>", "baseline_time_to": "<ns>"}
 ```
 
+Instead of `rules`, `rules_yaml` carries the rules file as text (the UI sends
+it so); it is parsed as strictly as the CLI does it: unknown or duplicate keys,
+more than one document or more than 64 KiB are 400.
+
 Invalid rules or windows are 400 with a message naming the check. Otherwise
 200 with `data.Evaluation`: `contract`, `method`, `run`, windows, `gate`,
 `evaluated_at` and per check `id`, `type`, `entry`, `advisory`, `status`,
@@ -172,8 +232,18 @@ gives the same answer.
   the CLI, standard library plus `gopkg.in/yaml.v3`.
 - `fixtures/regression/qg.go`: the reference runs and their literal answers.
 
-## Next (stage 2)
+- `log-ui/src/components/QualityView.vue` with the pure parts in
+  `src/services/quality.ts` (unit tests `quality.spec.ts`, browser tests
+  `e2e/quality.e2e.ts`).
+- `quality-check/action.yml` (the action) and `.github/quality.yaml` (this
+  repository's rules); `TROUBLESHOOTING_RUN` tags the API's own spans
+  (`log-analysis/cmd/rest_api/main.go`).
 
-A Quality page (rules, latest results per run, baseline vs candidate, click
-through to the evidence), a GitHub Action example that posts the summary on a
-PR, this repository's own CI as the first real user, and an HTML report.
+Stage 1 (API, CLI, fixture) and stage 2 (reports, Quality page, action, own
+CI) are recorded in `docs/milestone3-completion.md`.
+
+## Not done (only if asked)
+
+Stored evaluations and a history per run, imported requirement revisions with
+digests, posting a PR comment (the action writes the job summary), load and
+outage experiments, sync-call semantics.

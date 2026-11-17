@@ -385,3 +385,39 @@ func TestQualityQuery(t *testing.T) {
 		}
 	}
 }
+
+const referenceYAML = `version: 1
+entry: {service: recording-api, operation: start_session, span_kind: server}
+checks:
+  - {id: startup-p95, type: latency, max_ms: 800, target_ms: 500}
+  - {id: db-calls, type: db_calls, max_per_execution: 3, target_per_execution: 2}
+  - {id: no-directory, type: forbidden_call, to: directory-api}
+`
+
+// The UI sends the rules file as text; it is read as strictly as the CLI does.
+func TestQualityRulesYAML(t *testing.T) {
+	req := QualityRequest{RulesYAML: referenceYAML, Run: "r", TimeFrom: num(qBase), TimeTo: num(qBase + 1)}
+	if err := req.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if req.RulesYAML != "" || len(req.Rules.Checks) != 3 || *req.Rules.Checks[0].MaxMs != 800 || *req.Rules.Checks[1].TargetPer != 2 ||
+		req.Rules.Checks[2].To != "directory-api" || req.Rules.Checks[2].Entry.SpanKind != "server" {
+		t.Errorf("parsed: %+v", req.Rules)
+	}
+	for name, text := range map[string]string{
+		"unknown key":   strings.Replace(referenceYAML, "target_ms", "targt_ms", 1),
+		"duplicate key": strings.Replace(referenceYAML, "max_ms: 800,", "max_ms: 800, max_ms: 900,", 1),
+		"two documents": referenceYAML + "---\nversion: 1\n",
+		"not yaml":      "version: [1",
+		"too large":     referenceYAML + "#" + strings.Repeat("x", MaxQualityRulesBytes),
+	} {
+		q := QualityRequest{RulesYAML: text, Run: "r", TimeFrom: num(qBase), TimeTo: num(qBase + 1)}
+		if err := q.Validate(); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	both := QualityRequest{RulesYAML: referenceYAML, Rules: referenceRules(), Run: "r", TimeFrom: num(qBase), TimeTo: num(qBase + 1)}
+	if err := both.Validate(); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Errorf("rules and rules_yaml: %v", err)
+	}
+}

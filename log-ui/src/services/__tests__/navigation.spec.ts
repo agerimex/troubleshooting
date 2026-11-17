@@ -25,7 +25,7 @@ function report (spans: Span[], logs: LogRecord[], extra: { spans?: Partial<Repo
 
 describe('navigation', () => {
   it('has the five destinations in the blueprint order, Log Analysis first', () => {
-    expect(PAGES.map((p) => p.label)).toEqual(['Log Analysis', 'Timeline & Sequence', 'Problems', 'Releases', 'Settings'])
+    expect(PAGES.map((p) => p.label)).toEqual(['Log Analysis', 'Timeline & Sequence', 'Problems', 'Releases', 'Quality', 'Settings'])
   })
 
   it('opens Timeline unless a view was chosen or saved', () => {
@@ -66,6 +66,7 @@ describe('navigation', () => {
   it('maps pages and unknown hashes', () => {
     expect(parseRoute('').page).toBe('logs')
     expect(parseRoute('#/releases').page).toBe('releases')
+    expect(parseRoute('#/quality').page).toBe('quality')
     expect(parseRoute('#/architecture').page).toBe('logs')
   })
 

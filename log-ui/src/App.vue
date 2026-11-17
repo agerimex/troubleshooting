@@ -16,6 +16,7 @@
       @open-execution="openExecution" @back="returnToOrigin" @include="include"/>
     <ProblemsView v-if="visited.problems" v-show="page === 'problems'" :rulesRevision="rulesRevision" @open-execution="openExecution" @open-settings="go('settings')"/>
     <ReleasesView v-if="visited.releases" v-show="page === 'releases'" :included="included" @open-report="openFromRelease" @remove-included="removeIncluded"/>
+    <QualityView v-if="visited.quality" v-show="page === 'quality'" @open-execution="openExecution"/>
     <SettingsView v-if="visited.settings" v-show="page === 'settings'" @rules-saved="rulesRevision++"/>
   </main>
 </template>
@@ -27,13 +28,15 @@ import ExecutionsView from './components/ExecutionsView.vue'
 import ProblemsView from './components/problems/ProblemsView.vue'
 import ReleasesView from './components/ReleasesView.vue'
 import SettingsView from './components/SettingsView.vue'
+import QualityView from './components/QualityView.vue'
 import { type IncludedReport } from './services/comparison'
 import { PAGES, investigationHash, parseRoute, type ExecutionTarget, type Page } from './services/navigation'
 import { type Report } from './types/report'
 import { type ReportContext } from './types/stats'
 
-// The five destinations of the product blueprint, in order: Log Analysis
-// (the default), Timeline & Sequence, Problems, Releases, Settings.
+// The destinations of the product blueprint, in order: Log Analysis
+// (the default), Timeline & Sequence, Problems, Releases, Quality (milestone
+// 3), Settings.
 export default defineComponent({
   name: 'TroubleShooting',
   components: {
@@ -41,11 +44,12 @@ export default defineComponent({
     ExecutionsView,
     ProblemsView,
     ReleasesView,
+    QualityView,
     SettingsView
   },
   setup () {
     const page = ref<Page>('logs')
-    const visited = reactive({ problems: false, releases: false, settings: false })
+    const visited = reactive({ problems: false, releases: false, quality: false, settings: false })
     const target = ref<ExecutionTarget | null>(null)
     // A new key per opened execution: a response for an earlier one can never
     // reach the one shown now.
@@ -55,7 +59,7 @@ export default defineComponent({
 
     function show (p: Page) {
       page.value = p
-      if (p === 'problems' || p === 'releases' || p === 'settings') {
+      if (p === 'problems' || p === 'releases' || p === 'quality' || p === 'settings') {
         visited[p] = true
       }
     }

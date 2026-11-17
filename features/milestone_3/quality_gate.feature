@@ -1,4 +1,4 @@
-@milestone3 @stage1
+@milestone3
 Feature: Check a test run against quality rules
   A developer or a coding agent runs the tests of a change with its spans
   tagged troubleshooting.run, then checks that run against rules kept in the
@@ -86,3 +86,50 @@ Feature: Check a test run against quality rules
     And a network error or a non-API answer is never exit 0
     And misspelled or duplicate keys in the rules file are errors
     And --json writes the evaluation with a viewer link for every evidence
+
+  # Stage 2: reports, the Quality page and CI.
+
+  @QG-API-001
+  Scenario: The rules can be sent as the YAML file's text
+    When the request carries rules_yaml instead of rules
+    Then it is evaluated like the parsed rules
+    And unknown or duplicate keys, a second document, more than 64 KiB, or both rules and rules_yaml are a 400
+
+  @QG-OUT-001
+  Scenario: HTML and Markdown reports show the evaluation and never execute recorded text
+    When the CLI writes --html and --markdown
+    Then both show the gate, every check, the baseline and the evidence links
+    And recorded names with markup are shown as text, the HTML has no scripts
+    And only http(s) evidence links become links
+    And the Markdown details only the checks that failed or lack data
+
+  @QG-UI-001
+  Scenario: The Quality page checks a run and opens its evidence
+    When I paste the rules, name the run and a baseline and press Check run
+    Then the rules go to the API as typed, with the selected window
+    And the gate and every check are shown with value, limit, target, baseline and executions
+    And "Open timeline" opens the evidence execution with its span, and Back returns to Quality
+
+  @QG-UI-002
+  Scenario: Invalid rules on the page show the API's message and no result
+
+  @QG-UI-003
+  Scenario: A CI result file opens on the page; other files are refused
+
+  @QG-UI-004
+  Scenario: The rules and run ids stay in this browser only
+
+  @QG-CI-001
+  Scenario: The GitHub Action applies the gate
+    Given the action checked a run
+    Then the job summary has the Markdown report and the artifact has result.json, report.html and summary.md
+    And fail-on unresolved fails the step for failed and unresolved, fail-on failed only for failed, never for neither
+    And an error (exit 3) or an unknown fail-on value always fails it
+    And inputs reach the scripts only as environment variables
+
+  @QG-CI-002
+  Scenario: This repository's CI checks its own API
+    Given the test stack's API tags its spans with TROUBLESHOOTING_RUN
+    When the regression fixture has run
+    Then the database calls per request of trace-report, view-spans, stats/calls, compare and quality/evaluate are within .github/quality.yaml
+    And the build fails with the request behind any check over its limit

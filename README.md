@@ -62,7 +62,19 @@ go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting
 troubleshooting-check --url http://localhost:8095 --rules quality.yaml --run pr-42-1 --baseline main-118
 ```
 
-Rules (`quality-check/quality.example.yaml`): a latency percentile limit for an entry operation, at most N recorded database calls per execution, and services an execution must not call. Each failure names the execution behind it with a link to its timeline or sequence. Exit code 0 passed, 1 failed, 2 not enough data, 3 error. Advisory targets and the baseline are shown but never decide the result; a missing measurement is never a pass.
+Rules (`quality-check/quality.example.yaml`): a latency percentile limit for an entry operation, at most N recorded database calls per execution, and services an execution must not call. Each failure names the execution behind it with a link to its timeline or sequence. Exit code 0 passed, 1 failed, 2 not enough data, 3 error. Advisory targets and the baseline are shown but never decide the result; a missing measurement is never a pass. `--json`, `--html` and `--markdown` write the result, a report page and a summary for CI.
+
+In GitHub Actions:
+
+```yaml
+- uses: agerimex/troubleshooting/quality-check@main   # pin a commit for real use
+  with:
+    url: http://localhost:8095
+    run: pr-${{ github.event.number }}-${{ github.run_attempt }}
+    rules: quality.yaml
+```
+
+The step writes the summary to the job page, uploads the reports and fails when the gate failed or had not enough data. This repository's own CI does the same for its API (`.github/quality.yaml`: database queries per request). The UI's **Quality** page checks a run interactively and opens a CI `result.json` with its evidence.
 
 How to intergate to your golang project
 ------

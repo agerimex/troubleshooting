@@ -55,6 +55,9 @@ services:
       - "127.0.0.1:28094:8094"
     environment:
       TRACE_RECEIVER_ADDR: log-receiver:50055
+      # Tags this API's own spans as one test run for the quality gate
+      # (.github/quality.yaml); empty outside CI.
+      TROUBLESHOOTING_RUN: ${TROUBLESHOOTING_RUN:-}
       QUERY_TIMEOUT: 10s
       QUERY_MAX_ROWS_TO_READ: "50000000"
       QUERY_MAX_MEMORY_BYTES: "1073741824"

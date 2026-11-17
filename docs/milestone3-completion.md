@@ -1,14 +1,14 @@
-# Milestone 3, stage 1 completion record: quality gate
+# Milestone 3 completion record: quality gate
 
 Acceptance scope: `features/milestone_3/quality_gate.feature`; contract and
 user documentation: `docs/quality-gate.md` (`quality-gate-v1`). As for
 milestones 1 and 2 there are no Cucumber step definitions: each scenario is
 checked by the tests named below.
 
-Implementation: branch `feat/quality-review-stage-1`, uncommitted at the time
-of writing (2026-11-17). **Fill in the commit after committing.**
+Implementation: branch `feat/quality-review-stage-1`, committed as `94ef722`
+(2026-11-17).
 
-## What changed
+## Stage 1: what changed
 
 - **log-analysis**: `POST /api/v1/quality/evaluate` (`cmd/rest_api/quality.go`)
   and `internal/data/quality.go` (validation, one bounded canonical span query
@@ -53,8 +53,49 @@ phases, the limited API.
 
 ## Open
 
-- Stage 2: Quality page, GitHub Action example, this repository's CI as a
-  user, HTML report.
-- Not planned unless asked: imported requirement revisions with digests, run
+- Stage 2 is recorded below. Not planned unless asked: imported requirement revisions with digests, run
   registry, stored evaluations, load and outage experiments, sync-call
   semantics.
+
+# Stage 2: reports, Quality page, GitHub Action, own CI
+
+Implementation: branch `feat/quality-review-stage-2`, uncommitted at the time
+of writing (2026-11-17). **Fill in the commit after committing.**
+
+## What changed
+
+- **log-analysis**: `rules_yaml` in `quality/evaluate` (`ParseQualityRules`,
+  strict like the CLI; `gopkg.in/yaml.v3` is now a direct dependency);
+  `TROUBLESHOOTING_RUN` tags the API's own spans with `troubleshooting.run`.
+- **quality-check**: `--html` and `--markdown` (`reports.go`); `action.yml`,
+  a composite GitHub Action.
+- **log-ui**: the **Quality** page (`QualityView.vue`, `services/quality.ts`,
+  `types/quality.ts`, `api/quality.api.ts`, `logs-api/quality.impl.ts`),
+  between Releases and Settings; the blueprint test now expects six pages.
+- **CI**: the `integration` job sets `TROUBLESHOOTING_RUN` (passed to the test
+  stack's API by `docker-compose.test.yml`) and runs the action with
+  `.github/quality.yaml` after the fixture.
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-API-001 | `TestQualityRulesYAML` | Go unit |
+| QG-OUT-001 | `TestReportsEscapeRecordedText`, `TestMarkdownNeverLinksScripts`, `TestReportFilesWritten`; UI `quality.spec.ts` (export) | CLI; Vitest |
+| QG-UI-001 | `e2e/quality.e2e.ts` QG-UI-001; `quality.spec.ts` (labels, windows, evidence targets) | Playwright (mocked API); Vitest |
+| QG-UI-002 | `e2e/quality.e2e.ts` QG-UI-002 | Playwright |
+| QG-UI-003 | `e2e/quality.e2e.ts` QG-UI-003; `quality.spec.ts` (parseResult) | Playwright; Vitest |
+| QG-UI-004 | `e2e/quality.e2e.ts` QG-UI-004 | Playwright |
+| QG-CI-001 | the action's check and gate scripts, extracted from `action.yml` and run locally with `GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` set: passed run, a deliberately failing rule (exit 1, one failing check in the summary), every `gate:fail-on` combination | manual run, 2026-11-17 (not yet in GitHub) |
+| QG-CI-002 | CI job `integration`, step "Quality gate of the API's own requests"; locally: API with `TROUBLESHOOTING_RUN=local-1`, `go run . check`, then the action script: 6 checks passed (trace-report 12 queries over 23 requests, view-spans 5 over 64, stats/calls 3, compare 14, quality/evaluate 2) | real test stack; CI once pushed |
+
+## Verification run (2026-11-17)
+
+- `go test ./...` in log-analysis and quality-check; `npm run type-check`,
+  `npx vitest run` (93 tests), `npx playwright test` (93 tests, including the
+  360 px check with the Quality page): pass.
+- Quality page screenshots at 1366 px and 375 px with the real candidate
+  result: no horizontal scroll.
+- Real stack as above. Not run: the action inside GitHub Actions (it runs on
+  the first push of this branch), the fixture's outage/recreate/retention
+  phases with the tagged API.
