@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Quality gate (milestone 3, stage 1; docs/quality-gate.md): checks one test
@@ -65,10 +67,10 @@ const (
 
 // QualityEntry is the operation an execution starts with.
 type QualityEntry struct {
-	Service   string `json:"service"`
-	Operation string `json:"operation"`
+	Service   string `json:"service" yaml:"service"`
+	Operation string `json:"operation" yaml:"operation"`
 	// SpanKind is optional (server, consumer, internal, ...).
-	SpanKind string `json:"span_kind,omitempty"`
+	SpanKind string `json:"span_kind,omitempty" yaml:"span_kind,omitempty"`
 }
 
 func (e QualityEntry) String() string {
@@ -86,38 +88,42 @@ func (e QualityEntry) String() string {
 //     database calls (CLIENT spans with db.system or db.system.name);
 //   - forbidden_call: no execution calls service "to" (from "from", if set).
 type QualityCheck struct {
-	ID              string        `json:"id"`
-	Type            string        `json:"type"`
-	Entry           *QualityEntry `json:"entry,omitempty"`
-	Advisory        bool          `json:"advisory,omitempty"`
-	MinExecutions   int           `json:"min_executions,omitempty"`
-	Percentile      float64       `json:"percentile,omitempty"`
-	MaxMs           *float64      `json:"max_ms,omitempty"`
-	TargetMs        *float64      `json:"target_ms,omitempty"`
-	MaxPerExecution *int          `json:"max_per_execution,omitempty"`
-	TargetPer       *int          `json:"target_per_execution,omitempty"`
-	From            string        `json:"from,omitempty"`
-	To              string        `json:"to,omitempty"`
+	ID              string        `json:"id" yaml:"id"`
+	Type            string        `json:"type" yaml:"type"`
+	Entry           *QualityEntry `json:"entry,omitempty" yaml:"entry,omitempty"`
+	Advisory        bool          `json:"advisory,omitempty" yaml:"advisory,omitempty"`
+	MinExecutions   int           `json:"min_executions,omitempty" yaml:"min_executions,omitempty"`
+	Percentile      float64       `json:"percentile,omitempty" yaml:"percentile,omitempty"`
+	MaxMs           *float64      `json:"max_ms,omitempty" yaml:"max_ms,omitempty"`
+	TargetMs        *float64      `json:"target_ms,omitempty" yaml:"target_ms,omitempty"`
+	MaxPerExecution *int          `json:"max_per_execution,omitempty" yaml:"max_per_execution,omitempty"`
+	TargetPer       *int          `json:"target_per_execution,omitempty" yaml:"target_per_execution,omitempty"`
+	From            string        `json:"from,omitempty" yaml:"from,omitempty"`
+	To              string        `json:"to,omitempty" yaml:"to,omitempty"`
 }
 
 // QualityRules is the rules file (quality.yaml), version 1.
 type QualityRules struct {
-	Version int            `json:"version"`
-	Entry   *QualityEntry  `json:"entry,omitempty"`
-	Checks  []QualityCheck `json:"checks"`
+	Version int            `json:"version" yaml:"version"`
+	Entry   *QualityEntry  `json:"entry,omitempty" yaml:"entry,omitempty"`
+	Checks  []QualityCheck `json:"checks" yaml:"checks"`
 }
 
 // QualityRequest evaluates Run in the window [TimeFrom, TimeTo) of entry
 // start times and, for comparison only, Baseline in its own window (by
 // default the same one).
 type QualityRequest struct {
-	Rules        QualityRules `json:"rules"`
-	Run          string       `json:"run"`
-	TimeFrom     string       `json:"time_from"`
-	TimeTo       string       `json:"time_to"`
-	Baseline     string       `json:"baseline,omitempty"`
-	BaselineFrom string       `json:"baseline_time_from,omitempty"`
-	BaselineTo   string       `json:"baseline_time_to,omitempty"`
+	Rules QualityRules `json:"rules"`
+	// RulesYAML is the rules file as text (the UI sends it as typed); it is
+	// parsed strictly like the CLI does: unknown and duplicate keys are errors.
+	// A request has either rules or rules_yaml.
+	RulesYAML    string `json:"rules_yaml,omitempty"`
+	Run          string `json:"run"`
+	TimeFrom     string `json:"time_from"`
+	TimeTo       string `json:"time_to"`
+	Baseline     string `json:"baseline,omitempty"`
+	BaselineFrom string `json:"baseline_time_from,omitempty"`
+	BaselineTo   string `json:"baseline_time_to,omitempty"`
 }
 
 var checkIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -128,6 +134,29 @@ func validRunID(s string) bool {
 
 func finitePositive(v *float64) bool {
 	return v != nil && !math.IsNaN(*v) && !math.IsInf(*v, 0) && *v > 0
+}
+
+// MaxQualityRulesBytes bounds a rules file.
+const MaxQualityRulesBytes = 64 << 10
+
+// ParseQualityRules reads a rules file (YAML; JSON is YAML too). Unknown keys,
+// duplicate keys and more than one document are errors, so a misspelled
+// limit is never silently ignored. The result still needs Validate.
+func ParseQualityRules(text string) (QualityRules, error) {
+	if len(text) > MaxQualityRulesBytes {
+		return QualityRules{}, invalid("the rules are larger than %d bytes", MaxQualityRulesBytes)
+	}
+	dec := yaml.NewDecoder(strings.NewReader(text))
+	dec.KnownFields(true)
+	var r QualityRules
+	if err := dec.Decode(&r); err != nil {
+		return QualityRules{}, invalid("rules: %s", err.Error())
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return QualityRules{}, invalid("rules: only one YAML document is allowed")
+	}
+	return r, nil
 }
 
 func parseWindow(fromS, toS, what string) (int64, int64, error) {
@@ -153,6 +182,16 @@ func parseWindow(fromS, toS, what string) (int64, int64, error) {
 func (q *QualityRequest) Validate() error {
 	if _, _, err := parseWindow(q.TimeFrom, q.TimeTo, ""); err != nil {
 		return err
+	}
+	if strings.TrimSpace(q.RulesYAML) != "" {
+		if q.Rules.Version != 0 || q.Rules.Entry != nil || len(q.Rules.Checks) > 0 {
+			return invalid("send rules or rules_yaml, not both")
+		}
+		rules, err := ParseQualityRules(q.RulesYAML)
+		if err != nil {
+			return err
+		}
+		q.Rules, q.RulesYAML = rules, ""
 	}
 	q.Run = strings.TrimSpace(q.Run)
 	q.Baseline = strings.TrimSpace(q.Baseline)

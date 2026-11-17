@@ -31,6 +31,7 @@ returns to the previous page.
 | Timeline & Sequence | The sequence library (distinct execution shapes with percentiles, opened as a sequence; `docs/sequence-library.md`, replaces the execution list on 13 October 2026), trace id lookup, and the focused viewer: Timeline (default) or Sequence, the log inspector, CLIENT/SERVER switch, events and links, completeness, per-section retry, regenerate, widen, investigation link, HTML/JSON export | `ExecutionsView.vue`, `ExecutionViewer.vue` |
 | Problems | The problem list and detail; an example opens in Timeline & Sequence with its span and log selected; Compare releases and "Check fixed release" stay in the detail | `problems/ProblemsView.vue`, `ProblemDetail.vue` |
 | Releases | Compare releases (with included reports and exports) and operation statistics | `ReleasesView.vue` (`CompareView`, `StatisticsView`) |
+| Quality (milestone 3, 17 November 2026) | Check a test run against quality rules, or open a CI result file; evidence opens in Timeline & Sequence (`docs/quality-gate.md`) | `QualityView.vue` |
 | Settings | Detection rules (versioned, optimistic concurrency) and data retention (read-only, from `GET retention`) | `SettingsView.vue` |
 
 Row actions in Log Analysis: **Open timeline**, **Open sequence**, **Copy

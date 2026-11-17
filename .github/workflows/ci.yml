@@ -62,6 +62,10 @@ jobs:
     name: Regression fixture against ClickHouse
     runs-on: ubuntu-latest
     needs: [go, ui]
+    env:
+      # The test stack's API tags its own spans with this run, so the quality
+      # gate below can check its requests during the fixture.
+      TROUBLESHOOTING_RUN: ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -72,6 +76,16 @@ jobs:
       - run: make test-stack-up
       - run: make fixture-load
       - run: make fixture-check
+      # This repository is the quality gate's first user: the API must not
+      # add database queries per request (docs/quality-gate.md).
+      - name: Quality gate of the API's own requests
+        uses: ./quality-check
+        with:
+          url: http://127.0.0.1:28094
+          ui: http://127.0.0.1:28095
+          rules: .github/quality.yaml
+          run: ${{ env.TROUBLESHOOTING_RUN }}
+          since: 3h
       - uses: actions/upload-artifact@v4
         if: always()
         with:

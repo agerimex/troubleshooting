@@ -38,9 +38,9 @@ async function openLogAnalysis (page: Page) {
 
 const visibleRows = (page: Page, testId: string) => page.getByTestId(testId).filter({ visible: true })
 
-test('NAV-EXP-001 / NAV-EXP-002 / RPT-DIR-001: five destinations in order; Log Analysis is the default', async ({ page }) => {
+test('NAV-EXP-001 / NAV-EXP-002 / RPT-DIR-001: six destinations in order (Quality added by milestone 3); Log Analysis is the default', async ({ page }) => {
   await openLogAnalysis(page)
-  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('button')).toHaveText(['Log Analysis', 'Timeline & Sequence', 'Problems', 'Releases', 'Settings'])
+  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('button')).toHaveText(['Log Analysis', 'Timeline & Sequence', 'Problems', 'Releases', 'Quality', 'Settings'])
   await expect(page.getByTestId('main-nav-logs')).toHaveAttribute('aria-current', 'page')
   await expect(page.getByTestId('log-analysis')).toBeVisible()
   await expect(visibleRows(page, 'span-name')).toHaveText(['publish_recording', 'publish_recording'])
@@ -372,7 +372,7 @@ test('the last chosen view is kept for executions opened without an explicit vie
 test('NAV-EXP-017: a narrow screen keeps every page usable without horizontal page scroll', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 })
   await openLogAnalysis(page)
-  for (const p of ['logs', 'executions', 'problems', 'releases', 'settings']) {
+  for (const p of ['logs', 'executions', 'problems', 'releases', 'quality', 'settings']) {
     await page.getByTestId('main-nav-' + p).click()
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow, p).toBeLessThanOrEqual(1)

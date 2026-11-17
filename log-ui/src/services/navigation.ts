@@ -2,17 +2,19 @@ import { type LogRecord, type Report } from '@/types/report'
 import { type ReportContext } from '@/types/stats'
 import { sortedLogs } from '@/services/report'
 
-// Navigation of the product blueprint (product-blueprint-v1.3): five pages,
+// Navigation of the product blueprint (product-blueprint-v1.3) plus Quality
+// (milestone 3, docs/quality-gate.md): six pages,
 // an execution viewer (Timeline & Sequence) that any page can open, and
 // investigation links that resolve without the page they were copied from.
 
-export type Page = 'logs' | 'executions' | 'problems' | 'releases' | 'settings'
+export type Page = 'logs' | 'executions' | 'problems' | 'releases' | 'quality' | 'settings'
 
 export const PAGES: { value: Page, label: string }[] = [
   { value: 'logs', label: 'Log Analysis' },
   { value: 'executions', label: 'Timeline & Sequence' },
   { value: 'problems', label: 'Problems' },
   { value: 'releases', label: 'Releases' },
+  { value: 'quality', label: 'Quality' },
   { value: 'settings', label: 'Settings' }
 ]
 

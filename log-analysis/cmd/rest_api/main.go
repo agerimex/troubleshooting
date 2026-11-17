@@ -46,8 +46,15 @@ func getenv(key, def string) string {
 
 // initOpenTelemetry sends this service's own traces to the receiver.
 // TROUBLESHOOTING_TOKEN, when set, is picked up by log-sender itself.
+// TROUBLESHOOTING_RUN, when set, tags every span with troubleshooting.run, so
+// a test run of this API can be checked with the quality gate (this
+// repository's CI does: .github/quality.yaml).
 func initOpenTelemetry() {
-	_, err := sender.NewTracer("LogAnalysis", sender.WithAddress(getenv("TRACE_RECEIVER_ADDR", "log-receiver-compose:50055")))
+	opts := []sender.Option{sender.WithAddress(getenv("TRACE_RECEIVER_ADDR", "log-receiver-compose:50055"))}
+	if run := os.Getenv("TROUBLESHOOTING_RUN"); run != "" {
+		opts = append(opts, sender.WithResourceAttributes(map[string]string{data.AttrRun: run}))
+	}
+	_, err := sender.NewTracer("LogAnalysis", opts...)
 	if err != nil {
 		fmt.Println("Where is receiver of traces")
 	}

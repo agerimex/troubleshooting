@@ -1,0 +1,112 @@
+name: Troubleshooting quality gate
+description: >-
+  Check a test run against quality rules kept in your repository (latency
+  limits, database calls per execution, forbidden calls) and link every
+  failure to the execution behind it. See docs/quality-gate.md.
+inputs:
+  url:
+    description: Troubleshooting URL that serves /api (the UI origin or the API itself).
+    required: true
+  run:
+    description: The test run, i.e. the value of troubleshooting.run on its spans.
+    required: true
+  rules:
+    description: Rules file (YAML or JSON).
+    default: quality.yaml
+  baseline:
+    description: Run to compare with (shown next to each value; never changes the result).
+    default: ''
+  since:
+    description: Window of the run, ending now (a Go duration, at most 24h).
+    default: 1h
+  baseline-since:
+    description: Window of the baseline run, ending now (default the run's window).
+    default: ''
+  ui:
+    description: Origin for evidence links, if it differs from url.
+    default: ''
+  fail-on:
+    description: >-
+      "unresolved" (default) fails the step when the gate failed or had not
+      enough data; "failed" only when it failed; "never" only reports.
+      An error (exit 3: invalid rules, unreachable API) always fails.
+    default: unresolved
+  artifact:
+    description: Name of the uploaded report artifact (empty to skip the upload).
+    default: quality-report
+outputs:
+  gate:
+    description: passed, failed, unresolved or error.
+    value: ${{ steps.check.outputs.gate }}
+  exit-code:
+    description: The CLI's exit code (0 passed, 1 failed, 2 unresolved, 3 error).
+    value: ${{ steps.check.outputs.exit-code }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache: false
+    - name: Build troubleshooting-check
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: go build -o "$RUNNER_TEMP/troubleshooting-check" ./cmd/troubleshooting-check
+    - name: Check the run
+      id: check
+      shell: bash
+      # Inputs reach the script only as environment variables, never as
+      # script text, so a value can't inject shell code.
+      env:
+        TC_URL: ${{ inputs.url }}
+        TC_RUN: ${{ inputs.run }}
+        TC_RULES: ${{ inputs.rules }}
+        TC_BASELINE: ${{ inputs.baseline }}
+        TC_SINCE: ${{ inputs.since }}
+        TC_BASELINE_SINCE: ${{ inputs.baseline-since }}
+        TC_UI: ${{ inputs.ui }}
+      run: |
+        out="$RUNNER_TEMP/quality-report"
+        mkdir -p "$out"
+        args=(--url "$TC_URL" --rules "$TC_RULES" --run "$TC_RUN" --since "$TC_SINCE"
+          --json "$out/result.json" --html "$out/report.html" --markdown "$out/summary.md")
+        if [ -n "$TC_BASELINE" ]; then args+=(--baseline "$TC_BASELINE"); fi
+        if [ -n "$TC_BASELINE_SINCE" ]; then args+=(--baseline-since "$TC_BASELINE_SINCE"); fi
+        if [ -n "$TC_UI" ]; then args+=(--ui "$TC_UI"); fi
+        set +e
+        "$RUNNER_TEMP/troubleshooting-check" "${args[@]}"
+        code=$?
+        set -e
+        case "$code" in 0) gate=passed ;; 1) gate=failed ;; 2) gate=unresolved ;; *) gate=error ;; esac
+        if [ -f "$out/summary.md" ]; then
+          cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "### ⚠️ Quality gate: error (no result; see the step log)" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "gate=$gate" >> "$GITHUB_OUTPUT"
+        echo "dir=$out" >> "$GITHUB_OUTPUT"
+    - name: Upload the report
+      if: inputs.artifact != '' && always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ steps.check.outputs.dir }}
+        if-no-files-found: ignore
+    - name: Apply the gate
+      shell: bash
+      env:
+        TC_GATE: ${{ steps.check.outputs.gate }}
+        TC_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        case "$TC_FAIL_ON" in
+          unresolved|failed|never) ;;
+          *) echo "::error title=Quality gate::fail-on must be unresolved, failed or never, not '$TC_FAIL_ON'"; exit 1 ;;
+        esac
+        case "$TC_GATE:$TC_FAIL_ON" in
+          error:*) echo "::error title=Quality gate::no result (invalid rules, unreachable API or another error)"; exit 1 ;;
+          passed:*|failed:never|unresolved:never|unresolved:failed) echo "Quality gate: $TC_GATE" ;;
+          failed:*) echo "::error title=Quality gate::failed"; exit 1 ;;
+          unresolved:*) echo "::error title=Quality gate::unresolved: not enough data"; exit 1 ;;
+          *) echo "::error title=Quality gate::unknown gate '$TC_GATE'"; exit 1 ;;
+        esac

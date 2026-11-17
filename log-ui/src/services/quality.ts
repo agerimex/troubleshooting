@@ -1,0 +1,161 @@
+import { type ExecutionTarget, type ExecutionView } from '@/services/navigation'
+import { escapeHtml, htmlPage } from '@/services/report'
+import { type CheckStatus, type Gate, type QualityCheckResult, type QualityEvaluation, type QualityEvidence } from '@/types/quality'
+
+// Pure parts of the Quality page (docs/quality-gate.md): windows, labels,
+// evidence targets, reading a CLI result file and the HTML export.
+
+export const QUALITY_CONTRACT = 'quality-gate-v1'
+
+export const EXAMPLE_RULES = `version: 1
+entry:
+  service: recording-api
+  operation: start_session
+  span_kind: server
+checks:
+  - id: startup-p95
+    type: latency
+    max_ms: 800
+    target_ms: 500
+  - id: db-calls
+    type: db_calls
+    max_per_execution: 3
+  - id: no-directory
+    type: forbidden_call
+    to: directory-api
+`
+
+export const WINDOW_PRESETS: { value: string, label: string, minutes: number }[] = [
+  { value: '15m', label: 'Last 15 minutes', minutes: 15 },
+  { value: '1h', label: 'Last hour', minutes: 60 },
+  { value: '6h', label: 'Last 6 hours', minutes: 360 },
+  { value: '24h', label: 'Last 24 hours', minutes: 1440 }
+]
+
+// presetWindow is [now - preset, now) in Unix nanoseconds.
+export function presetWindow (preset: string, nowMs: number): { from: string, to: string } {
+  const p = WINDOW_PRESETS.find((w) => w.value === preset) ?? WINDOW_PRESETS[1]
+  const to = BigInt(nowMs) * 1000000n
+  return { from: (to - BigInt(p.minutes) * 60000000000n).toString(), to: to.toString() }
+}
+
+export const GATE_LABEL: Record<Gate, string> = { passed: 'Passed', failed: 'Failed', unresolved: 'Unresolved: not enough data' }
+export const STATUS_LABEL: Record<CheckStatus, string> = { pass: 'Pass', fail: 'Fail', insufficient: 'No data' }
+
+export function gateLabel (gate: string): string {
+  return GATE_LABEL[gate as Gate] ?? gate
+}
+
+export function statusLabel (status: string): string {
+  return STATUS_LABEL[status as CheckStatus] ?? status
+}
+
+// valueText shows a value in its unit: milliseconds with one decimal, counts
+// as they are, "-" when there is none.
+export function valueText (value: number | null | undefined, unit: string): string {
+  if (value === null || value === undefined) {
+    return '-'
+  }
+  if (unit === 'ms') {
+    return String(Math.round(value * 10) / 10) + ' ms'
+  }
+  return String(value)
+}
+
+export function entryText (c: QualityCheckResult): string {
+  return c.entry.service + ' / ' + c.entry.operation + (c.entry.span_kind ? ' (' + c.entry.span_kind + ')' : '')
+}
+
+export function limitText (c: QualityCheckResult): string {
+  let s = valueText(c.limit, c.unit)
+  if (c.target !== null && c.target !== undefined) {
+    s += ' (target ' + valueText(c.target, c.unit) + (c.target_status ? ', ' + c.target_status : '') + ')'
+  }
+  return s
+}
+
+export function baselineText (c: QualityCheckResult): string {
+  if (!c.baseline) {
+    return ''
+  }
+  return c.baseline.status === 'insufficient' ? 'no data' : valueText(c.baseline.value, c.unit)
+}
+
+// evidenceView: calls between services open as a sequence, the rest as a
+// timeline.
+export function evidenceView (c: QualityCheckResult): ExecutionView {
+  return c.type === 'forbidden_call' ? 'sequence' : 'timeline'
+}
+
+const traceIdPattern = /^[0-9a-f]{32}$/
+const spanIdPattern = /^[0-9a-f]{16}$/
+const nsPattern = /^-?\d{1,20}$/
+
+// evidenceTarget opens one piece of evidence in the execution viewer; null
+// for evidence without valid identifiers (a hand-edited result file).
+export function evidenceTarget (c: QualityCheckResult, e: QualityEvidence, view: ExecutionView = evidenceView(c)): ExecutionTarget | null {
+  if (!traceIdPattern.test(e.trace_id) || !nsPattern.test(e.time_from) || !nsPattern.test(e.time_to) || BigInt(e.time_to) <= BigInt(e.time_from)) {
+    return null
+  }
+  const t: ExecutionTarget = { traceId: e.trace_id, window: { from: e.time_from, to: e.time_to }, view, origin: { page: 'quality', label: 'the quality check ' + c.id } }
+  if (spanIdPattern.test(e.span_id)) {
+    t.spanId = e.span_id
+  }
+  return t
+}
+
+// parseResult reads a result file (the CLI's --json, or this page's JSON
+// export). It never throws; anything else than a quality-gate-v1 evaluation
+// is an error.
+export function parseResult (text: string): [string | null, QualityEvaluation | null] {
+  let data: any
+  try {
+    data = JSON.parse(text)
+  } catch {
+    return ['The file is not JSON.', null]
+  }
+  if (data && typeof data === 'object' && data.data?.Evaluation) {
+    data = data.data.Evaluation
+  }
+  if (!data || typeof data !== 'object' || data.contract !== QUALITY_CONTRACT || !Array.isArray(data.checks) || typeof data.gate !== 'string') {
+    return ['The file is not a ' + QUALITY_CONTRACT + ' evaluation (troubleshooting-check --json).', null]
+  }
+  for (const c of data.checks) {
+    if (!c || typeof c.id !== 'string' || typeof c.status !== 'string' || !c.entry || typeof c.entry.service !== 'string') {
+      return ['The evaluation has an invalid check.', null]
+    }
+    c.details = Array.isArray(c.details) ? c.details.filter((d: unknown) => typeof d === 'string') : []
+    c.evidence = Array.isArray(c.evidence) ? c.evidence.filter((e: any) => e && typeof e.trace_id === 'string') : []
+  }
+  return [null, data as QualityEvaluation]
+}
+
+export function nsToIso (ns: string | undefined): string {
+  if (!ns || !nsPattern.test(ns)) {
+    return ''
+  }
+  return new Date(Number(BigInt(ns) / 1000000n)).toISOString()
+}
+
+// exportHtml is a self-contained page of the evaluation as shown: no
+// scripts, every recorded value escaped.
+export function exportHtml (ev: QualityEvaluation): string {
+  const e = escapeHtml
+  const hasBaseline = !!ev.baseline
+  const rows = ev.checks.map((c) => {
+    const items = [...c.details.map((d) => `<li>${e(d)}</li>`),
+      ...c.evidence.map((x) => `<li>Evidence: ${e(x.note)} (trace <code>${e(x.trace_id)}</code>, span <code>${e(x.span_id)}</code>)</li>`)]
+    return `<tr><td>${e(statusLabel(c.status))}</td><td><b>${e(c.id)}</b>${c.advisory ? ' (advisory)' : ''}<br>${e(entryText(c))}</td>` +
+      `<td>${e(valueText(c.value, c.unit))}</td><td>${e(limitText(c))}</td>${hasBaseline ? `<td>${e(baselineText(c))}</td>` : ''}` +
+      `<td>${e(c.executions)}</td><td>${e(c.summary)}${items.length ? '<ul>' + items.join('') + '</ul>' : ''}</td></tr>`
+  }).join('')
+  const body = `<h1>Quality gate: ${e(gateLabel(ev.gate))}</h1>
+<p>Run <code>${e(ev.run)}</code>, ${e(nsToIso(ev.time_from))} to ${e(nsToIso(ev.time_to))}${hasBaseline ? `; baseline <code>${e(ev.baseline)}</code>, ${e(nsToIso(ev.baseline_time_from))} to ${e(nsToIso(ev.baseline_time_to))}` : ''}. ${e(ev.contract)}, evaluated ${e(ev.evaluated_at)}.</p>
+<table><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>${hasBaseline ? '<th>Baseline</th>' : ''}<th>Executions</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table>
+<p>${e(ev.method)}. Statuses describe this run only: a pass means "not observed in this run", not a guarantee; a missing measurement is never a pass.</p>`
+  return htmlPage('Quality gate: ' + gateLabel(ev.gate), body)
+}
+
+export function exportJson (ev: QualityEvaluation): string {
+  return JSON.stringify(ev, null, 2) + '\n'
+}
