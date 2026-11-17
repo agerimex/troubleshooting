@@ -182,6 +182,7 @@ All settings are environment variables; docker-compose reads them from the shell
 | `TRACE_RECEIVER_ADDR` | analysis (its own traces) | `log-receiver-compose:50055` |
 | `CORS_ALLOWED_ORIGINS` | analysis | `http://localhost:5173,http://127.0.0.1:5173` (Vite dev server) |
 | `APP_ENV` | analysis | empty; `development` pretty-prints JSON |
+| `TROUBLESHOOTING_RUN` | analysis: tags its own spans with `troubleshooting.run` (the quality gate of its own CI) | empty = untagged |
 | `TROUBLESHOOTING_TOKEN` | receiver (both ports), log-sender | empty = no token check |
 | `UI_AUTH`, `UI_USER`, `UI_PASSWORD_HASH` | UI (Caddy) | `off` |
 | `QUERY_TIMEOUT` | analysis: ClickHouse `max_execution_time` per query (a request runs at most two) | `10s` |

@@ -46,7 +46,8 @@ type ghComment struct {
 	ID   int64  `json:"id"`
 	Body string `json:"body"`
 	User struct {
-		Type string `json:"type"`
+		Login string `json:"login"`
+		Type  string `json:"type"`
 	} `json:"user"`
 }
 
@@ -119,7 +120,7 @@ func postComment(ctx context.Context, o commentOptions, body string) (string, in
 			return fmt.Sprintf("not posted: the result is for commit %s, the pull request's head is now %s", short(o.commit), short(pr.Head.SHA)), commentSkipped
 		}
 	}
-	existing, err := gh.findComment(ctx, o.repo, o.pr, markerLine(o.marker))
+	existing, err := gh.findComment(ctx, o.repo, o.pr, markerLine(o.marker), gh.login(ctx))
 	if err != nil {
 		return "listing comments: " + err.Error(), commentError
 	}
@@ -145,9 +146,23 @@ func postComment(ctx context.Context, o commentOptions, body string) (string, in
 
 type ghClient struct{ api, token string }
 
-// findComment returns the id of the bot comment that starts with the marker
-// line, or 0. Comments by people are never edited, even with the marker.
-func (g ghClient) findComment(ctx context.Context, repo string, pr int, marker string) (int64, error) {
+// login is the token's own user: a personal access token can read it, the
+// workflow's GITHUB_TOKEN can't ("", the comments are then github-actions').
+func (g ghClient) login(ctx context.Context) string {
+	var u struct {
+		Login string `json:"login"`
+	}
+	if err := g.do(ctx, http.MethodGet, "/user", nil, &u); err != nil {
+		return ""
+	}
+	return u.Login
+}
+
+// findComment returns the id of our comment that starts with the marker line,
+// or 0. Ours is the token's own user's (login), or a bot's when the token has
+// no user (GITHUB_TOKEN). Comments by anyone else are never edited, even with
+// the marker.
+func (g ghClient) findComment(ctx context.Context, repo string, pr int, marker, login string) (int64, error) {
 	for page := 1; page <= maxCommentPage; page++ {
 		var list []ghComment
 		path := fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=100&page=%d", repo, pr, page)
@@ -155,7 +170,11 @@ func (g ghClient) findComment(ctx context.Context, repo string, pr int, marker s
 			return 0, err
 		}
 		for _, c := range list {
-			if c.User.Type == "Bot" && strings.HasPrefix(c.Body, marker) {
+			ours := c.User.Type == "Bot"
+			if login != "" {
+				ours = strings.EqualFold(c.User.Login, login)
+			}
+			if ours && strings.HasPrefix(c.Body, marker) {
 				return c.ID, nil
 			}
 		}

@@ -50,7 +50,7 @@ checks:
 | `db_calls` | Client spans with `db.system` (or `db.system.name`) per execution | **Every** execution has at most `max_per_execution`, not on average |
 | `forbidden_call` | A span of service `to` called from another service, or a client span naming it in `peer.service` / `server.address` | No execution calls it: “not observed in this run” |
 
-A check can have its own `entry`, and `advisory: true` shows it without letting it decide. Unknown and duplicate keys are errors, so a misspelled limit is never silently ignored. SQL text and logs are never parsed.
+A check can have its own `entry`, and `advisory: true` shows it without letting it decide. Unknown and duplicate keys are errors, and so is a field of another check type (`max_ms` on a `db_calls` check), so a misspelled or misplaced limit is never silently ignored. SQL text and logs are never parsed.
 
 ## 3. Check the run
 
@@ -88,7 +88,7 @@ FAIL    db-calls  fx…-qg-api / start_session (server)
     url: http://localhost:8095          # where your Troubleshooting runs
     run: pr-${{ github.event.number }}-${{ github.run_attempt }}
     rules: quality.yaml
-    baseline: main-latest               # optional
+    baseline: main-118                  # optional: the id of a run you tagged earlier
     since: 1h
     rules-from: base                    # the rules of the pull request's base branch
     fail-on: unresolved                 # or "failed", or "never" (report only)
@@ -116,11 +116,12 @@ The action builds the CLI, checks the run, writes the Markdown summary to the jo
 - uses: agerimex/troubleshooting/quality-check@main
   with:
     url: ${{ steps.troubleshooting.outputs.url }}
+    ui: ${{ steps.troubleshooting.outputs.ui }}   # none: the job's server is gone afterwards; report.html keeps the evidence
     run: pr-${{ github.run_id }}-${{ github.run_attempt }}
     rules-from: base
 ```
 
-[`examples/quality-gate`](https://github.com/agerimex/troubleshooting/tree/main/examples/quality-gate) is a complete example: a small orders service with its `quality.yaml`. Troubleshooting’s CI runs it on every push, once as written (2 database calls per request: passed) and once with a planted change that reads prices one by one and calls `legacy-pricing` (9 database calls and a forbidden call: failed).
+[`examples/quality-gate`](https://github.com/agerimex/troubleshooting/tree/main/examples/quality-gate) is a complete example: a small orders service with its `quality.yaml`. Troubleshooting’s CI runs it on every push, once as written (2 database calls per request: passed) and once with a planted change that reads prices one by one and calls `legacy-pricing` (9 database calls and a forbidden call: failed). [Catch an N+1 query in a pull request](/articles/catch-n-plus-one-in-a-pull-request) follows that change through the gate, with the real output.
 
 ::: warning Trust
 The workflow file is part of the pull request too. Protect `main` and review changes under `.github/`. Don’t run untrusted fork code with secrets that reach a private Troubleshooting.
@@ -148,7 +149,7 @@ Every check shows its value, the limit with the advisory target, the baseline an
 | --- | --- |
 | Pass | The run kept the limit |
 | Fail | The run broke the limit; the evidence names an execution that did |
-| Not enough data | No executions, fewer than needed, incomplete executions (a span below the entry names a parent that was not recorded), spans outside retention, or a query limit. Never a pass |
+| Not enough data | No executions, fewer than needed, incomplete executions (a span below the entry names a parent that was not recorded, or the execution runs more than 5 minutes past the window), spans outside retention, or a query limit. Never a pass |
 
 - **Gate**: any failed blocking check → *failed*; otherwise any check without enough data → *unresolved*; otherwise *passed*.
 - **Targets** are *met* or *open* and never change a status. **Advisory** checks are shown and never decide.

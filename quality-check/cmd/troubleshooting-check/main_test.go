@@ -296,3 +296,70 @@ func TestEvidenceSnapshot(t *testing.T) {
 		t.Errorf("--no-snapshot kept a snapshot")
 	}
 }
+
+// With --ui none (a Troubleshooting that is gone after the CI job) no report
+// carries a link; the evidence names its trace and its snapshot instead.
+func TestNoEvidenceLinks(t *testing.T) {
+	rules := writeFile(t, "quality.yaml", rulesYAML)
+	s := server(t, 200, answer("failed"), nil)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	code := run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42", "--ui", "none",
+		"--json", filepath.Join(dir, "r.json"), "--html", filepath.Join(dir, "r.html"), "--markdown", filepath.Join(dir, "r.md")}, &out, io.Discard, fixedNow)
+	if code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	for _, f := range []string{"r.json", "r.html", "r.md"} {
+		b, _ := os.ReadFile(filepath.Join(dir, f))
+		if strings.Contains(string(b), "#/executions") {
+			t.Errorf("%s has an evidence link", f)
+		}
+	}
+	if strings.Contains(out.String(), "#/executions") || !strings.Contains(out.String(), "        trace ") {
+		t.Errorf("text report:\n%s", out.String())
+	}
+	md, _ := os.ReadFile(filepath.Join(dir, "r.md"))
+	if !strings.Contains(string(md), "its spans are in r.html") {
+		t.Errorf("markdown doesn't point to the snapshot:\n%s", md)
+	}
+
+	// Without an HTML report the Markdown names no file that wasn't written.
+	run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42", "--ui", "none",
+		"--json", filepath.Join(dir, "j.json"), "--markdown", filepath.Join(dir, "j.md")}, io.Discard, io.Discard, fixedNow)
+	md, _ = os.ReadFile(filepath.Join(dir, "j.md"))
+	if strings.Contains(string(md), "its spans are in") || !strings.Contains(string(md), "trace `abc`") {
+		t.Errorf("markdown without an HTML report:\n%s", md)
+	}
+}
+
+// The CLI accepts the same files as the API: one YAML document, at most
+// 64 KiB.
+func TestRulesOneDocument(t *testing.T) {
+	two := writeFile(t, "two.yaml", rulesYAML+"\n---\n"+rulesYAML)
+	if _, _, err := loadRules(two); err == nil || !strings.Contains(err.Error(), "only one YAML document") {
+		t.Errorf("two documents: %v", err)
+	}
+	big := writeFile(t, "big.yaml", rulesYAML+"\n#"+strings.Repeat("x", maxRulesBytes))
+	if _, _, err := loadRules(big); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("too large: %v", err)
+	}
+	if _, _, err := loadRules(writeFile(t, "one.yaml", rulesYAML)); err != nil {
+		t.Errorf("one document: %v", err)
+	}
+}
+
+// A spans section at a query limit returned nothing: the snapshot says so
+// instead of looking like an empty trace.
+func TestSnapshotAtQueryLimit(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"data":{"Report":{"spans":{"status":"limit","error":"max_rows_to_read","records":[]}}}}`)
+	}))
+	defer s.Close()
+	snap := readSnapshot(options{url: s.URL, timeout: time.Second}, "abc", "1", "2")
+	if snap.Error != "query limit: max_rows_to_read" || len(snap.Spans) != 0 {
+		t.Errorf("snapshot at a query limit: %+v", snap)
+	}
+	if h := snapshotHTML(snap, ""); !strings.Contains(h, "unavailable: query limit") {
+		t.Errorf("html: %s", h)
+	}
+}

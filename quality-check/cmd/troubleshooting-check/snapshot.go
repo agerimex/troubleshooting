@@ -1,16 +1,14 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"html"
-	"io"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Evidence snapshots: the spans of each evidence trace, read once when the
@@ -51,42 +49,54 @@ type reportSpan struct {
 	Tags      []map[string]string `json:"tags"`
 }
 
-// addSnapshots reads the spans of every evidence (one request per distinct
-// trace and window).
+// snapshotReaders bounds the trace reports read at the same time.
+const snapshotReaders = 4
+
+// addSnapshots reads the spans of every evidence: one request per distinct
+// trace and window, up to snapshotReaders at a time.
 func addSnapshots(o options, ev *Evaluation) {
-	cache := map[string]*Snapshot{}
+	type window struct{ trace, from, to string }
+	snaps := map[window]*Snapshot{}
+	var order []window
+	for _, c := range ev.Checks {
+		for _, e := range c.Evidence {
+			w := window{e.TraceID, e.TimeFrom, e.TimeTo}
+			if _, ok := snaps[w]; !ok {
+				snaps[w] = nil
+				order = append(order, w)
+			}
+		}
+	}
+	results := make([]*Snapshot, len(order))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, snapshotReaders)
+	for i, w := range order {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, w window) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = readSnapshot(o, w.trace, w.from, w.to)
+		}(i, w)
+	}
+	wg.Wait()
+	for i, w := range order {
+		snaps[w] = results[i]
+	}
 	for i := range ev.Checks {
 		for j := range ev.Checks[i].Evidence {
 			e := &ev.Checks[i].Evidence[j]
-			key := e.TraceID + "|" + e.TimeFrom + "|" + e.TimeTo
-			if cache[key] == nil {
-				cache[key] = readSnapshot(o, e.TraceID, e.TimeFrom, e.TimeTo)
-			}
-			e.Snapshot = cache[key]
+			e.Snapshot = snaps[window{e.TraceID, e.TimeFrom, e.TimeTo}]
 		}
 	}
 }
 
 func readSnapshot(o options, trace, from, to string) *Snapshot {
-	body, _ := json.Marshal(map[string]any{"trace_id": trace, "time_from": from, "time_to": to,
-		"span_limit": maxSnapshotSpans, "sections": []string{"spans"}})
-	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
-	defer cancel()
-	endpoint := strings.TrimRight(o.url, "/") + "/api/v1/trace-report"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	status, raw, err := postJSON(o, "/api/v1/trace-report", map[string]any{"trace_id": trace, "time_from": from, "time_to": to,
+		"span_limit": maxSnapshotSpans, "sections": []string{"spans"}}, 16<<20)
 	if err != nil {
 		return &Snapshot{Error: err.Error()}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if user, pass, ok := strings.Cut(o.basicAuth, ":"); ok {
-		req.SetBasicAuth(user, pass)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return &Snapshot{Error: err.Error()}
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	var out struct {
 		Error   bool   `json:"error"`
 		Message string `json:"message"`
@@ -101,12 +111,18 @@ func readSnapshot(o options, trace, from, to string) *Snapshot {
 			} `json:"Report"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil || resp.StatusCode != http.StatusOK || out.Error {
-		return &Snapshot{Error: fmt.Sprintf("HTTP %d %s", resp.StatusCode, out.Message)}
+	if err := json.Unmarshal(raw, &out); err != nil || status != http.StatusOK || out.Error {
+		return &Snapshot{Error: fmt.Sprintf("HTTP %d %s", status, out.Message)}
 	}
+	// Only "ok" has records: "limit" means a query limit or the deadline was
+	// hit and nothing was returned (report contract), which must not read as
+	// an empty trace.
 	sec := out.Data.Report.Spans
-	if sec == nil || sec.Status != "ok" && sec.Status != "limit" {
+	if sec == nil || sec.Status != "ok" {
 		msg := "spans unavailable"
+		if sec != nil && sec.Status == "limit" {
+			msg = "query limit"
+		}
 		if sec != nil && sec.Error != "" {
 			msg += ": " + sec.Error
 		}

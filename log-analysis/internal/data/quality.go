@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -62,7 +63,6 @@ const (
 	qualityLookahead  = 5 * time.Minute
 	defaultMinLatency = 20
 	maxQualityDetails = 5
-	rootParent        = "0000000000000000"
 )
 
 // QualityEntry is the operation an execution starts with.
@@ -257,6 +257,43 @@ func normalizeEntry(e *QualityEntry) error {
 	return nil
 }
 
+// foreignFields rejects a field of another check type (e.g. max_ms on a
+// db_calls check): it would be accepted and never applied, so a limit the
+// author believes in would silently not hold.
+func foreignFields(c *QualityCheck) error {
+	set := map[string]bool{
+		"percentile": c.Percentile != 0, "max_ms": c.MaxMs != nil, "target_ms": c.TargetMs != nil,
+		"max_per_execution": c.MaxPerExecution != nil, "target_per_execution": c.TargetPer != nil,
+		"from": c.From != "", "to": c.To != "",
+	}
+	own := map[string][]string{
+		CheckLatency:   {"percentile", "max_ms", "target_ms"},
+		CheckDBCalls:   {"max_per_execution", "target_per_execution"},
+		CheckForbidden: {"from", "to"},
+	}[c.Type]
+	if own == nil {
+		return nil // an unknown type is reported by the caller
+	}
+	for _, f := range own {
+		delete(set, f)
+	}
+	var bad []string
+	for f, ok := range set {
+		if ok {
+			bad = append(bad, f)
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	sort.Strings(bad)
+	verb := "doesn't"
+	if len(bad) > 1 {
+		verb = "don't"
+	}
+	return fmt.Errorf("%s %s apply to a %s check", strings.Join(bad, ", "), verb, c.Type)
+}
+
 func validateCheck(c *QualityCheck, entry *QualityEntry) error {
 	if c.Entry == nil {
 		if entry == nil {
@@ -269,6 +306,9 @@ func validateCheck(c *QualityCheck, entry *QualityEntry) error {
 	}
 	if c.MinExecutions < 0 {
 		return fmt.Errorf("min_executions must not be negative")
+	}
+	if err := foreignFields(c); err != nil {
+		return err
 	}
 	switch c.Type {
 	case CheckLatency:
@@ -393,6 +433,10 @@ type execution struct {
 	// starts within the entry's duration, so it may belong below the entry:
 	// the execution is incomplete. nil if there is none.
 	Missing *qSpan
+	// PastRead: the entry ends at or after the end of the spans read (the
+	// window end plus qualityLookahead), so spans at its end were not read
+	// and the execution is incomplete.
+	PastRead bool
 }
 
 type spanIndex struct {
@@ -405,11 +449,13 @@ type spanIndex struct {
 // whose parent was not recorded and that starts within the entry's duration
 // (from its start on, if the duration is invalid). The entry's own missing
 // parent (e.g. an uninstrumented gateway above it) doesn't count: it hides
-// nothing below the entry.
+// nothing below the entry. Neither do the entry's siblings under that same
+// missing parent (the gateway's other calls): they are beside the entry, not
+// below it.
 func (ix spanIndex) missingBelow(entry *qSpan) *qSpan {
 	var first *qSpan
 	for _, s := range ix.orphans[entry.TraceID] {
-		if s == entry || s.Start < entry.Start || (entry.Duration >= 0 && s.Start > entry.Start+entry.Duration*1000) {
+		if s == entry || s.Parent == entry.Parent || s.Start < entry.Start || (entry.Duration >= 0 && s.Start > entry.Start+entry.Duration*1000) {
 			continue
 		}
 		if first == nil || s.Start < first.Start || (s.Start == first.Start && s.SpanID < first.SpanID) {
@@ -427,7 +473,7 @@ func indexSpans(spans []qSpan) spanIndex {
 	}
 	for i := range spans {
 		s := &spans[i]
-		if s.Parent == rootParent || s.Parent == "" {
+		if s.Parent == RootParentSpanID || s.Parent == "" {
 			continue
 		}
 		key := s.TraceID + ":" + s.Parent
@@ -442,6 +488,7 @@ func indexSpans(spans []qSpan) spanIndex {
 // executions returns the run's entry spans that start in [from, to), in start
 // order, each with its subtree (by recorded parentage in the same trace).
 func (ix spanIndex) executions(spans []qSpan, e QualityEntry, run string, from, to int64) []execution {
+	readEnd := to + int64(qualityLookahead)
 	var out []execution
 	for i := range spans {
 		s := &spans[i]
@@ -451,7 +498,7 @@ func (ix spanIndex) executions(spans []qSpan, e QualityEntry, run string, from, 
 		if e.SpanKind != "" && s.Kind != e.SpanKind {
 			continue
 		}
-		ex := execution{Entry: s, Missing: ix.missingBelow(s)}
+		ex := execution{Entry: s, Missing: ix.missingBelow(s), PastRead: s.Duration >= 0 && s.Start+s.Duration*1000 >= readEnd}
 		stack := []*qSpan{s}
 		seen := map[*qSpan]bool{s: true}
 		for len(stack) > 0 {
@@ -525,31 +572,46 @@ func measure(c QualityCheck, exs []execution, ix spanIndex) QualityCheckResult {
 }
 
 // requireComplete: a call count or the absence of a call can't pass while an
-// execution may be missing spans (a span of its trace names a parent that was
-// not recorded): the missing part could hold calls. A failure stands, since
-// the calls it counted were recorded.
+// execution may be missing spans: a span of its trace names a parent that was
+// not recorded, or the execution runs past the end of the spans read. The
+// missing part could hold calls. A failure stands, since the calls it counted
+// were recorded.
 func requireComplete(exs []execution, r *QualityCheckResult) {
-	incomplete := 0
+	missing, pastRead := 0, 0
 	var first *execution
 	for i := range exs {
+		if exs[i].Missing == nil && !exs[i].PastRead {
+			continue
+		}
 		if exs[i].Missing != nil {
-			incomplete++
-			if first == nil {
-				first = &exs[i]
-			}
+			missing++
+		} else {
+			pastRead++
+		}
+		if first == nil {
+			first = &exs[i]
 		}
 	}
+	incomplete := missing + pastRead
 	if incomplete == 0 {
 		return
 	}
-	r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are incomplete: a span below the entry names a parent that was not recorded (lost, sampled out or not instrumented), so calls below it may be missing", incomplete, len(exs)))
+	if missing > 0 {
+		r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are incomplete: a span below the entry names a parent that was not recorded (lost, sampled out or not instrumented), so calls below it may be missing", missing, len(exs)))
+	}
+	if pastRead > 0 {
+		r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are incomplete: they run past the spans read (%s after the window's end), so calls at their end were not checked; end the window later", pastRead, len(exs), qualityLookahead))
+	}
 	if r.Status != CheckPass {
 		return
 	}
 	r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "incomplete_executions", ""
 	r.Summary = fmt.Sprintf("%d of %d executions are incomplete, so the limit can't be shown to hold (%s)", incomplete, len(exs), r.Summary)
-	r.Evidence = append([]QualityEvidence{evidenceOf(*first, first.Missing,
-		fmt.Sprintf("incomplete execution: %s names parent %s, which was not recorded", first.Missing.Name, first.Missing.Parent))}, r.Evidence...)
+	note := "incomplete execution: it runs past the spans read"
+	if first.Missing != nil {
+		note = fmt.Sprintf("incomplete execution: %s names parent %s, which was not recorded", first.Missing.Name, first.Missing.Parent)
+	}
+	r.Evidence = append([]QualityEvidence{evidenceOf(*first, first.Missing, note)}, r.Evidence...)
 }
 
 func insufficientExecutions(c QualityCheck, r *QualityCheckResult, n int) bool {
@@ -912,11 +974,19 @@ func loadRun(ctx context.Context, rules QualityRules, run string, from, to int64
 // EvaluateQuality evaluates a validated request.
 func EvaluateQuality(ctx context.Context, req QualityRequest) QualityResult {
 	from, to, _ := parseWindow(req.TimeFrom, req.TimeTo, "")
-	run := loadRun(ctx, req.Rules, req.Run, from, to)
-	var base runSpans
+	// The run and the baseline are read at the same time: both are bounded by
+	// the one request deadline.
+	var run, base runSpans
+	var wg sync.WaitGroup
 	if req.Baseline != "" {
 		bFrom, bTo, _ := parseWindow(req.BaselineFrom, req.BaselineTo, "")
-		base = loadRun(ctx, req.Rules, req.Baseline, bFrom, bTo)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			base = loadRun(ctx, req.Rules, req.Baseline, bFrom, bTo)
+		}()
 	}
+	run = loadRun(ctx, req.Rules, req.Run, from, to)
+	wg.Wait()
 	return buildQualityResult(req, run, base, clock.Now())
 }

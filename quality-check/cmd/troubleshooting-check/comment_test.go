@@ -17,7 +17,8 @@ type fakeGitHub struct {
 	mu       sync.Mutex
 	head     string
 	comments []ghComment
-	users    map[int64]string // comment id -> user type
+	users    map[int64]string // comment id -> user type, or "User:<login>"
+	pat      string           // the token's user (a personal access token); "" = GITHUB_TOKEN
 	readOnly bool
 	calls    []string
 	nextID   int64
@@ -40,13 +41,21 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 		}
 		write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user":
+			if f.pat == "" {
+				w.WriteHeader(http.StatusForbidden)
+				write(map[string]string{"message": "Resource not accessible by integration"})
+				return
+			}
+			write(map[string]string{"login": f.pat})
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/42":
 			write(map[string]any{"head": map[string]string{"sha": f.head}})
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/42/comments":
 			out := []map[string]any{}
 			if r.URL.Query().Get("page") == "1" {
 				for _, c := range f.comments {
-					out = append(out, map[string]any{"id": c.ID, "body": c.Body, "user": map[string]string{"type": f.users[c.ID]}})
+					typ, login, _ := strings.Cut(f.users[c.ID], ":")
+					out = append(out, map[string]any{"id": c.ID, "body": c.Body, "user": map[string]string{"type": typ, "login": login}})
 				}
 			}
 			write(out)
@@ -56,7 +65,10 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues/42/comments":
 			f.nextID++
 			f.comments = append(f.comments, ghComment{ID: f.nextID, Body: in.Body})
-			f.users[f.nextID] = "Bot"
+			f.users[f.nextID] = "Bot:github-actions[bot]"
+			if f.pat != "" {
+				f.users[f.nextID] = "User:" + f.pat
+			}
 			w.WriteHeader(http.StatusCreated)
 			write(map[string]any{"id": f.nextID})
 		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/repos/o/r/issues/comments/"):
@@ -146,5 +158,24 @@ func TestCommentBodyFits(t *testing.T) {
 	}
 	if markerLine("a-->b\nc") != "<!-- troubleshooting-quality-gate:ab c -->" {
 		t.Errorf("marker: %s", markerLine("a-->b\nc"))
+	}
+}
+
+// With a personal access token the comments are the token user's own: later
+// runs update them, and another person's comment with the marker is still
+// never edited.
+func TestCommentWithPersonalToken(t *testing.T) {
+	f := &fakeGitHub{head: "abc123", users: map[int64]string{}, nextID: 100, pat: "ci-user"}
+	f.comments = []ghComment{{ID: 7, Body: markerLine("quality-report") + "\nquoted by a person"}}
+	f.users[7] = "User:someone-else"
+	s := httptest.NewServer(f.handler(t))
+	defer s.Close()
+	for i, want := range []string{"posted", "updated comment 101", "updated comment 101"} {
+		if code, msg := commentRun(t, s.URL, fmt.Sprintf("run %d\n", i)); code != commentPosted || !strings.Contains(msg, want) {
+			t.Fatalf("run %d: %d %s", i, code, msg)
+		}
+	}
+	if len(f.comments) != 2 || f.comments[0].Body != markerLine("quality-report")+"\nquoted by a person" {
+		t.Errorf("comments: %+v", f.comments)
 	}
 }

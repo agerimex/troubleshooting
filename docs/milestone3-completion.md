@@ -143,3 +143,54 @@ Implementation: commit `2c8b27b` on branch `feat/quality-review-stage-2`
   QG-VAL-001) against the new API on the test stack: pass.
 - Not run: anything inside GitHub Actions (the stack action, the comment, the
   `quality-example` job and `rules-from: base` run on the first push).
+- First run in GitHub (`main` after the merge, CI run 44079936899): the
+  `quality-example` job passed (good run passed, the planted regression
+  failed as required) and the API's own gate passed; the pull request run
+  failed only on the flaky milestone 2 fixture, so the PR comment and
+  `rules-from: base` on a pull request are still to be seen.
+
+# After stage 3: reports without dead links (2026-11-17)
+
+That first run showed that evidence links from a Troubleshooting started
+inside the job point to a server that is gone after the job (and to the API
+port, which serves no UI). `--ui none` (action input `ui: none`, the stack
+action's `ui` output) leaves the links out: the text names the trace and
+span, the Markdown says the spans are in report.html, and the HTML report
+keeps its snapshots. Both CI jobs use it. The HTML report shows its windows
+as UTC times instead of nanoseconds and keeps the value columns on one line.
+Tests: `TestNoEvidenceLinks`, `TestWindowText`, the updated
+`TestReportsEscapeRecordedText` strings. The site article
+`site/articles/catch-n-plus-one-in-a-pull-request.md` uses that run's
+`result.json`, rendered with these changes.
+
+# Review fixes (2026-11-17)
+
+A review of everything since `164cfec` found, and this fixes:
+
+- **Siblings counted as missing spans.** A span under the same unrecorded
+  parent as the entry (an uninstrumented gateway's other call) made a
+  complete execution incomplete. `missingBelow` now skips the entry's
+  siblings.
+- **Executions past the spans read.** Spans are read up to the window's end
+  plus 5 minutes; an execution running past that could pass with its last
+  calls unread. It is now incomplete (`PastRead`), with its own detail and
+  evidence.
+- **Fields of another check type** (e.g. `max_ms` on `db_calls`) were
+  accepted and never applied; they are now errors (`foreignFields`).
+- **CLI and API rules limits differ.** The CLI now rejects a second YAML
+  document and files over 64 KiB, like `ParseQualityRules`.
+- **Snapshot at a query limit** read as an empty trace; it is now
+  "unavailable: query limit".
+- **Comments with a personal access token** were never found again, so every
+  run added one; ours is now the token's own user's (`GET /user`), or the
+  bot's for `GITHUB_TOKEN`.
+- **The Markdown named report.html** when only `--json` was written; it now
+  names the HTML report actually written, or nothing.
+- **Speed and duplication:** run and baseline are read concurrently, evidence
+  snapshots up to 4 at a time; one `postJSON` helper in the CLI,
+  `RootParentSpanID` instead of a second constant, one Markdown URL escaper.
+
+Tests: `TestQualityIncompleteExecutions` (sibling, past the read end),
+`TestQualityForeignFields`, `TestQualityValidate` (three new cases),
+`TestRulesOneDocument`, `TestSnapshotAtQueryLimit`,
+`TestCommentWithPersonalToken`, `TestNoEvidenceLinks` (no HTML report).

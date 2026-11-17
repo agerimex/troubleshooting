@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -169,7 +170,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs.SetOutput(stderr)
 	var o options
 	fs.StringVar(&o.url, "url", envOr("TROUBLESHOOTING_URL", "http://localhost:8095"), "Troubleshooting URL (the UI origin, which serves /api; or the API itself)")
-	fs.StringVar(&o.ui, "ui", "", "UI URL for evidence links (default: --url)")
+	fs.StringVar(&o.ui, "ui", "", "UI URL for evidence links (default: --url); \"none\" for no links, e.g. when the Troubleshooting is gone after the CI job")
 	fs.StringVar(&o.rules, "rules", "quality.yaml", "rules file (YAML or JSON)")
 	fs.StringVar(&o.run, "run", "", "run to check: the value of troubleshooting.run on its spans (required)")
 	fs.StringVar(&o.baseline, "baseline", "", "run to compare with (shown next to each value; never changes the result)")
@@ -209,10 +210,12 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 		addSnapshots(o, &ev)
 	}
 	ev.Source = &Source{Commit: o.commit, Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}
-	addLinks(&ev, o.ui)
+	if o.ui != "none" {
+		addLinks(&ev, o.ui)
+	}
 	b, _ := json.MarshalIndent(ev, "", "  ")
 	for _, f := range []struct{ path, body string }{
-		{o.jsonPath, string(b) + "\n"}, {o.htmlPath, htmlReport(ev)}, {o.mdPath, markdownReport(ev)},
+		{o.jsonPath, string(b) + "\n"}, {o.htmlPath, htmlReport(ev)}, {o.mdPath, markdownReport(ev, htmlName(o.htmlPath))},
 	} {
 		if f.path == "" {
 			continue
@@ -252,11 +255,20 @@ func loadRules(path string) (Rules, string, error) {
 	if err != nil {
 		return Rules{}, "", err
 	}
+	// The same limits as the API's ParseQualityRules, so the CLI and the
+	// Quality page accept the same files.
+	if len(b) > maxRulesBytes {
+		return Rules{}, "", fmt.Errorf("%s: the rules are larger than %d bytes", path, maxRulesBytes)
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	var r Rules
 	if err := dec.Decode(&r); err != nil {
 		return Rules{}, "", fmt.Errorf("%s: %w", path, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return Rules{}, "", fmt.Errorf("%s: only one YAML document is allowed", path)
 	}
 	sum := sha256.Sum256(b)
 	return r, hex.EncodeToString(sum[:]), nil
@@ -310,14 +322,18 @@ func buildRequest(o options, now time.Time) (request, string, error) {
 	return req, digest, nil
 }
 
-func evaluate(o options, req request) (Evaluation, error) {
-	body, _ := json.Marshal(req)
+// maxRulesBytes is the API's MaxQualityRulesBytes.
+const maxRulesBytes = 64 << 10
+
+// postJSON posts payload to an API path (with --basic-auth and --timeout) and
+// returns the HTTP status and at most limit bytes of the answer.
+func postJSON(o options, path string, payload any, limit int64) (int, []byte, error) {
+	body, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
 	defer cancel()
-	endpoint := strings.TrimRight(o.url, "/") + "/api/v1/quality/evaluate"
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(o.url, "/")+path, bytes.NewReader(body))
 	if err != nil {
-		return Evaluation{}, err
+		return 0, nil, err
 	}
 	hreq.Header.Set("Content-Type", "application/json")
 	if user, pass, ok := strings.Cut(o.basicAuth, ":"); ok {
@@ -325,10 +341,16 @@ func evaluate(o options, req request) (Evaluation, error) {
 	}
 	resp, err := http.DefaultClient.Do(hreq)
 	if err != nil {
-		return Evaluation{}, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	return resp.StatusCode, raw, err
+}
+
+func evaluate(o options, req request) (Evaluation, error) {
+	endpoint := strings.TrimRight(o.url, "/") + "/api/v1/quality/evaluate"
+	status, raw, err := postJSON(o, "/api/v1/quality/evaluate", req, 32<<20)
 	if err != nil {
 		return Evaluation{}, err
 	}
@@ -340,10 +362,10 @@ func evaluate(o options, req request) (Evaluation, error) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return Evaluation{}, fmt.Errorf("%s: HTTP %d, not a Troubleshooting API answer", endpoint, resp.StatusCode)
+		return Evaluation{}, fmt.Errorf("%s: HTTP %d, not a Troubleshooting API answer", endpoint, status)
 	}
-	if resp.StatusCode != http.StatusOK || out.Error {
-		return Evaluation{}, fmt.Errorf("%s: HTTP %d: %s", endpoint, resp.StatusCode, out.Message)
+	if status != http.StatusOK || out.Error {
+		return Evaluation{}, fmt.Errorf("%s: HTTP %d: %s", endpoint, status, out.Message)
 	}
 	if out.Data.Evaluation == nil {
 		return Evaluation{}, fmt.Errorf("%s: the answer has no evaluation", endpoint)
@@ -424,7 +446,12 @@ func report(ev Evaluation) string {
 			fmt.Fprintf(&b, "        %s\n", d)
 		}
 		for _, e := range c.Evidence {
-			fmt.Fprintf(&b, "        evidence: %s\n        %s\n", e.Note, e.Link)
+			fmt.Fprintf(&b, "        evidence: %s\n", e.Note)
+			if e.Link != "" {
+				fmt.Fprintf(&b, "        %s\n", e.Link)
+			} else {
+				fmt.Fprintf(&b, "        trace %s, span %s\n", e.TraceID, e.SpanID)
+			}
 		}
 	}
 	return b.String()
@@ -436,4 +463,12 @@ func entryText(e Entry) string {
 		s += " (" + e.SpanKind + ")"
 	}
 	return s
+}
+
+// htmlName is the file name of the --html report, "" if none is written.
+func htmlName(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Base(path)
 }
