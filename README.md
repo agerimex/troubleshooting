@@ -72,9 +72,10 @@ In GitHub Actions:
     url: http://localhost:8095
     run: pr-${{ github.event.number }}-${{ github.run_attempt }}
     rules: quality.yaml
+    rules-from: base                                  # a pull request can't loosen its own limits
 ```
 
-The step writes the summary to the job page, uploads the reports and fails when the gate failed or had not enough data. This repository's own CI does the same for its API (`.github/quality.yaml`: database queries per request). The UI's **Quality** page checks a run interactively and opens a CI `result.json` with its evidence.
+The step writes the summary to the job page and as one pull request comment (updated on re-runs), uploads the reports (with a snapshot of each evidence execution, kept after raw spans expire) and fails when the gate failed or had not enough data. No Troubleshooting server needed: `agerimex/troubleshooting/quality-check/stack` starts one inside the job (`examples/quality-gate/` shows a whole application, `docs/quality-gate.md` the workflow). This repository's own CI does the same for its API (`.github/quality.yaml`: database queries per request). The UI's **Quality** page checks a run interactively and opens a CI `result.json` with its evidence.
 
 How to intergate to your golang project
 ------

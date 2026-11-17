@@ -8,6 +8,10 @@
 //	troubleshooting-check --url http://localhost:8095 --rules quality.yaml \
 //	    --run pr-42-1 [--baseline main-118] [--since 1h] [--json result.json] [--html report.html] [--markdown summary.md]
 //
+//	troubleshooting-check comment --markdown summary.md --repo owner/name --pr 42 [--commit sha]
+//
+// posts or updates the summary as one pull request comment (comment.go).
+//
 // The run is the value of the troubleshooting.run attribute on the spans of
 // the test run (e.g. OTEL_RESOURCE_ATTRIBUTES=troubleshooting.run=pr-42-1).
 // See docs/quality-gate.md.
@@ -16,6 +20,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -78,12 +84,13 @@ type request struct {
 }
 
 type Evidence struct {
-	TraceID  string `json:"trace_id"`
-	SpanID   string `json:"span_id"`
-	TimeFrom string `json:"time_from"`
-	TimeTo   string `json:"time_to"`
-	Note     string `json:"note"`
-	Link     string `json:"link,omitempty"`
+	TraceID  string    `json:"trace_id"`
+	SpanID   string    `json:"span_id"`
+	TimeFrom string    `json:"time_from"`
+	TimeTo   string    `json:"time_to"`
+	Note     string    `json:"note"`
+	Link     string    `json:"link,omitempty"`
+	Snapshot *Snapshot `json:"snapshot,omitempty"` // the evidence trace's spans when checked (snapshot.go)
 }
 
 type Baseline struct {
@@ -125,6 +132,19 @@ type Evaluation struct {
 	Gate         string        `json:"gate"`
 	Checks       []CheckResult `json:"checks"`
 	EvaluatedAt  string        `json:"evaluated_at"`
+	// Source is added by the CLI (the API doesn't know it): what was tested
+	// and which rules decided, so a result can't be mistaken for one of
+	// another commit or of other rules.
+	Source *Source `json:"source,omitempty"`
+}
+
+type Source struct {
+	Commit      string `json:"commit,omitempty"`    // the tested commit (a PR's head, not its merge commit)
+	Ref         string `json:"ref,omitempty"`       // its branch or tag
+	CIRun       string `json:"ci_run,omitempty"`    // link to the CI run
+	Rules       string `json:"rules"`               // the rules file as given
+	RulesRef    string `json:"rules_ref,omitempty"` // where the rules were read from, e.g. "origin/main:quality.yaml"
+	RulesSHA256 string `json:"rules_sha256"`        // of the file's bytes
 }
 
 type options struct {
@@ -133,6 +153,8 @@ type options struct {
 	since, baselineSince                                      time.Duration
 	timeout                                                   time.Duration
 	basicAuth                                                 string
+	commit, ref, ciRun, rulesRef                              string
+	noSnapshot                                                bool
 }
 
 func main() {
@@ -140,6 +162,9 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
+	if len(args) > 0 && args[0] == "comment" {
+		return runComment(args[1:], stdout, stderr)
+	}
 	fs := flag.NewFlagSet("troubleshooting-check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var o options
@@ -158,6 +183,11 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs.StringVar(&o.htmlPath, "html", "", "write a self-contained HTML report to this file")
 	fs.StringVar(&o.mdPath, "markdown", "", "write a Markdown summary (for a CI job summary or a PR comment) to this file")
 	fs.DurationVar(&o.timeout, "timeout", 2*time.Minute, "request timeout")
+	fs.StringVar(&o.commit, "commit", "", "the tested commit, recorded in the result (in CI: a pull request's head commit)")
+	fs.StringVar(&o.ref, "ref", "", "the tested branch or tag, recorded in the result")
+	fs.StringVar(&o.ciRun, "ci-run", "", "link to the CI run, recorded in the result")
+	fs.StringVar(&o.rulesRef, "rules-ref", "", "where the rules file was read from (e.g. origin/main:quality.yaml), recorded in the result")
+	fs.BoolVar(&o.noSnapshot, "no-snapshot", false, "don't keep the spans of each evidence execution in --json and --html")
 	o.basicAuth = os.Getenv("TROUBLESHOOTING_BASIC_AUTH")
 	if err := fs.Parse(args); err != nil {
 		return exitError
@@ -165,7 +195,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	if o.ui == "" {
 		o.ui = o.url
 	}
-	req, err := buildRequest(o, now())
+	req, digest, err := buildRequest(o, now())
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return exitError
@@ -175,6 +205,10 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return exitError
 	}
+	if !o.noSnapshot && (o.jsonPath != "" || o.htmlPath != "") {
+		addSnapshots(o, &ev)
+	}
+	ev.Source = &Source{Commit: o.commit, Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}
 	addLinks(&ev, o.ui)
 	b, _ := json.MarshalIndent(ev, "", "  ")
 	for _, f := range []struct{ path, body string }{
@@ -213,18 +247,19 @@ func exitCode(gate string) int {
 
 // loadRules parses YAML (JSON is YAML too), rejecting unknown keys and
 // duplicate keys.
-func loadRules(path string) (Rules, error) {
+func loadRules(path string) (Rules, string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Rules{}, err
+		return Rules{}, "", err
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	var r Rules
 	if err := dec.Decode(&r); err != nil {
-		return Rules{}, fmt.Errorf("%s: %w", path, err)
+		return Rules{}, "", fmt.Errorf("%s: %w", path, err)
 	}
-	return r, nil
+	sum := sha256.Sum256(b)
+	return r, hex.EncodeToString(sum[:]), nil
 }
 
 // window resolves --from/--to or --since into Unix nanoseconds.
@@ -251,17 +286,17 @@ func window(from, to string, since time.Duration, now time.Time) (string, string
 	return strconv.FormatInt(start.UnixNano(), 10), strconv.FormatInt(end.UnixNano(), 10), nil
 }
 
-func buildRequest(o options, now time.Time) (request, error) {
+func buildRequest(o options, now time.Time) (request, string, error) {
 	if strings.TrimSpace(o.run) == "" {
-		return request{}, errors.New("--run is required")
+		return request{}, "", errors.New("--run is required")
 	}
-	rules, err := loadRules(o.rules)
+	rules, digest, err := loadRules(o.rules)
 	if err != nil {
-		return request{}, err
+		return request{}, "", err
 	}
 	req := request{Rules: rules, Run: o.run, Baseline: o.baseline}
 	if req.TimeFrom, req.TimeTo, err = window(o.from, o.to, o.since, now); err != nil {
-		return request{}, err
+		return request{}, "", err
 	}
 	if o.baseline != "" && (o.baselineSince != 0 || o.baselineFrom != "" || o.baselineTo != "") {
 		since := o.baselineSince
@@ -269,10 +304,10 @@ func buildRequest(o options, now time.Time) (request, error) {
 			since = o.since
 		}
 		if req.BaselineFrom, req.BaselineTo, err = window(o.baselineFrom, o.baselineTo, since, now); err != nil {
-			return request{}, fmt.Errorf("baseline %w", err)
+			return request{}, "", fmt.Errorf("baseline %w", err)
 		}
 	}
-	return req, nil
+	return req, digest, nil
 }
 
 func evaluate(o options, req request) (Evaluation, error) {
@@ -364,6 +399,9 @@ func report(ev Evaluation) string {
 		fmt.Fprintf(&b, ", baseline %s", ev.Baseline)
 	}
 	fmt.Fprintf(&b, ", %d checks\n", len(ev.Checks))
+	if s := sourceText(ev.Source); s != "" {
+		fmt.Fprintf(&b, "%s\n", s)
+	}
 	for _, c := range ev.Checks {
 		word := statusWord[c.Status]
 		if word == "" {

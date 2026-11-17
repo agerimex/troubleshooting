@@ -115,7 +115,9 @@ the gate.
     rules: quality.yaml
     baseline: main-latest               # optional
     since: 1h
+    rules-from: base                    # read the rules from the PR's base branch
     fail-on: unresolved                 # or "failed", or "never" (report only)
+    comment: auto                       # PR comment on pull_request events; "true" / "false"
 ```
 
 Outputs: `gate` (passed / failed / unresolved / error) and `exit-code`.
@@ -123,12 +125,80 @@ Inputs reach the scripts only as environment variables. `fail-on:
 unresolved` (the default) fails the step when the gate failed or had not
 enough data; an error always fails it.
 
-Trust: the rules are read from the checked-out commit, so a pull request can
-change its own limits; that change is visible in the diff, but the action
-does not prevent it. To keep the limits independent of the candidate, read
-the rules from the base branch (e.g. `git show origin/main:quality.yaml >
-/tmp/quality.yaml`) and pass that file. Don't run untrusted fork code with
-secrets to reach a private Troubleshooting.
+**Which rules decide (`rules-from`).** Empty (default): the checked-out
+commit's file, so a pull request can change its own limits (visible in the
+diff, not prevented). `base`: the file of the pull request's base branch,
+fetched from origin: the candidate can't loosen its gate, and when it changes
+the file the summary says that the base's rules were used. If the base has no
+such file yet, the gate is being introduced and this commit's file is used,
+with a notice. On a push (no base) the checked-out file is used. Any other
+value is a branch or tag fetched from origin.
+
+**What was tested.** The CLI adds `source` to the result: `commit` (the
+action passes a pull request's head, not its merge commit), `ref`, `ci_run`
+(link to the run attempt), `rules` (the file as given), `rules_ref` (e.g.
+`main@89ab01234567:quality.yaml` with `rules-from`) and `rules_sha256` of the
+file's bytes. Text, Markdown and HTML reports show it in one line, and the
+Quality page shows it for an opened result file. CLI flags `--commit`,
+`--ref`, `--ci-run`, `--rules-ref`.
+
+**Pull request comment.** `troubleshooting-check comment` posts the Markdown
+summary as one comment and updates that same comment on later runs (found by
+a hidden marker per `artifact` name; comments by people are never edited), so
+retries never add a second, contradicting comment. It posts nothing when the
+pull request's head is no longer the tested commit. The job needs
+`pull-requests: write`; without it (a pull request from a fork gets a
+read-only token) the comment is skipped with a notice and the step does not
+fail: the result is still in the job summary and the artifact. Comments over
+GitHub's size limit are cut at a line end.
+
+Trust: with `rules-from: base` the limits come from the base branch. The
+workflow file itself is still part of the pull request; branch protection and
+review of `.github/` changes are what keep that honest. Don't run untrusted
+fork code with secrets to reach a private Troubleshooting.
+
+### An application's CI: Troubleshooting in the job
+
+An application doesn't need a Troubleshooting server its CI can reach:
+`quality-check/stack` starts a private one inside the job (ClickHouse in
+Docker, the receiver and the API built from this repository; Linux runners).
+The tests export spans over OTLP to it, then the gate checks them:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write                # for the comment
+    steps:
+      - uses: actions/checkout@v4
+      - id: troubleshooting
+        uses: agerimex/troubleshooting/quality-check/stack@main
+      - run: go test ./...
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
+          OTEL_EXPORTER_OTLP_INSECURE: "true"
+          OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=pr-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: agerimex/troubleshooting/quality-check@main
+        with:
+          url: ${{ steps.troubleshooting.outputs.url }}
+          run: pr-${{ github.run_id }}-${{ github.run_attempt }}
+          rules-from: base
+```
+
+Outputs of the stack: `url`, `otlp-endpoint`, `sender-address` (for
+log-sender) and `logs` (the services' logs). Inputs: the four ports and the
+ClickHouse image. Evidence links then point to the job's own API, which is
+gone after the job: the reports keep a snapshot of each evidence execution
+(below).
+
+`examples/quality-gate/` is such an application (an orders service with
+`quality.yaml`), and this repository's CI job `quality-example` runs exactly
+the steps above. It also runs the tests again with `EXAMPLE_REGRESSION=1`, a
+planted change that passes every functional test (prices read one by one, 9
+database calls instead of 2, and a call to `legacy-pricing`), and requires
+that gate to fail.
 
 **This repository is the first user.** The CI job `integration` runs the test
 stack with `TROUBLESHOOTING_RUN=ci-<run id>-<attempt>`, so the API tags its
@@ -185,10 +255,29 @@ it. A pass reads "not observed in this run": a trace cannot prove a call can
 never happen. Whether the call was synchronous is not judged.
 
 **Statuses.** A check is `pass`, `fail` or `insufficient` (with a reason:
-`no_executions`, `too_few_executions`, `outside_retention`, `too_many_spans`,
+`no_executions`, `too_few_executions`, `incomplete_executions`, `outside_retention`, `too_many_spans`,
 `query_limit`, `query_unavailable`, `query_error`). Targets are `met` or
-`open` and never change a status. Spans whose parent was not recorded are
-reported: calls below a missing span are not part of an execution.
+`open` and never change a status.
+
+**Incomplete executions.** An execution is incomplete when a span of its
+trace names a parent that was not recorded (lost, sampled out, not
+instrumented) and starts within the entry's duration (from its start on if
+the duration is invalid), so it may belong below the entry. The entry's own
+missing parent (e.g. an uninstrumented gateway above it) doesn't count: it
+hides nothing below the entry. `db_calls` and `forbidden_call` can't pass
+with incomplete executions: they are `insufficient` with reason
+`incomplete_executions`, the first incomplete execution as evidence (its
+orphaned span selected) and the value counted so far. A failure stands, since
+the calls it counted were recorded. Latency is the entry's own duration and
+is unaffected.
+
+**Evidence snapshots.** With `--json` or `--html` the CLI reads each evidence
+trace once (`trace-report`, at most 200 spans) and keeps it as `snapshot` in
+the result; `report.html` shows it as a static timeline (start offset,
+duration bar, nesting, the evidence span highlighted). Raw spans expire, so a
+link in an old pull request stops working; the snapshot still shows what the
+execution did. A failed read is noted and never changes a status.
+`--no-snapshot` skips it.
 
 **Gate.** Any failed blocking check → `failed`; otherwise any blocking check
 with insufficient data → `unresolved`; otherwise `passed`. Advisory checks are
@@ -226,24 +315,32 @@ gives the same answer.
 
 - `log-analysis/internal/data/quality.go`: request validation, the bounded
   canonical span query (`qualityQuery`) and the pure evaluator
-  (`evaluateRun`, `gateOf`); unit tests in `quality_test.go`.
+  (`evaluateRun`, `requireComplete`, `gateOf`); unit tests in `quality_test.go`.
 - `log-analysis/cmd/rest_api/quality.go`: the endpoint.
 - `quality-check/` (module `github.com/agerimex/troubleshooting/quality-check`):
-  the CLI, standard library plus `gopkg.in/yaml.v3`.
+  the CLI, standard library plus `gopkg.in/yaml.v3`: `main.go` (check,
+  `source`), `reports.go`, `snapshot.go` (evidence snapshots), `comment.go`
+  (`troubleshooting-check comment`).
+- `quality-check/action.yml` (the gate) and `quality-check/stack/action.yml`
+  (Troubleshooting inside a CI job).
+- `examples/quality-gate/`: the example application and its `quality.yaml`
+  (CI job `quality-example`).
 - `fixtures/regression/qg.go`: the reference runs and their literal answers.
-
 - `log-ui/src/components/QualityView.vue` with the pure parts in
   `src/services/quality.ts` (unit tests `quality.spec.ts`, browser tests
   `e2e/quality.e2e.ts`).
-- `quality-check/action.yml` (the action) and `.github/quality.yaml` (this
-  repository's rules); `TROUBLESHOOTING_RUN` tags the API's own spans
-  (`log-analysis/cmd/rest_api/main.go`).
+- `.github/quality.yaml`: this repository's rules; `TROUBLESHOOTING_RUN` tags
+  the API's own spans (`log-analysis/cmd/rest_api/main.go`).
 
-Stage 1 (API, CLI, fixture) and stage 2 (reports, Quality page, action, own
-CI) are recorded in `docs/milestone3-completion.md`.
+Stages 1 (API, CLI, fixture), 2 (reports, Quality page, action, own CI) and 3
+(trusted rules, provenance, PR comment, Troubleshooting in the job, evidence
+snapshots, incomplete executions) are recorded in
+`docs/milestone3-completion.md`.
 
 ## Not done (only if asked)
 
-Stored evaluations and a history per run, imported requirement revisions with
-digests, posting a PR comment (the action writes the job summary), load and
-outage experiments, sync-call semantics.
+Stored evaluations and a history per run, a "latest run on main" baseline
+(needs a run registry), imported requirement revisions with digests, load and
+outage experiments, sync-call semantics and allowlists, published container
+images for the in-job stack (it builds the receiver and API, about a minute),
+showing snapshots on the Quality page when raw spans have expired.

@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [protos, log-sender, log-receiver, log-analysis, quality-check, fixtures/regression]
+        module: [protos, log-sender, log-receiver, log-analysis, quality-check, fixtures/regression, examples/quality-gate]
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -62,6 +62,9 @@ jobs:
     name: Regression fixture against ClickHouse
     runs-on: ubuntu-latest
     needs: [go, ui]
+    permissions:
+      contents: read
+      pull-requests: write # the quality gate comments on pull requests
     env:
       # The test stack's API tags its own spans with this run, so the quality
       # gate below can check its requests during the fixture.
@@ -84,6 +87,7 @@ jobs:
           url: http://127.0.0.1:28094
           ui: http://127.0.0.1:28095
           rules: .github/quality.yaml
+          rules-from: base # a pull request cannot loosen its own limits
           run: ${{ env.TROUBLESHOOTING_RUN }}
           since: 3h
       - uses: actions/upload-artifact@v4
@@ -97,3 +101,66 @@ jobs:
       - name: Remove the test stack
         if: always()
         run: make test-stack-reset
+
+  # How an application uses the quality gate in its own CI, run for real:
+  # a private Troubleshooting in the job (quality-check/stack), the example
+  # application's tests send their spans to it, then the gate checks them.
+  # The planted regression must fail the gate (docs/quality-gate.md).
+  quality-example:
+    name: Quality gate in an application's CI (example)
+    runs-on: ubuntu-latest
+    needs: [go]
+    env:
+      RUN_ID: example-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Troubleshooting in this job
+        id: troubleshooting
+        uses: ./quality-check/stack
+      - name: Tests of the example application
+        working-directory: examples/quality-gate
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
+          OTEL_EXPORTER_OTLP_INSECURE: "true"
+          OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=${{ env.RUN_ID }}
+        run: go test -count=1 ./...
+      - name: Quality gate
+        uses: ./quality-check
+        with:
+          url: ${{ steps.troubleshooting.outputs.url }}
+          run: ${{ env.RUN_ID }}
+          rules: examples/quality-gate/quality.yaml
+          since: 30m
+          comment: "false"
+          artifact: example-quality-report
+      - name: Tests with the planted regression
+        working-directory: examples/quality-gate
+        env:
+          EXAMPLE_REGRESSION: "1"
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
+          OTEL_EXPORTER_OTLP_INSECURE: "true"
+          OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=${{ env.RUN_ID }}-regression
+        run: go test -count=1 ./...
+      - name: Quality gate of the regression
+        id: regression
+        uses: ./quality-check
+        with:
+          url: ${{ steps.troubleshooting.outputs.url }}
+          run: ${{ env.RUN_ID }}-regression
+          baseline: ${{ env.RUN_ID }}
+          rules: examples/quality-gate/quality.yaml
+          since: 30m
+          fail-on: never
+          comment: "false"
+          artifact: example-regression-report
+      - name: The regression must fail the gate
+        env:
+          GATE: ${{ steps.regression.outputs.gate }}
+        run: |
+          if [ "$GATE" != failed ]; then
+            echo "::error title=Quality gate example::the planted regression gave '$GATE', not failed"
+            exit 1
+          fi
+      - name: Troubleshooting logs
+        if: failure()
+        run: tail -n 100 "${{ steps.troubleshooting.outputs.logs }}"/*.log

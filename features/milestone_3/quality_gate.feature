@@ -133,3 +133,46 @@ Feature: Check a test run against quality rules
     When the regression fixture has run
     Then the database calls per request of trace-report, view-spans, stats/calls, compare and quality/evaluate are within .github/quality.yaml
     And the build fails with the request behind any check over its limit
+
+  # Stage 3: trusted rules, provenance, pull request feedback, an application's CI.
+
+  @QG-INC-001
+  Scenario: An incomplete execution can't establish a count or an absence
+    Given an execution of the run with a span whose parent was not recorded, starting within the entry
+    Then db-calls and no-directory are insufficient with reason incomplete_executions
+    And the evidence opens that execution with the orphaned span selected
+    But a counted violation still fails, and the latency check is unaffected
+    And the entry's own missing parent, or an orphan outside the entry's duration, keeps it complete
+
+  @QG-SRC-001
+  Scenario: The result names the tested commit and the rules that decided
+    When the CLI checks a run with --commit, --ref, --ci-run and --rules-ref
+    Then the result's source has them and the sha256 of the rules file
+    And the text, Markdown and HTML reports and the Quality page show them, linking the CI run only if it is http(s)
+
+  @QG-CI-003
+  Scenario: A pull request can't loosen its own gate
+    Given the action with rules-from base
+    When the pull request changes quality.yaml
+    Then the gate uses the base branch's rules and the summary says so
+    And when the base has no rules file yet, this commit's file is used with a notice
+    And on a push the checked-out file is used
+
+  @QG-CI-004
+  Scenario: One pull request comment, updated, never stale
+    When the action runs again on the same pull request
+    Then it updates its own comment instead of adding one, and never edits a person's comment
+    And it posts nothing when the pull request's head is no longer the tested commit
+    And a read-only token (a fork pull request) skips the comment without failing the step
+
+  @QG-CI-005
+  Scenario: An application's CI needs no Troubleshooting server
+    Given quality-check/stack started Troubleshooting inside the job
+    When the example application's tests export their spans to it
+    Then the gate passes, and with the planted regression it fails on database calls and the forbidden call
+
+  @QG-OUT-002
+  Scenario: The report keeps the evidence after raw spans expire
+    When the CLI writes --json or --html
+    Then each evidence keeps a snapshot of its trace's spans, shown as a static timeline with the evidence span highlighted
+    And a failed read is noted and never changes a status

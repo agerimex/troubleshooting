@@ -46,6 +46,9 @@
           <template v-if="result.baseline"> · baseline <code>{{ result.baseline }}</code> · {{ windowText(result.baseline_time_from, result.baseline_time_to) }}</template>
         </p>
         <p class="text-xs opacity-80">{{ source }} · evaluated {{ result.evaluated_at }} · {{ result.contract }}</p>
+        <p v-if="sourceText(result.source)" class="text-xs opacity-80" data-testid="quality-source">
+          {{ sourceText(result.source) }}<template v-if="ciRunLink(result.source)"> · <a :href="ciRunLink(result.source)" target="_blank" rel="noopener noreferrer">CI run</a></template>
+        </p>
         <div class="exports">
           <button type="button" class="link" @click="saveJson" data-testid="quality-export-json">Export JSON</button>
           <button type="button" class="link" @click="saveHtml" data-testid="quality-export-html">Export HTML</button>
@@ -93,7 +96,7 @@ import { download } from '@/services/report'
 import { type ExecutionView } from '@/services/navigation'
 import {
   EXAMPLE_RULES, WINDOW_PRESETS, baselineText, entryText, evidenceTarget, exportHtml, exportJson, gateLabel, limitText,
-  nsToIso, parseResult, presetWindow, statusLabel, valueText
+  ciRunLink, nsToIso, parseResult, presetWindow, sourceText, statusLabel, valueText
 } from '@/services/quality'
 import { type QualityCheckResult, type QualityEvaluation, type QualityEvidence } from '@/types/quality'
 
@@ -205,7 +208,7 @@ export default defineComponent({
     return {
       EXAMPLE_RULES, WINDOW_PRESETS, rulesYaml, run, baseline, preset, baselinePreset, loading, error, result, source,
       evaluate, openFile, targetOf, open, windowText, saveJson, saveHtml,
-      gateLabel, statusLabel, valueText, limitText, baselineText, entryText
+      gateLabel, statusLabel, valueText, limitText, baselineText, entryText, sourceText, ciRunLink
     }
   }
 })

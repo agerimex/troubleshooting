@@ -300,20 +300,68 @@ func TestQualityForbiddenCall(t *testing.T) {
 	}
 }
 
-// Spans whose parent was not recorded are reported: calls below them are
-// not part of any execution.
-func TestQualityOrphansReported(t *testing.T) {
+// An execution with a span whose parent was not recorded (starting within
+// the entry's duration) is incomplete: a count or an absence can't pass, a
+// failure stands, latency is unaffected. The entry's own missing parent and
+// orphans outside the entry's duration don't make it incomplete.
+func TestQualityIncompleteExecutions(t *testing.T) {
 	tr := strings.Repeat("b", 32)
-	spans := []qSpan{
-		{TraceID: tr, SpanID: spanHex(1), Parent: rootParent, Service: "api", Name: "start", Kind: "server", Start: qBase, Duration: 1000, Run: "r"},
-		{TraceID: tr, SpanID: spanHex(3), Parent: spanHex(2), Service: "api", Name: "lookup", Kind: "client", DB: true, Start: qBase + 2},
+	entry := qSpan{TraceID: tr, SpanID: spanHex(1), Parent: rootParent, Service: "api", Name: "start", Kind: "server", Start: qBase, Duration: 1000, Run: "r"}
+	db := func(id int, parent string, start int64) qSpan {
+		return qSpan{TraceID: tr, SpanID: spanHex(id), Parent: parent, Service: "api", Name: "lookup", Kind: "client", DB: true, Start: start, Duration: 10}
 	}
-	req := validRequest(t, QualityRules{Version: 1, Entry: &QualityEntry{Service: "api", Operation: "start"},
-		Checks: []QualityCheck{{ID: "db", Type: CheckDBCalls, MaxPerExecution: ip(0)}}}, "r", "")
-	r := buildQualityResult(req, runSpans{Spans: spans}, runSpans{}, time.Now()).Checks[0]
-	if r.Status != CheckPass || *r.Value != 0 || len(r.Details) != 2 || !strings.Contains(r.Details[0], "parent was not recorded") ||
-		!strings.Contains(r.Details[1], "no database calls were recorded") {
-		t.Errorf("orphans: %+v", r)
+	orphanCall := qSpan{TraceID: tr, SpanID: spanHex(9), Parent: spanHex(8), Service: "directory", Name: "GET /users", Kind: "server", Start: qBase + 5, Duration: 10}
+	rules := QualityRules{Version: 1, Entry: &QualityEntry{Service: "api", Operation: "start"}, Checks: []QualityCheck{
+		{ID: "db", Type: CheckDBCalls, MaxPerExecution: ip(1), TargetPer: ip(1)},
+		{ID: "dir", Type: CheckForbidden, To: "directory"},
+		{ID: "p95", Type: CheckLatency, MaxMs: fp(10), MinExecutions: 1},
+	}}
+	eval := func(spans ...qSpan) []QualityCheckResult {
+		return buildQualityResult(validRequest(t, rules, "r", ""), runSpans{Spans: spans}, runSpans{}, time.Now()).Checks
+	}
+
+	r := eval(entry, db(2, spanHex(1), qBase+2), orphanCall)
+	if r[0].Status != CheckInsufficient || r[0].Reason != "incomplete_executions" || r[0].TargetStatus != "" || *r[0].Value != 1 ||
+		!strings.Contains(r[0].Summary, "1 of 1 executions are incomplete") || len(r[0].Evidence) != 2 || r[0].Evidence[0].SpanID != spanHex(9) ||
+		!strings.Contains(r[0].Evidence[0].Note, "names parent "+spanHex(8)) {
+		t.Errorf("db calls of an incomplete execution: %+v", r[0])
+	}
+	if r[1].Status != CheckInsufficient || r[1].Reason != "incomplete_executions" {
+		t.Errorf("absence in an incomplete execution: %+v", r[1])
+	}
+	if r[2].Status != CheckPass {
+		t.Errorf("latency is the entry's own duration: %+v", r[2])
+	}
+
+	// A counted violation stands: the recorded calls are real.
+	r = eval(entry, db(2, spanHex(1), qBase+2), db(3, spanHex(1), qBase+3), orphanCall)
+	if r[0].Status != CheckFail || !strings.Contains(strings.Join(r[0].Details, "|"), "1 of 1 executions are incomplete") {
+		t.Errorf("failure with an incomplete execution: %+v", r[0])
+	}
+	recorded := orphanCall
+	recorded.Parent = spanHex(2)
+	if r = eval(entry, db(2, spanHex(1), qBase+2), recorded); r[1].Status != CheckFail {
+		t.Errorf("recorded forbidden call: %+v", r[1])
+	}
+
+	// Not incomplete: the entry's own parent is missing (an uninstrumented
+	// gateway), or the orphan starts outside the entry's duration.
+	gateway := entry
+	gateway.Parent = spanHex(7)
+	late := orphanCall
+	late.Start = qBase + 1000*1000 + 1
+	early := orphanCall
+	early.Start = qBase - 1
+	for name, spans := range map[string][]qSpan{"gateway": {gateway, db(2, spanHex(1), qBase+2)}, "late": {entry, late}, "early": {entry, early}} {
+		if r = eval(spans...); r[0].Status != CheckPass || r[1].Status != CheckPass || len(r[0].Evidence) > 0 && r[0].Evidence[0].SpanID == spanHex(9) {
+			t.Errorf("%s: %+v / %+v", name, r[0], r[1])
+		}
+	}
+	// An invalid entry duration: any orphan from its start on counts.
+	open := entry
+	open.Duration = -1
+	if r = eval(open, late); r[0].Status != CheckInsufficient {
+		t.Errorf("invalid duration: %+v", r[0])
 	}
 }
 

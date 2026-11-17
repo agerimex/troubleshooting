@@ -387,19 +387,40 @@ type runSpans struct {
 
 // execution is one entry span and the spans below it.
 type execution struct {
-	Entry    *qSpan
-	Subtree  []*qSpan
-	Orphaned bool // its trace has spans whose parent was not recorded
+	Entry   *qSpan
+	Subtree []*qSpan
+	// Missing is a span of the trace whose parent was not recorded and that
+	// starts within the entry's duration, so it may belong below the entry:
+	// the execution is incomplete. nil if there is none.
+	Missing *qSpan
 }
 
 type spanIndex struct {
 	children map[string][]*qSpan // TraceId + ":" + parent SpanId
 	byID     map[string]*qSpan
-	orphans  map[string]bool // trace ids with an unrecorded parent
+	orphans  map[string][]*qSpan // per trace id: spans whose parent was not recorded
+}
+
+// missingBelow returns the first span (in start order) of the entry's trace
+// whose parent was not recorded and that starts within the entry's duration
+// (from its start on, if the duration is invalid). The entry's own missing
+// parent (e.g. an uninstrumented gateway above it) doesn't count: it hides
+// nothing below the entry.
+func (ix spanIndex) missingBelow(entry *qSpan) *qSpan {
+	var first *qSpan
+	for _, s := range ix.orphans[entry.TraceID] {
+		if s == entry || s.Start < entry.Start || (entry.Duration >= 0 && s.Start > entry.Start+entry.Duration*1000) {
+			continue
+		}
+		if first == nil || s.Start < first.Start || (s.Start == first.Start && s.SpanID < first.SpanID) {
+			first = s
+		}
+	}
+	return first
 }
 
 func indexSpans(spans []qSpan) spanIndex {
-	ix := spanIndex{children: map[string][]*qSpan{}, byID: map[string]*qSpan{}, orphans: map[string]bool{}}
+	ix := spanIndex{children: map[string][]*qSpan{}, byID: map[string]*qSpan{}, orphans: map[string][]*qSpan{}}
 	for i := range spans {
 		s := &spans[i]
 		ix.byID[s.TraceID+":"+s.SpanID] = s
@@ -412,7 +433,7 @@ func indexSpans(spans []qSpan) spanIndex {
 		key := s.TraceID + ":" + s.Parent
 		ix.children[key] = append(ix.children[key], s)
 		if ix.byID[key] == nil {
-			ix.orphans[s.TraceID] = true
+			ix.orphans[s.TraceID] = append(ix.orphans[s.TraceID], s)
 		}
 	}
 	return ix
@@ -430,7 +451,7 @@ func (ix spanIndex) executions(spans []qSpan, e QualityEntry, run string, from, 
 		if e.SpanKind != "" && s.Kind != e.SpanKind {
 			continue
 		}
-		ex := execution{Entry: s, Orphaned: ix.orphans[s.TraceID]}
+		ex := execution{Entry: s, Missing: ix.missingBelow(s)}
 		stack := []*qSpan{s}
 		seen := map[*qSpan]bool{s: true}
 		for len(stack) > 0 {
@@ -490,24 +511,45 @@ func nearestRank(sorted []float64, p float64) float64 {
 func measure(c QualityCheck, exs []execution, ix spanIndex) QualityCheckResult {
 	r := QualityCheckResult{ID: c.ID, Type: c.Type, Entry: *c.Entry, Advisory: c.Advisory,
 		Executions: len(exs), Details: []string{}, Evidence: []QualityEvidence{}}
-	orphaned := 0
-	for _, ex := range exs {
-		if ex.Orphaned {
-			orphaned++
-		}
-	}
-	if orphaned > 0 && c.Type != CheckLatency {
-		r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are in traces with spans whose parent was not recorded; calls below a missing span are not counted", orphaned, len(exs)))
-	}
 	switch c.Type {
 	case CheckLatency:
-		measureLatency(c, exs, &r)
+		measureLatency(c, exs, &r) // the entry's own duration: complete even if spans below it are missing
 	case CheckDBCalls:
 		measureDBCalls(c, exs, &r)
+		requireComplete(exs, &r)
 	case CheckForbidden:
 		measureForbidden(c, exs, &r, ix)
+		requireComplete(exs, &r)
 	}
 	return r
+}
+
+// requireComplete: a call count or the absence of a call can't pass while an
+// execution may be missing spans (a span of its trace names a parent that was
+// not recorded): the missing part could hold calls. A failure stands, since
+// the calls it counted were recorded.
+func requireComplete(exs []execution, r *QualityCheckResult) {
+	incomplete := 0
+	var first *execution
+	for i := range exs {
+		if exs[i].Missing != nil {
+			incomplete++
+			if first == nil {
+				first = &exs[i]
+			}
+		}
+	}
+	if incomplete == 0 {
+		return
+	}
+	r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are incomplete: a span below the entry names a parent that was not recorded (lost, sampled out or not instrumented), so calls below it may be missing", incomplete, len(exs)))
+	if r.Status != CheckPass {
+		return
+	}
+	r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "incomplete_executions", ""
+	r.Summary = fmt.Sprintf("%d of %d executions are incomplete, so the limit can't be shown to hold (%s)", incomplete, len(exs), r.Summary)
+	r.Evidence = append([]QualityEvidence{evidenceOf(*first, first.Missing,
+		fmt.Sprintf("incomplete execution: %s names parent %s, which was not recorded", first.Missing.Name, first.Missing.Parent))}, r.Evidence...)
 }
 
 func insufficientExecutions(c QualityCheck, r *QualityCheckResult, n int) bool {

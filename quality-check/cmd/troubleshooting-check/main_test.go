@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -46,6 +48,10 @@ var fixedNow = func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, ti
 func server(t *testing.T, status int, answer string, got *request) *httptest.Server {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/trace-report" && r.Method == http.MethodPost {
+			io.WriteString(w, snapshotAnswer)
+			return
+		}
 		if r.URL.Path != "/api/v1/quality/evaluate" || r.Method != http.MethodPost {
 			t.Errorf("request %s %s", r.Method, r.URL.Path)
 		}
@@ -170,8 +176,123 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 // The shipped example must stay valid for the strict parser.
 func TestExampleRulesParse(t *testing.T) {
-	r, err := loadRules(filepath.Join("..", "..", "quality.example.yaml"))
+	r, _, err := loadRules(filepath.Join("..", "..", "quality.example.yaml"))
 	if err != nil || r.Version != 1 || len(r.Checks) != 3 || r.Entry == nil || r.Checks[1].MaxPerExecution == nil {
 		t.Fatalf("example: %v %+v", err, r)
+	}
+}
+
+// The result names what was tested and which rules decided: commit, ref, CI
+// run, the rules file and the sha256 of its bytes.
+func TestSourceRecorded(t *testing.T) {
+	rules := writeFile(t, "quality.yaml", rulesYAML)
+	s := server(t, 200, answer("failed"), nil)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	code := run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42",
+		"--commit", "0123456789abcdef0123456789abcdef01234567", "--ref", "feat/x", "--ci-run", "https://ci.example/runs/7",
+		"--rules-ref", "origin/main:quality.yaml",
+		"--json", filepath.Join(dir, "r.json"), "--markdown", filepath.Join(dir, "s.md"), "--html", filepath.Join(dir, "r.html")}, &out, io.Discard, fixedNow)
+	if code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	// sha256 of rulesYAML's bytes.
+	sum := sha256.Sum256([]byte(rulesYAML))
+	digest := hex.EncodeToString(sum[:])
+	var ev Evaluation
+	b, _ := os.ReadFile(filepath.Join(dir, "r.json"))
+	if err := json.Unmarshal(b, &ev); err != nil || ev.Source == nil {
+		t.Fatalf("json: %v %s", err, b)
+	}
+	want := Source{Commit: "0123456789abcdef0123456789abcdef01234567", Ref: "feat/x", CIRun: "https://ci.example/runs/7",
+		Rules: rules, RulesRef: "origin/main:quality.yaml", RulesSHA256: digest}
+	if *ev.Source != want {
+		t.Errorf("source: %+v", *ev.Source)
+	}
+	line := "commit 0123456789ab (feat/x) · rules origin/main:quality.yaml, sha256 " + digest[:12]
+	if !strings.Contains(out.String(), "2 checks\n"+line+"\n") {
+		t.Errorf("text report:\n%s", out.String())
+	}
+	md, _ := os.ReadFile(filepath.Join(dir, "s.md"))
+	if !strings.Contains(string(md), "commit 0123456789ab (feat/x)") || !strings.Contains(string(md), "[CI run](https://ci.example/runs/7)") {
+		t.Errorf("markdown:\n%s", md)
+	}
+	h, _ := os.ReadFile(filepath.Join(dir, "r.html"))
+	if !strings.Contains(string(h), `<a href="https://ci.example/runs/7">CI run</a>`) || !strings.Contains(string(h), "sha256 "+digest[:12]) {
+		t.Errorf("html:\n%s", h)
+	}
+	// Without flags the rules are still identified.
+	out.Reset()
+	run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42"}, &out, io.Discard, fixedNow)
+	if !strings.Contains(out.String(), "rules "+rules+", sha256 "+digest[:12]) || strings.Contains(out.String(), "commit") {
+		t.Errorf("without flags:\n%s", out.String())
+	}
+}
+
+// The evidence trace: an entry, a database call and a span with markup in
+// its name (recorded text is never markup).
+const snapshotAnswer = `{"error":false,"message":"success","data":{"Report":{"spans":{"status":"ok","truncated":false,"records":[
+{"timeStamp":"1000000000","name":"start_session","spanKind":"server","service":"recording-api","spanId":"0000000000000001","parentSpanId":"0000000000000000","status":"unset","duration":2000,"tags":[]},
+{"timeStamp":"1001000000","name":"<script>alert(1)</script>","spanKind":"client","service":"recording-api","spanId":"0000000000000003","parentSpanId":"0000000000000002","status":"error","duration":-1,"tags":[]},
+{"timeStamp":"1000500000","name":"permission_lookup","spanKind":"client","service":"recording-api","spanId":"0000000000000002","parentSpanId":"0000000000000001","status":"unset","duration":500,"tags":[{"key":"db.system","value":"postgresql"}]}
+]}}}}`
+
+// Each evidence keeps its trace's spans in result.json and report.html, as
+// a tree; a failed read is noted and changes nothing; --no-snapshot skips it.
+func TestEvidenceSnapshot(t *testing.T) {
+	rules := writeFile(t, "quality.yaml", rulesYAML)
+	s := server(t, 200, answer("failed"), nil)
+	dir := t.TempDir()
+	code := run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42",
+		"--json", filepath.Join(dir, "r.json"), "--html", filepath.Join(dir, "r.html")}, io.Discard, io.Discard, fixedNow)
+	if code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	var ev Evaluation
+	b, _ := os.ReadFile(filepath.Join(dir, "r.json"))
+	if err := json.Unmarshal(b, &ev); err != nil {
+		t.Fatal(err)
+	}
+	snap := ev.Checks[0].Evidence[0].Snapshot
+	if snap == nil || len(snap.Spans) != 3 || snap.Spans[2].Peer != "postgresql" || snap.Error != "" {
+		t.Fatalf("snapshot: %+v", snap)
+	}
+	rows, depth := snapshotRows(snap.Spans)
+	if rows[0].SpanID != "0000000000000001" || rows[1].SpanID != "0000000000000002" || rows[2].SpanID != "0000000000000003" ||
+		depth[0] != 0 || depth[1] != 1 || depth[2] != 2 {
+		t.Errorf("tree: %+v %v", rows, depth)
+	}
+	h, _ := os.ReadFile(filepath.Join(dir, "r.html"))
+	for _, want := range []string{"Snapshot of the execution: 3 spans", "&lt;script&gt;alert(1)&lt;/script&gt;", `<tr class="hl">`,
+		"→ postgresql", "+0.5 ms", "invalid", `<span class="fail">error</span>`} {
+		if !strings.Contains(string(h), want) {
+			t.Errorf("html is missing %q", want)
+		}
+	}
+	if strings.Contains(strings.ToLower(string(h)), "<script") {
+		t.Error("html contains a script tag")
+	}
+
+	// A failed read: noted, same gate.
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/trace-report" {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			io.WriteString(w, `{"error":true,"message":"query limit"}`)
+			return
+		}
+		io.WriteString(w, answer("failed"))
+	}))
+	defer broken.Close()
+	if code := run([]string{"--url", broken.URL, "--rules", rules, "--run", "pr-42", "--html", filepath.Join(dir, "b.html")}, io.Discard, io.Discard, fixedNow); code != 1 {
+		t.Errorf("exit %d with a failed snapshot", code)
+	}
+	h, _ = os.ReadFile(filepath.Join(dir, "b.html"))
+	if !strings.Contains(string(h), "Snapshot of the execution unavailable: HTTP 504 query limit") {
+		t.Errorf("failed snapshot not noted")
+	}
+	run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42", "--no-snapshot", "--json", filepath.Join(dir, "n.json")}, io.Discard, io.Discard, fixedNow)
+	b, _ = os.ReadFile(filepath.Join(dir, "n.json"))
+	if strings.Contains(string(b), "snapshot") {
+		t.Errorf("--no-snapshot kept a snapshot")
 	}
 }

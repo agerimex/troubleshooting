@@ -75,7 +75,14 @@ func markdownReport(ev Evaluation) string {
 	if hasBaseline {
 		fmt.Fprintf(&b, " against baseline `%s`", strings.ReplaceAll(ev.Baseline, "`", "'"))
 	}
-	fmt.Fprintf(&b, ", %d checks.\n\n", len(ev.Checks))
+	fmt.Fprintf(&b, ", %d checks.", len(ev.Checks))
+	if s := sourceText(ev.Source); s != "" {
+		fmt.Fprintf(&b, " %s.", mdText(s))
+	}
+	if ev.Source != nil && webLink(ev.Source.CIRun) {
+		fmt.Fprintf(&b, " [CI run](%s)", strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E").Replace(ev.Source.CIRun))
+	}
+	b.WriteString("\n\n")
 	if hasBaseline {
 		b.WriteString("| | Check | Value | Limit | Baseline | Executions |\n|---|---|---|---|---|---|\n")
 	} else {
@@ -119,7 +126,10 @@ const htmlStyle = `body{font:14px/1.5 system-ui,sans-serif;margin:24px;color:#1b
 h1{font-size:22px;margin:0 0 4px}table{border-collapse:collapse;margin:16px 0;width:100%}
 th,td{border:1px solid #d5dccf;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f3f6ef}
 .pass{color:#2f6b12}.fail{color:#a1260d;font-weight:600}.insufficient{color:#8a5a00;font-weight:600}
-.meta{color:#5a6553;font-size:12px}code{font-size:12px}li{margin:2px 0}`
+.meta{color:#5a6553;font-size:12px}code{font-size:12px}li{margin:2px 0}
+details.snap{margin:6px 0 10px}details.snap summary{cursor:pointer;color:#3f6b12}
+table.snap{margin:6px 0;font-size:12px}table.snap td{padding:3px 6px;white-space:nowrap}table.snap tr.hl td{background:#fff4d6}
+table.snap td.bar,table.snap th.bar{width:40%;min-width:120px}td.bar i{display:block;height:8px;background:#7aa45a;border-radius:2px}`
 
 func htmlReport(ev Evaluation) string {
 	e := html.EscapeString
@@ -134,7 +144,14 @@ func htmlReport(ev Evaluation) string {
 	if ev.Baseline != "" {
 		fmt.Fprintf(&b, ` · baseline <code>%s</code> [%s, %s)`, e(ev.Baseline), e(ev.BaselineFrom), e(ev.BaselineTo))
 	}
-	fmt.Fprintf(&b, ` · %s · evaluated %s</p>`, e(ev.Contract), e(ev.EvaluatedAt))
+	fmt.Fprintf(&b, ` · %s · evaluated %s`, e(ev.Contract), e(ev.EvaluatedAt))
+	if s := sourceText(ev.Source); s != "" {
+		fmt.Fprintf(&b, `<br>%s`, e(s))
+	}
+	if ev.Source != nil && webLink(ev.Source.CIRun) {
+		fmt.Fprintf(&b, ` · <a href="%s">CI run</a>`, e(ev.Source.CIRun))
+	}
+	b.WriteString(`</p>`)
 	b.WriteString(`<table><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>`)
 	if ev.Baseline != "" {
 		b.WriteString(`<th>Baseline</th>`)
@@ -158,9 +175,9 @@ func htmlReport(ev Evaluation) string {
 			}
 			for _, ev := range c.Evidence {
 				if webLink(ev.Link) {
-					fmt.Fprintf(&b, `<li>Evidence: <a href="%s">%s</a></li>`, e(ev.Link), e(ev.Note))
+					fmt.Fprintf(&b, `<li>Evidence: <a href="%s">%s</a>%s</li>`, e(ev.Link), e(ev.Note), snapshotHTML(ev.Snapshot, ev.SpanID))
 				} else {
-					fmt.Fprintf(&b, `<li>Evidence: %s (trace <code>%s</code>)</li>`, e(ev.Note), e(ev.TraceID))
+					fmt.Fprintf(&b, `<li>Evidence: %s (trace <code>%s</code>)%s</li>`, e(ev.Note), e(ev.TraceID), snapshotHTML(ev.Snapshot, ev.SpanID))
 				}
 			}
 			b.WriteString(`</ul>`)
@@ -171,4 +188,41 @@ func htmlReport(ev Evaluation) string {
 	fmt.Fprintf(&b, `<p class="meta">%s. Statuses describe this run only: a pass means "not observed in this run", not a guarantee; a missing measurement is never a pass.</p>`, e(ev.Method))
 	b.WriteString(`</body></html>`)
 	return b.String()
+}
+
+// sourceText says what was tested and which rules decided, e.g.
+// "commit 1a2b3c4d5e6f (feat/x) · rules main@89ab01234567:quality.yaml, sha256 0123456789ab".
+// Empty if nothing is known.
+func sourceText(s *Source) string {
+	if s == nil {
+		return ""
+	}
+	var parts []string
+	if s.Commit != "" {
+		c := "commit " + short(s.Commit)
+		if s.Ref != "" {
+			c += " (" + s.Ref + ")"
+		}
+		parts = append(parts, c)
+	} else if s.Ref != "" {
+		parts = append(parts, "ref "+s.Ref)
+	}
+	if s.Rules != "" {
+		r := "rules " + s.Rules // the file as given, or where it was read from
+		if s.RulesRef != "" {
+			r = "rules " + s.RulesRef
+		}
+		if s.RulesSHA256 != "" {
+			r += ", sha256 " + short(s.RulesSHA256)
+		}
+		parts = append(parts, r)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func short(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }

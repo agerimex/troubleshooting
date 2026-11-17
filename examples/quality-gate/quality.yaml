@@ -1,0 +1,19 @@
+# Quality rules of the example application, checked in CI
+# (.github/workflows/ci.yml, job quality-example; docs/quality-gate.md).
+version: 1
+entry:
+  service: example-orders
+  operation: GET /orders/{id}
+  span_kind: server
+checks:
+  - id: orders-p95
+    type: latency
+    max_ms: 250
+    target_ms: 100
+  - id: orders-db-calls
+    type: db_calls
+    max_per_execution: 3
+    target_per_execution: 2
+  - id: no-legacy-pricing
+    type: forbidden_call
+    to: legacy-pricing

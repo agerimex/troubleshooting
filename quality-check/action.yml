@@ -11,8 +11,16 @@ inputs:
     description: The test run, i.e. the value of troubleshooting.run on its spans.
     required: true
   rules:
-    description: Rules file (YAML or JSON).
+    description: Rules file (YAML or JSON), relative to the repository root.
     default: quality.yaml
+  rules-from:
+    description: >-
+      Where to read the rules from. Empty (default): the checked-out commit,
+      so a pull request can change its own limits. "base": the pull
+      request's base branch, so the candidate can't loosen its gate (on
+      other events the checked-out file is used). Any other value is a
+      branch or tag fetched from origin.
+    default: ''
   baseline:
     description: Run to compare with (shown next to each value; never changes the result).
     default: ''
@@ -25,14 +33,32 @@ inputs:
   ui:
     description: Origin for evidence links, if it differs from url.
     default: ''
+  commit:
+    description: The tested commit, recorded in the result (default a pull request's head, else the pushed commit).
+    default: ${{ github.event.pull_request.head.sha || github.sha }}
+  ref:
+    description: The tested branch or tag, recorded in the result.
+    default: ${{ github.head_ref || github.ref_name }}
   fail-on:
     description: >-
       "unresolved" (default) fails the step when the gate failed or had not
       enough data; "failed" only when it failed; "never" only reports.
       An error (exit 3: invalid rules, unreachable API) always fails.
     default: unresolved
+  comment:
+    description: >-
+      Post the summary as a pull request comment and update it on later
+      runs: "auto" (default) on pull_request events, "true", or "false".
+      Needs `pull-requests: write`; without it (e.g. a fork pull request)
+      the comment is skipped with a notice and the step does not fail.
+    default: auto
+  github-token:
+    description: Token for the pull request comment.
+    default: ${{ github.token }}
   artifact:
-    description: Name of the uploaded report artifact (empty to skip the upload).
+    description: >-
+      Name of the uploaded report artifact (empty to skip the upload). It
+      also tells this gate's comment apart from other gates' comments.
     default: quality-report
 outputs:
   gate:
@@ -61,15 +87,60 @@ runs:
         TC_URL: ${{ inputs.url }}
         TC_RUN: ${{ inputs.run }}
         TC_RULES: ${{ inputs.rules }}
+        TC_RULES_FROM: ${{ inputs.rules-from }}
+        TC_BASE_REF: ${{ github.base_ref }}
         TC_BASELINE: ${{ inputs.baseline }}
         TC_SINCE: ${{ inputs.since }}
         TC_BASELINE_SINCE: ${{ inputs.baseline-since }}
         TC_UI: ${{ inputs.ui }}
+        TC_COMMIT: ${{ inputs.commit }}
+        TC_REF: ${{ inputs.ref }}
+        TC_CI_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
       run: |
         out="$RUNNER_TEMP/quality-report"
         mkdir -p "$out"
-        args=(--url "$TC_URL" --rules "$TC_RULES" --run "$TC_RUN" --since "$TC_SINCE"
+        echo "dir=$out" >> "$GITHUB_OUTPUT"
+        fail() {
+          echo "::error title=Quality gate::$1"
+          echo "### ⚠️ Quality gate: error" >> "$GITHUB_STEP_SUMMARY"
+          echo "$1" >> "$GITHUB_STEP_SUMMARY"
+          echo "exit-code=3" >> "$GITHUB_OUTPUT"
+          echo "gate=error" >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+        rules="$TC_RULES"
+        rules_ref=""
+        note=""
+        from="$TC_RULES_FROM"
+        if [ "$from" = base ]; then
+          if [ -n "$TC_BASE_REF" ]; then
+            from="$TC_BASE_REF"
+          else
+            from=""
+            echo "::notice title=Quality gate::not a pull request: the rules of the checked-out commit are used"
+          fi
+        fi
+        if [ -n "$from" ]; then
+          git fetch --no-tags --depth=1 origin "$from" || fail "could not fetch '$from' from origin to read the rules"
+          sha=$(git rev-parse FETCH_HEAD)
+          if git cat-file -e "FETCH_HEAD:$TC_RULES" 2>/dev/null; then
+            rules="$RUNNER_TEMP/quality-rules-$(basename "$TC_RULES")"
+            git show "FETCH_HEAD:$TC_RULES" > "$rules"
+            rules_ref="$from@${sha:0:12}:$TC_RULES"
+            if [ -f "$TC_RULES" ] && ! git diff --quiet FETCH_HEAD -- "$TC_RULES"; then
+              note="This commit changes \`$TC_RULES\`; the gate used the rules of \`$from\`."
+            fi
+          else
+            # The gate is being introduced: there are no trusted rules to keep.
+            [ -f "$TC_RULES" ] || fail "neither '$from' nor this commit has $TC_RULES"
+            note="\`$from\` has no \`$TC_RULES\` yet, so the gate used this commit's rules."
+            echo "::notice title=Quality gate::$note"
+          fi
+        fi
+        args=(--url "$TC_URL" --rules "$rules" --run "$TC_RUN" --since "$TC_SINCE"
+          --commit "$TC_COMMIT" --ref "$TC_REF" --ci-run "$TC_CI_RUN"
           --json "$out/result.json" --html "$out/report.html" --markdown "$out/summary.md")
+        if [ -n "$rules_ref" ]; then args+=(--rules-ref "$rules_ref"); fi
         if [ -n "$TC_BASELINE" ]; then args+=(--baseline "$TC_BASELINE"); fi
         if [ -n "$TC_BASELINE_SINCE" ]; then args+=(--baseline-since "$TC_BASELINE_SINCE"); fi
         if [ -n "$TC_UI" ]; then args+=(--ui "$TC_UI"); fi
@@ -79,13 +150,36 @@ runs:
         set -e
         case "$code" in 0) gate=passed ;; 1) gate=failed ;; 2) gate=unresolved ;; *) gate=error ;; esac
         if [ -f "$out/summary.md" ]; then
+          if [ -n "$note" ]; then printf '\n> %s\n' "$note" >> "$out/summary.md"; fi
           cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "summary=true" >> "$GITHUB_OUTPUT"
         else
           echo "### ⚠️ Quality gate: error (no result; see the step log)" >> "$GITHUB_STEP_SUMMARY"
         fi
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         echo "gate=$gate" >> "$GITHUB_OUTPUT"
-        echo "dir=$out" >> "$GITHUB_OUTPUT"
+    - name: Comment on the pull request
+      if: >-
+        always() && steps.check.outputs.summary == 'true' && github.event.pull_request.number &&
+        (inputs.comment == 'true' || inputs.comment == 'auto')
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        TC_PR: ${{ github.event.pull_request.number }}
+        TC_COMMIT: ${{ inputs.commit }}
+        TC_MARKER: ${{ inputs.artifact || 'quality-report' }}
+        TC_SUMMARY: ${{ steps.check.outputs.dir }}/summary.md
+      # A comment is a convenience: it never fails the step.
+      run: |
+        set +e
+        "$RUNNER_TEMP/troubleshooting-check" comment --markdown "$TC_SUMMARY" --repo "$GITHUB_REPOSITORY" \
+          --pr "$TC_PR" --commit "$TC_COMMIT" --marker "$TC_MARKER"
+        case "$?" in
+          0) ;;
+          2) echo "::notice title=Quality gate::the pull request comment was skipped (see above); the result is in the job summary" ;;
+          *) echo "::warning title=Quality gate::the pull request comment failed (see above); the result is in the job summary" ;;
+        esac
+        exit 0
     - name: Upload the report
       if: inputs.artifact != '' && always()
       uses: actions/upload-artifact@v4
@@ -98,13 +192,18 @@ runs:
       env:
         TC_GATE: ${{ steps.check.outputs.gate }}
         TC_FAIL_ON: ${{ inputs.fail-on }}
+        TC_COMMENT: ${{ inputs.comment }}
       run: |
         case "$TC_FAIL_ON" in
           unresolved|failed|never) ;;
           *) echo "::error title=Quality gate::fail-on must be unresolved, failed or never, not '$TC_FAIL_ON'"; exit 1 ;;
         esac
+        case "$TC_COMMENT" in
+          auto|true|false) ;;
+          *) echo "::error title=Quality gate::comment must be auto, true or false, not '$TC_COMMENT'"; exit 1 ;;
+        esac
         case "$TC_GATE:$TC_FAIL_ON" in
-          error:*) echo "::error title=Quality gate::no result (invalid rules, unreachable API or another error)"; exit 1 ;;
+          error:*|:*) echo "::error title=Quality gate::no result (invalid rules, unreachable API or another error)"; exit 1 ;;
           passed:*|failed:never|unresolved:never|unresolved:failed) echo "Quality gate: $TC_GATE" ;;
           failed:*) echo "::error title=Quality gate::failed"; exit 1 ;;
           unresolved:*) echo "::error title=Quality gate::unresolved: not enough data"; exit 1 ;;
