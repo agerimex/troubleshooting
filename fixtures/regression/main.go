@@ -120,6 +120,9 @@ func load(ctx context.Context, o options) error {
 	}); err != nil {
 		return err
 	}
+	if err := c.rebuildLoaded(ctx); err != nil {
+		return err
+	}
 	if err := c.m2Ready(ctx, o); err != nil {
 		return err
 	}

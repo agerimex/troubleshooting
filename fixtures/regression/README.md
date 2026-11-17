@@ -56,6 +56,14 @@ in `log-ui/e2e` and run with `make ui-e2e`; they use a mocked API.
   never reuses the ids of an earlier run.
 - Spans are written by the receiver before it answers, so readiness is a
   bounded poll of the API (default 3 minutes), not a sleep.
+- Once all spans are visible, `load` rebuilds the statistics of every
+  completed hour it wrote (`POST /api/v1/stats/rebuild`, `T-3h` up to the
+  current hour). A whole hour is read from its committed revision, and the
+  API's refresher runs once when it starts: in CI that is during the load,
+  so an hour it reached before its records arrived kept a revision without
+  them until the next refresh, and the milestone 2 checks saw 0 calls about
+  half the time. The rebuild also replaces the manual rebuild a reused test
+  volume needed.
 - Tables keep 3 days (TTL): check a run within that time, or load a new one.
 - Expected answers are written out in `checks.go`; none is computed with the
   API's SQL or filter code.

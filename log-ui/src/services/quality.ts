@@ -1,6 +1,9 @@
 import { type ExecutionTarget, type ExecutionView } from '@/services/navigation'
+import { ROOT_PARENT } from '@/services/spanTree'
+import { type Span } from '@/types/filter'
+import { type Report } from '@/types/report'
 import { escapeHtml, htmlPage } from '@/services/report'
-import { type CheckStatus, type Gate, type QualityCheckResult, type QualityEvaluation, type QualityEvidence, type QualitySource } from '@/types/quality'
+import { type CheckStatus, type Gate, type QualityCheckResult, type QualityEvaluation, type QualityEvidence, type QualitySource, type SavedSnapshot } from '@/types/quality'
 
 // Pure parts of the Quality page (docs/quality-gate.md): windows, labels,
 // evidence targets, reading a CLI result file and the HTML export.
@@ -101,6 +104,9 @@ export function evidenceTarget (c: QualityCheckResult, e: QualityEvidence, view:
   if (spanIdPattern.test(e.span_id)) {
     t.spanId = e.span_id
   }
+  if (savedSpans(e.snapshot, e.trace_id).length > 0) {
+    t.snapshot = e.snapshot
+  }
   return t
 }
 
@@ -174,7 +180,8 @@ export function sourceText (s: QualitySource | undefined | null): string {
   const commit = str(s.commit)
   const ref = str(s.ref)
   if (commit) {
-    parts.push('commit ' + short(commit) + (ref ? ' (' + ref + ')' : ''))
+    const head = str(s.pr_head)
+    parts.push('commit ' + short(commit) + (ref ? ' (' + ref + ')' : '') + (head ? ', merging head ' + short(head) : ''))
   } else if (ref) {
     parts.push('ref ' + ref)
   }
@@ -189,4 +196,63 @@ export function sourceText (s: QualitySource | undefined | null): string {
 export function ciRunLink (s: QualitySource | undefined | null): string {
   const u = s && typeof s.ci_run === 'string' ? s.ci_run : ''
   return /^https?:\/\//i.test(u) ? u : ''
+}
+
+const STATUS_CODE: Record<string, number> = { unset: 0, error: 1, ok: 2 }
+
+// savedSpans are a snapshot's spans as Spans of the trace, leaving out any
+// that a hand-edited file made invalid.
+export function savedSpans (snap: SavedSnapshot | undefined | null, traceId: string): Span[] {
+  if (!snap || !Array.isArray(snap.spans)) {
+    return []
+  }
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  return snap.spans.filter((s) => s && spanIdPattern.test(str(s.span_id)) && nsPattern.test(str(s.start))).map((s) => {
+    const status = str(s.status) || 'unset'
+    const peer = str(s.peer)
+    return {
+      timeStamp: s.start,
+      name: str(s.name),
+      spanKind: str(s.kind),
+      service: str(s.service),
+      traceId,
+      spanId: s.span_id,
+      parentSpanId: spanIdPattern.test(str(s.parent_id)) ? s.parent_id : ROOT_PARENT,
+      msg: '',
+      // The snapshot keeps the CLIENT's peer (peer.service or db.system):
+      // the sequence draws the call to it.
+      tags: peer ? [{ key: 'peer.service', value: peer }] : [],
+      serviceTags: [],
+      childSpanCount: 0,
+      statusCode: STATUS_CODE[status] ?? 0,
+      status,
+      statusMessage: '',
+      duration: typeof s.duration_us === 'number' ? s.duration_us : -1,
+      events: [],
+      links: []
+    }
+  })
+}
+
+export const SNAPSHOT_LOGS_TEXT = 'Logs are not kept in a saved snapshot.'
+
+// snapshotReport is a report of a saved snapshot: its spans, and a logs
+// section that says logs were not kept (never "no logs").
+export function snapshotReport (traceId: string, window: { from: string, to: string }, snap: SavedSnapshot, generatedAt: string): Report {
+  const spans = savedSpans(snap, traceId)
+  return {
+    traceId,
+    timeFrom: window.from,
+    timeTo: window.to,
+    generatedAt,
+    spans: {
+      status: 'ok', records: spans, limit: spans.length, shown: spans.length, truncated: !!snap.truncated,
+      total: snap.truncated ? null : spans.length, totalStatus: snap.truncated ? 'unavailable' : 'ok', retrievedAt: generatedAt
+    },
+    logs: {
+      status: 'unavailable', error: SNAPSHOT_LOGS_TEXT, records: [], limit: 0, shown: 0, truncated: false,
+      total: null, totalStatus: 'unavailable', retrievedAt: generatedAt
+    },
+    warnings: []
+  }
 }

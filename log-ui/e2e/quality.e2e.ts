@@ -107,3 +107,45 @@ test('QG-UI-004: the rules and run stay in this browser between visits', async (
   await expect(page.getByTestId('quality-rules')).toHaveValue('version: 1\n# mine\n')
   await expect(page.getByTestId('quality-run')).toHaveValue('pr-7')
 })
+
+test('QG-UI-005: a CI result\'s saved snapshot opens when the live spans are gone; live data wins', async ({ page }) => {
+  await setup(page, () => ({ status: 500, body: {} }))
+  const GONE = '0aa7dedc4bb0a64d39881e733a91f6d0'
+  const t0 = 1794917244779080744n
+  const snap = (id: string, parent: string, name: string, kind: string, offUs: number, durUs: number, peer?: string) =>
+    ({ span_id: id, parent_id: parent, service: 'example-orders', name, kind, start: (t0 + BigInt(offUs) * 1000n).toString(), duration_us: durUs, status: 'unset', peer })
+  const spans = [
+    snap('00000000000000b1', '0000000000000000', 'GET /orders/{id}', 'server', 0, 12000),
+    snap('00000000000000b2', '00000000000000b1', 'SELECT order_items', 'client', 10, 1100, 'postgresql'),
+    snap('00000000000000b3', '00000000000000b1', 'SELECT prices WHERE item_id = ?', 'client', 1200, 1100, 'postgresql'),
+    snap('00000000000000b4', '00000000000000b1', 'GET /discounts', 'client', 9700, 2100, 'legacy-pricing'),
+    { span_id: 'not-a-span-id', start: 'x' } // a hand-edited file: left out
+  ]
+  const ev = evaluation()
+  ev.checks[0].evidence = [
+    { trace_id: GONE, span_id: '00000000000000b2', time_from: (t0 - 60000000000n).toString(), time_to: (t0 + 60000000000n).toString(), note: 'execution with the most database calls: 9', snapshot: { spans } } as any,
+    { ...ev.checks[0].evidence[0], snapshot: { spans } } as any
+  ]
+  await page.getByTestId('quality-file').setInputFiles({ name: 'result.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(ev)) })
+  await expect(page.getByTestId('quality-snapshot-db-calls').first()).toHaveText('saved snapshot: 4 spans')
+
+  await page.getByTestId('quality-open-timeline-db-calls').first().click()
+  await expect(page.getByTestId('saved-snapshot')).toContainText('Saved snapshot from the CI result')
+  await expect(page.getByTestId('completeness')).toHaveCount(0)
+  await expect(page.getByTestId('report-summary')).toContainText('4 spans')
+  await expect(page.getByTestId('logs-summary')).toContainText('Logs are not kept in a saved snapshot.')
+  await expect(page.getByTestId('retry-logs')).toHaveCount(0)
+  await expect(page.getByTestId('inspector-logs-not-kept')).toHaveText('Logs are not kept in a saved snapshot.')
+  await expect(page.getByTestId('inspector-retry-logs')).toHaveCount(0)
+  await expect(page.getByTestId('generated-at')).toHaveCount(0)
+  await expect(page.getByTestId('report')).toContainText('SELECT prices WHERE item_id = ?')
+  await page.getByTestId('view-sequence').click()
+  await expect(page.getByTestId('report')).toContainText('legacy-pricing')
+
+  // The other evidence's trace is still on the server: the live report wins.
+  await page.getByTestId('return-origin').click()
+  await page.getByTestId('quality-open-timeline-db-calls').nth(1).click()
+  await expect(page.getByTestId('report-summary')).toContainText('1 spans')
+  await expect(page.getByTestId('saved-snapshot')).toHaveCount(0)
+  await expect(page.getByTestId('completeness')).toBeVisible()
+})

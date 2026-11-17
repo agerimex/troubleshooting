@@ -7,7 +7,7 @@
         <PrimeButton type="button" size="small" label="Sequence library" icon="pi pi-list" @click="libraryOpen = true" data-testid="open-library"/>
       </div>
       <ExecutionViewer :key="targetKey" :traceId="target.traceId" :initialWindow="target.window" :spanId="target.spanId ?? ''" :recordId="target.recordId ?? ''"
-        :initialViewChoice="target.view" :origin="target.origin ?? null" :context="target.context ?? null" :included="included"
+        :initialViewChoice="target.view" :origin="target.origin ?? null" :context="target.context ?? null" :snapshot="target.snapshot ?? null" :included="included"
         @back="back" @open-execution="$emit('open-execution', $event)" @include="$emit('include', $event)"/>
     </div>
   </div>

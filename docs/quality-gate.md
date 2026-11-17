@@ -26,13 +26,18 @@ load and outage experiments, and an enforced CI trust model (see "Trust" below).
    With log-sender: `sender.WithResourceAttributes(map[string]string{"troubleshooting.run": "pr-42-1"})`.
    A span attribute of the same name works too. Only the entry service needs
    it: spans of downstream services belong to the run through their recorded
-   parent in the same trace.
+   parent in the same trace. In CI use a new id for every run and attempt,
+   `ci-${{ github.run_id }}-${{ github.run_attempt }}` (plus the job name when
+   a matrix runs the same tests): a pull request number repeats on every push,
+   and two runs with one id mix their executions.
 
 2. Write the rules (`quality.yaml`; example in
    `quality-check/quality.example.yaml`):
 
    ```yaml
    version: 1
+   run:                         # optional: what the test run declares
+     executions: 200            # each checked entry runs this often: fewer = lost
    entry:                       # the operation an execution starts with
      service: recording-api
      operation: start_session
@@ -43,7 +48,7 @@ load and outage experiments, and an enforced CI trust model (see "Trust" below).
        percentile: 95           # default 95
        max_ms: 800              # the limit: decides the gate
        target_ms: 500           # optional, advisory
-       min_executions: 20       # default 20 for latency, 1 otherwise
+       min_executions: 20       # default run.executions (at least 20 for latency), else 20 for latency, 1 otherwise
      - id: db-calls
        type: db_calls
        max_per_execution: 3
@@ -115,7 +120,7 @@ the gate.
   uses: agerimex/troubleshooting/quality-check@main   # pin a commit for real use
   with:
     url: http://localhost:8095          # where your Troubleshooting runs
-    run: pr-${{ github.event.number }}-${{ github.run_attempt }}
+    run: ci-${{ github.run_id }}-${{ github.run_attempt }}
     rules: quality.yaml
     baseline: main-118                  # optional: the id of a run you tagged earlier
     since: 1h
@@ -139,12 +144,15 @@ with a notice. On a push (no base) the checked-out file is used. Any other
 value is a branch or tag fetched from origin.
 
 **What was tested.** The CLI adds `source` to the result: `commit` (the
-action passes a pull request's head, not its merge commit), `ref`, `ci_run`
+tested commit: the action records what is checked out, `git rev-parse HEAD`,
+which for a pull request is its merge commit), `pr_head` (the pull
+request's head, when it differs; the comment is skipped once the head moves
+on), `ref`, `ci_run`
 (link to the run attempt), `rules` (the file as given), `rules_ref` (e.g.
 `main@89ab01234567:quality.yaml` with `rules-from`) and `rules_sha256` of the
 file's bytes. Text, Markdown and HTML reports show it in one line, and the
 Quality page shows it for an opened result file. CLI flags `--commit`,
-`--ref`, `--ci-run`, `--rules-ref`.
+`--pr-head`, `--ref`, `--ci-run`, `--rules-ref`.
 
 **Pull request comment.** `troubleshooting-check comment` posts the Markdown
 summary as one comment and updates that same comment on later runs (found by
@@ -185,12 +193,12 @@ jobs:
         env:
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
           OTEL_EXPORTER_OTLP_INSECURE: "true"
-          OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=pr-${{ github.run_id }}-${{ github.run_attempt }}
+          OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=ci-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: agerimex/troubleshooting/quality-check@main
         with:
           url: ${{ steps.troubleshooting.outputs.url }}
           ui: ${{ steps.troubleshooting.outputs.ui }}   # none: no links to a server that is gone after the job
-          run: pr-${{ github.run_id }}-${{ github.run_attempt }}
+          run: ci-${{ github.run_id }}-${{ github.run_attempt }}
           rules-from: base
 ```
 
@@ -262,9 +270,30 @@ it. A pass reads "not observed in this run": a trace cannot prove a call can
 never happen. Whether the call was synchronous is not judged.
 
 **Statuses.** A check is `pass`, `fail` or `insufficient` (with a reason:
-`no_executions`, `too_few_executions`, `incomplete_executions`, `outside_retention`, `too_many_spans`,
+`no_executions`, `too_few_executions`, `missing_executions`, `incomplete_executions`,
+`invalid_durations`, `no_database_calls`, `outside_retention`, `too_many_spans`,
 `query_limit`, `query_unavailable`, `query_error`). Targets are `met` or
 `open` and never change a status.
+
+**What a pass needs.** Traces can't show what was never recorded, so a pass
+only stands on data that can carry it:
+
+- `run.executions` declares how many executions of each checked entry the
+  tests make. It is every check's default minimum (latency: at least 20), and
+  fewer is `missing_executions`: executions were lost (not exported, not
+  tagged, outside the window), not a smaller run. A check's own
+  `min_executions` wins.
+- A `db_calls` check with no database call in any execution is
+  `no_database_calls`: missing instrumentation is far more likely than an
+  operation that reads nothing. If it really makes none, the limit says so:
+  `max_per_execution: 0`.
+- Executions without a valid duration (the entry never ended, or ended before
+  it started) are often the slowest ones, so a latency pass with any of them
+  is `invalid_durations`; a failure measured on the others stands.
+- A branch that was never recorded at all (no span names its missing parent)
+  can't be detected from the spans. Declaring `run.executions` and keeping the
+  instrumentation of database calls and service calls in the tests catches the
+  common cases; the result never claims more than "not observed in this run".
 
 **Incomplete executions.** An execution is incomplete when a span of its
 trace names a parent that was not recorded (lost, sampled out, not
@@ -291,7 +320,10 @@ execution did. A failed read (including a query limit, which returns no
 spans) is noted and never changes a status; up to 4 traces are read at the
 same time. `--no-snapshot` skips it. With `--ui none` (a Troubleshooting
 started inside the job) the evidence has no link, and the Markdown points to
-the HTML report for the snapshot only when one is written.
+the HTML report for the snapshot only when one is written. The Quality page
+opens a result file's snapshot in Timeline & Sequence when the live spans of
+its trace are gone (marked as a saved snapshot; logs, attributes and events
+are not kept), and the live report whenever the spans still exist.
 
 **Gate.** Any failed blocking check → `failed`; otherwise any blocking check
 with insufficient data → `unresolved`; otherwise `passed`. Advisory checks are

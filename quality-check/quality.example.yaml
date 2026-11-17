@@ -1,6 +1,11 @@
 # Quality rules for troubleshooting-check (quality-gate-v1, docs/quality-gate.md).
 version: 1
 
+# Optional: what the test run declares. The tests run each checked entry this
+# often; fewer recorded executions means lost spans (unresolved, not a pass).
+run:
+  executions: 200
+
 # The operation an execution starts with; a check can set its own entry.
 entry:
   service: recording-api

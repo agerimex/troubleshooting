@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  baselineText, ciRunLink, evidenceTarget, evidenceView, exportHtml, exportJson, gateLabel, limitText, parseResult, presetWindow, sourceText, statusLabel, valueText
+  baselineText, ciRunLink, evidenceTarget, evidenceView, exportHtml, exportJson, gateLabel, limitText, parseResult, presetWindow, savedSpans, snapshotReport, sourceText, statusLabel, valueText
 } from '@/services/quality'
 import { type QualityCheckResult, type QualityEvaluation } from '@/types/quality'
 
@@ -95,6 +95,7 @@ describe('the CLI source of a result file', () => {
   it('names the commit, the rules and their digest; only http(s) CI links', () => {
     const s = { commit: '0123456789abcdef0123', ref: 'feat/x', ci_run: 'https://ci.example/runs/7', rules: '/tmp/q.yaml', rules_ref: 'main@89ab01234567:quality.yaml', rules_sha256: 'd80ff3781a3d0000' }
     expect(sourceText(s)).toBe('commit 0123456789ab (feat/x) · rules main@89ab01234567:quality.yaml, sha256 d80ff3781a3d')
+    expect(sourceText({ ...s, pr_head: 'fedcba9876543210' })).toBe('commit 0123456789ab (feat/x), merging head fedcba987654 · rules main@89ab01234567:quality.yaml, sha256 d80ff3781a3d')
     expect(sourceText({ rules: 'quality.yaml' })).toBe('rules quality.yaml')
     expect(sourceText(undefined)).toBe('')
     expect(sourceText({ commit: 5 } as any)).toBe('')
@@ -103,5 +104,39 @@ describe('the CLI source of a result file', () => {
     const [err, ev] = parseResult(JSON.stringify({ contract: 'quality-gate-v1', gate: 'failed', checks: [], run: 'r', source: s }))
     expect(err).toBeNull()
     expect(exportHtml(ev!)).toContain('<p>commit 0123456789ab (feat/x) · rules main@89ab01234567:quality.yaml, sha256 d80ff3781a3d</p>')
+  })
+})
+
+describe('saved snapshots (CI result files)', () => {
+  const snap = {
+    truncated: true,
+    spans: [
+      { span_id: '00000000000000b1', parent_id: '0000000000000000', service: 'api', name: 'GET /x', kind: 'server', start: '1000', duration_us: 12000, status: 'error' },
+      { span_id: '00000000000000b2', parent_id: '00000000000000b1', service: 'api', name: 'SELECT', kind: 'client', start: '2000', duration_us: 10, status: 'ok', peer: 'postgresql' },
+      { span_id: 'bad', parent_id: '', service: 'api', name: 'x', kind: 'client', start: '1', duration_us: 1, status: 'ok' }
+    ]
+  }
+
+  it('turns the valid spans into spans of the trace', () => {
+    const spans = savedSpans(snap, TRACE)
+    expect(spans.map((s) => s.spanId)).toEqual(['00000000000000b1', '00000000000000b2'])
+    expect(spans[0]).toMatchObject({ traceId: TRACE, parentSpanId: '0000000000000000', statusCode: 1, status: 'error', duration: 12000, spanKind: 'server', events: [], links: [] })
+    expect(spans[1].tags).toEqual([{ key: 'peer.service', value: 'postgresql' }])
+    expect(savedSpans(undefined, TRACE)).toEqual([])
+    expect(savedSpans({ spans: 'x' } as any, TRACE)).toEqual([])
+  })
+
+  it('is a report whose logs were not kept, never "no logs"', () => {
+    const r = snapshotReport(TRACE, { from: '0', to: '9' }, snap, '5')
+    expect(r.spans).toMatchObject({ status: 'ok', shown: 2, truncated: true, total: null })
+    expect(r.logs).toMatchObject({ status: 'unavailable', error: 'Logs are not kept in a saved snapshot.', records: [] })
+  })
+
+  it('travels with the evidence target only when it has spans', () => {
+    const c = candidate().checks[0]
+    const e = { ...c.evidence[0], snapshot: snap }
+    expect(evidenceTarget(c, e)?.snapshot).toBe(snap)
+    expect(evidenceTarget(c, { ...e, snapshot: { spans: [] } })?.snapshot).toBeUndefined()
+    expect(evidenceTarget(c, { ...e, snapshot: { error: 'query limit' } })?.snapshot).toBeUndefined()
   })
 })

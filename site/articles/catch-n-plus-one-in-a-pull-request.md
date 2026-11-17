@@ -67,12 +67,12 @@ The job starts a private Troubleshooting, runs the tests with spans going to it,
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
     OTEL_EXPORTER_OTLP_INSECURE: "true"
-    OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=pr-${{ github.run_id }}-${{ github.run_attempt }}
+    OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=ci-${{ github.run_id }}-${{ github.run_attempt }}
 - uses: agerimex/troubleshooting/quality-check@main
   with:
     url: ${{ steps.troubleshooting.outputs.url }}
     ui: ${{ steps.troubleshooting.outputs.ui }}
-    run: pr-${{ github.run_id }}-${{ github.run_attempt }}
+    run: ci-${{ github.run_id }}-${{ github.run_attempt }}
     rules: quality.yaml
     rules-from: base
 ```

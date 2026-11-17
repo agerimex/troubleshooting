@@ -352,7 +352,7 @@ func TestQualityIncompleteExecutions(t *testing.T) {
 	late.Start = qBase + 1000*1000 + 1
 	early := orphanCall
 	early.Start = qBase - 1
-	for name, spans := range map[string][]qSpan{"gateway": {gateway, db(2, spanHex(1), qBase+2)}, "late": {entry, late}, "early": {entry, early}} {
+	for name, spans := range map[string][]qSpan{"gateway": {gateway, db(2, spanHex(1), qBase+2)}, "late": {entry, db(2, spanHex(1), qBase+2), late}, "early": {entry, db(2, spanHex(1), qBase+2), early}} {
 		if r = eval(spans...); r[0].Status != CheckPass || r[1].Status != CheckPass || len(r[0].Evidence) > 0 && r[0].Evidence[0].SpanID == spanHex(9) {
 			t.Errorf("%s: %+v / %+v", name, r[0], r[1])
 		}
@@ -393,7 +393,7 @@ func TestQualityIncompleteExecutions(t *testing.T) {
 // A field of another check type is an error, never silently ignored.
 func TestQualityForeignFields(t *testing.T) {
 	c := QualityCheck{ID: "db", Type: CheckDBCalls, MaxPerExecution: ip(3), MaxMs: fp(200), To: "x"}
-	err := validateCheck(&c, &QualityEntry{Service: "s", Operation: "o"})
+	err := validateCheck(&c, &QualityEntry{Service: "s", Operation: "o"}, 0)
 	if err == nil || err.Error() != "max_ms, to don't apply to a db_calls check" {
 		t.Errorf("foreign fields: %v", err)
 	}
@@ -504,5 +504,97 @@ func TestQualityRulesYAML(t *testing.T) {
 	both := QualityRequest{RulesYAML: referenceYAML, Rules: referenceRules(), Run: "r", TimeFrom: num(qBase), TimeTo: num(qBase + 1)}
 	if err := both.Validate(); err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Errorf("rules and rules_yaml: %v", err)
+	}
+}
+
+// Evidence sufficiency (stage 4): a pass needs the data to stand on.
+func TestQualityEvidenceSufficiency(t *testing.T) {
+	tr := func(i int) string { return fmt.Sprintf("%032x", i+1) }
+	entry := func(i int, dur int64) qSpan {
+		return qSpan{TraceID: tr(i), SpanID: spanHex(1), Parent: RootParentSpanID, Service: "api", Name: "start", Kind: "server",
+			Start: qBase + int64(i)*int64(time.Second), Duration: dur, Run: "r"}
+	}
+	db := func(i int) qSpan {
+		return qSpan{TraceID: tr(i), SpanID: spanHex(2), Parent: spanHex(1), Service: "api", Name: "lookup", Kind: "client", DB: true,
+			Start: qBase + int64(i)*int64(time.Second) + 1, Duration: 10}
+	}
+	eval := func(rules QualityRules, spans []qSpan) []QualityCheckResult {
+		return buildQualityResult(validRequest(t, rules, "r", ""), runSpans{Spans: spans}, runSpans{}, time.Now()).Checks
+	}
+	e := &QualityEntry{Service: "api", Operation: "start"}
+
+	// Invalid durations: 18 of 20 never ended; the 2 valid ones are fast.
+	var spans []qSpan
+	for i := 0; i < 20; i++ {
+		d := int64(-1)
+		if i < 2 {
+			d = 1000
+		}
+		spans = append(spans, entry(i, d), db(i))
+	}
+	lat := QualityRules{Version: 1, Entry: e, Checks: []QualityCheck{{ID: "p95", Type: CheckLatency, MaxMs: fp(100), MinExecutions: 1}}}
+	if r := eval(lat, spans)[0]; r.Status != CheckInsufficient || r.Reason != "invalid_durations" || !strings.Contains(r.Summary, "18 of 20 executions have no valid duration") ||
+		r.Evidence[0].Note != "execution without a valid duration" {
+		t.Errorf("invalid durations: %+v", r)
+	}
+	slow := append([]qSpan(nil), spans...)
+	slow[0].Duration = 500_000 // 500 ms: a measured execution already breaks the limit
+	if r := eval(lat, slow)[0]; r.Status != CheckFail {
+		t.Errorf("a failure with invalid durations stands: %+v", r)
+	}
+	var none []qSpan
+	for i := 0; i < 3; i++ {
+		none = append(none, entry(i, -1))
+	}
+	if r := eval(lat, none)[0]; r.Status != CheckInsufficient || r.Reason != "invalid_durations" || !strings.Contains(r.Summary, "none of the 3") {
+		t.Errorf("all durations invalid: %+v", r)
+	}
+
+	// No database call in the whole run: not a pass, unless none is the limit.
+	var bare []qSpan
+	for i := 0; i < 3; i++ {
+		bare = append(bare, entry(i, 1000))
+	}
+	dbRule := func(max int) QualityRules {
+		return QualityRules{Version: 1, Entry: e, Checks: []QualityCheck{{ID: "db", Type: CheckDBCalls, MaxPerExecution: ip(max), TargetPer: nil}}}
+	}
+	if r := eval(dbRule(3), bare)[0]; r.Status != CheckInsufficient || r.Reason != "no_database_calls" || !strings.Contains(r.Summary, "max_per_execution: 0") {
+		t.Errorf("no database calls: %+v", r)
+	}
+	if r := eval(dbRule(0), bare)[0]; r.Status != CheckPass {
+		t.Errorf("no database calls with limit 0: %+v", r)
+	}
+
+	// run.executions: fewer executions than the run declares were lost.
+	decl := QualityRules{Version: 1, Run: &QualityRun{Executions: 5}, Entry: e, Checks: []QualityCheck{
+		{ID: "db", Type: CheckDBCalls, MaxPerExecution: ip(3)},
+		{ID: "own", Type: CheckDBCalls, MaxPerExecution: ip(3), MinExecutions: 1},
+		{ID: "p", Type: CheckLatency, MaxMs: fp(100)},
+	}}
+	var three []qSpan
+	for i := 0; i < 3; i++ {
+		three = append(three, entry(i, 1000), db(i))
+	}
+	r := eval(decl, three)
+	if r[0].Status != CheckInsufficient || r[0].Reason != "missing_executions" || !strings.Contains(r[0].Summary, "the run declares 5") {
+		t.Errorf("declared executions: %+v", r[0])
+	}
+	if r[1].Status != CheckPass {
+		t.Errorf("a check's own min_executions wins: %+v", r[1])
+	}
+	if r[2].Reason != "missing_executions" {
+		t.Errorf("latency with declared executions: %+v", r[2])
+	}
+	var five []qSpan
+	for i := 0; i < 5; i++ {
+		five = append(five, entry(i, 1000), db(i))
+	}
+	if r = eval(decl, five); r[0].Status != CheckPass || r[2].Reason != "too_few_executions" {
+		t.Errorf("all declared executions (latency still needs 20): %+v / %+v", r[0], r[2])
+	}
+	bad := QualityRequest{Rules: QualityRules{Version: 1, Run: &QualityRun{Executions: -1}, Entry: e, Checks: []QualityCheck{{ID: "db", Type: CheckDBCalls, MaxPerExecution: ip(3)}}},
+		Run: "r", TimeFrom: num(qBase), TimeTo: num(qBase + 1)}
+	if err := bad.Validate(); err == nil {
+		t.Errorf("negative run.executions accepted")
 	}
 }

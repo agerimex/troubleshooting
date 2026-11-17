@@ -1,5 +1,6 @@
 import { type LogRecord, type Report } from '@/types/report'
 import { type ReportContext } from '@/types/stats'
+import { type SavedSnapshot } from '@/types/quality'
 import { sortedLogs } from '@/services/report'
 
 // Navigation of the product blueprint (product-blueprint-v1.3) plus Quality
@@ -39,6 +40,9 @@ export interface ExecutionTarget {
   origin?: Origin
   // The comparison an example was opened from (Releases).
   context?: ReportContext
+  // A saved snapshot of the trace (a CI result file): shown when the live
+  // spans are not available.
+  snapshot?: SavedSnapshot
 }
 
 export const VIEW_PREFERENCE_KEY = 'troubleshooting.execution.view'

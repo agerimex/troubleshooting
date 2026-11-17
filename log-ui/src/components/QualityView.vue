@@ -77,6 +77,8 @@
             <template v-if="targetOf(c, e)">
               <button type="button" class="link" @click="open(c, e, 'timeline')" :data-testid="'quality-open-timeline-' + c.id">Open timeline</button>
               <button type="button" class="link" @click="open(c, e, 'sequence')" :data-testid="'quality-open-sequence-' + c.id">Open sequence</button>
+              <span v-if="snapshotCount(e)" class="text-xs opacity-80" :data-testid="'quality-snapshot-' + c.id"
+                title="Shown when the live spans of this trace are not available">saved snapshot: {{ snapshotCount(e) }} spans</span>
             </template>
             <span v-else class="text-xs opacity-80">trace {{ e.trace_id }} (not a valid execution link)</span>
           </div>
@@ -96,7 +98,7 @@ import { download } from '@/services/report'
 import { type ExecutionView } from '@/services/navigation'
 import {
   EXAMPLE_RULES, WINDOW_PRESETS, baselineText, entryText, evidenceTarget, exportHtml, exportJson, gateLabel, limitText,
-  ciRunLink, nsToIso, parseResult, presetWindow, sourceText, statusLabel, valueText
+  ciRunLink, nsToIso, parseResult, presetWindow, savedSpans, sourceText, statusLabel, valueText
 } from '@/services/quality'
 import { type QualityCheckResult, type QualityEvaluation, type QualityEvidence } from '@/types/quality'
 
@@ -181,6 +183,10 @@ export default defineComponent({
       source.value = 'From the file ' + file.name
     }
 
+    // snapshotCount: the spans of the evidence's saved snapshot (a CI result).
+    function snapshotCount (e: QualityEvidence) {
+      return savedSpans(e.snapshot, e.trace_id).length
+    }
     function targetOf (c: QualityCheckResult, e: QualityEvidence) {
       return evidenceTarget(c, e)
     }
@@ -207,7 +213,7 @@ export default defineComponent({
 
     return {
       EXAMPLE_RULES, WINDOW_PRESETS, rulesYaml, run, baseline, preset, baselinePreset, loading, error, result, source,
-      evaluate, openFile, targetOf, open, windowText, saveJson, saveHtml,
+      evaluate, openFile, targetOf, open, snapshotCount, windowText, saveJson, saveHtml,
       gateLabel, statusLabel, valueText, limitText, baselineText, entryText, sourceText, ciRunLink
     }
   }
