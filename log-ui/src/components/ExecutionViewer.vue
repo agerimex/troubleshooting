@@ -40,7 +40,7 @@
 
     <div class="flex flex-wrap items-center gap-2 mt-2 text-sm">
       <span data-testid="report-scope">Scope: one trace within {{ formatNs(reportWindow.from) }} – {{ formatNs(reportWindow.to) }} [from, to).</span>
-      <span v-if="report" data-testid="generated-at">Revision generated at {{ formatNs(report.generatedAt) }}.</span>
+      <span v-if="report && !saved" data-testid="generated-at">Revision generated at {{ formatNs(report.generatedAt) }}.</span>
       <PrimeButton type="button" label="Regenerate" icon="pi pi-refresh" size="small" text @click="generate" data-testid="regenerate"/>
       <PrimeButton type="button" label="Widen by 1 h on each side" size="small" text @click="widen" data-testid="widen-window"/>
     </div>
@@ -52,7 +52,12 @@
     </div>
 
     <template v-if="report">
-      <div class="mt-3" data-testid="completeness">
+      <div v-if="saved" class="state warn mt-3" data-testid="saved-snapshot">
+        <b>Saved snapshot from the CI result.</b> The live spans of this trace are not available here: they expired, or were recorded by a
+        Troubleshooting that is gone (one started inside a CI job). The snapshot keeps the spans' names, services, kinds, times and status;
+        logs, attributes and events were not saved. <b>Regenerate</b> tries the live data again.
+      </div>
+      <div v-else class="mt-3" data-testid="completeness">
         <Tag :severity="state.complete ? 'success' : 'danger'" :value="state.complete ? 'Complete' : 'Incomplete'"/>
         <span v-if="state.complete" class="ml-2 text-sm">Every source returned all matching records of this trace within the window. That does not prove every event was instrumented or delivered.</span>
         <ul v-else class="mt-1 text-sm text-red-500">
@@ -68,12 +73,13 @@
         <div data-testid="spans-summary">
           <span :class="{ bad: report.spans.status !== 'ok' }">Spans: {{ sectionSummary(report.spans, 'spans') }}</span>
           <span v-if="report.spans.status !== 'ok' && report.spans.error" class="bad" data-testid="spans-error"> {{ report.spans.error }}</span>
-          <PrimeButton v-if="report.spans.status !== 'ok'" type="button" label="Retry" size="small" text :loading="retrying.spans" @click="retrySection('spans')" data-testid="retry-spans"/>
+          <PrimeButton v-if="report.spans.status !== 'ok' && !saved" type="button" label="Retry" size="small" text :loading="retrying.spans" @click="retrySection('spans')" data-testid="retry-spans"/>
         </div>
-        <div data-testid="logs-summary">
+        <div v-if="saved" data-testid="logs-summary">Logs: {{ SNAPSHOT_LOGS_TEXT }}</div>
+        <div v-else data-testid="logs-summary">
           <span :class="{ bad: report.logs.status !== 'ok' }">Logs: {{ sectionSummary(report.logs, 'logs') }}</span>
           <span v-if="report.logs.status !== 'ok' && report.logs.error" class="bad" data-testid="logs-error"> {{ report.logs.error }}</span>
-          <PrimeButton v-if="report.logs.status !== 'ok'" type="button" label="Retry" size="small" text :loading="retrying.logs" @click="retrySection('logs')" data-testid="retry-logs"/>
+          <PrimeButton v-if="report.logs.status !== 'ok' && !saved" type="button" label="Retry" size="small" text :loading="retrying.logs" @click="retrySection('logs')" data-testid="retry-logs"/>
         </div>
       </div>
       <p v-if="report.logs.status === 'ok' && report.logs.records.length === 0" class="text-sm mt-1" data-testid="no-logs">{{ NO_LOGS_TEXT }}</p>
@@ -110,6 +116,7 @@
             <button type="button" :aria-pressed="selected === endpoints.server" :class="{ on: selected === endpoints.server }" @click="select(endpoints.server)" data-testid="pair-server">SERVER · {{ nameOf(endpoints.server) }}</button>
           </div>
           <LogInspector :key="report.generatedAt + report.traceId" :report="report" :span="selectedSpan" :initialLog="recordId" :focusLog="focusLog"
+            :notKept="saved ? SNAPSHOT_LOGS_TEXT : ''"
             @retry-logs="retrySection('logs')" @scope="logScope = $event"/>
           <PrimeButton v-if="selectedSpan" type="button" icon="pi pi-info-circle" size="small" text :label="evidenceLabel(selectedSpan)"
             title="Events (exceptions) and links of the selected span" @click="evidence = selectedSpan" data-testid="evidence"/>
@@ -158,6 +165,8 @@ import {
   NO_LOGS_TEXT, NO_SPANS_TEXT, SCOPE_BOUNDARY_TEXT, completeness, download, exportHtml, exportJson, fromResponse, mergeSections, reportLinks, sectionSummary
 } from '@/services/report'
 import { initialSelection, spanKey, spanLogCounts, timeline } from '@/services/problems'
+import { SNAPSHOT_LOGS_TEXT, savedSpans, snapshotReport } from '@/services/quality'
+import { type SavedSnapshot } from '@/types/quality'
 import { buildSequence, exportSequenceHtml, pairEndpoints, sequenceExport } from '@/services/sequence'
 import {
   PAGES, VIEW_PREFERENCE_KEY, copyText, initialView, investigationLink, type ExecutionView, type Origin
@@ -181,7 +190,10 @@ export default defineComponent({
     initialViewChoice: { type: String as PropType<ExecutionView | undefined>, default: undefined },
     origin: { type: Object as PropType<Origin | null>, default: null },
     context: { type: Object as PropType<ReportContext | null>, default: null },
-    included: { type: Boolean, default: false }
+    included: { type: Boolean, default: false },
+    // A saved snapshot of the trace (a CI result file): shown when the live
+    // report has no spans of it.
+    snapshot: { type: Object as PropType<SavedSnapshot | null>, default: null }
   },
   emits: ['back', 'open-execution', 'include'],
   setup (props, { emit }) {
@@ -196,6 +208,9 @@ export default defineComponent({
 
     const reportWindow = ref({ ...props.initialWindow })
     const report = ref<Report | null>(null)
+    // saved: the report shows the saved snapshot, not live data.
+    const saved = ref(false)
+    const nowNs = () => (BigInt(Date.now()) * 1000000n).toString()
     const loading = ref(false)
     const loadError = ref('')
     const retrying = reactive({ spans: false, logs: false })
@@ -226,8 +241,14 @@ export default defineComponent({
         return
       }
       loading.value = false
-      const generated = response ? fromResponse(response) : null
-      if (error !== null || generated === null || generated.traceId !== props.traceId) {
+      const response_ = response ? fromResponse(response) : null
+      const live = error === null && response_ !== null && response_.traceId === props.traceId ? response_ : null
+      // The live spans are gone (expired, or recorded by a Troubleshooting
+      // that no longer exists): show the saved snapshot, labeled as such.
+      saved.value = props.snapshot !== null && savedSpans(props.snapshot, props.traceId).length > 0 &&
+        (live === null || (live.spans.status === 'ok' && live.spans.records.length === 0))
+      const generated = saved.value ? snapshotReport(props.traceId, reportWindow.value, props.snapshot!, nowNs()) : live
+      if (generated === null) {
         loadError.value = error ?? 'invalid response'
         return
       }
@@ -349,10 +370,10 @@ export default defineComponent({
     generate()
 
     return {
-      view, setView, reportWindow, report, loading, loadError, retrying, selected, select, selectLog, focusLog, logScope, originMissing,
+      view, setView, reportWindow, report, saved, loading, loadError, retrying, selected, select, selectLog, focusLog, logScope, originMissing,
       generate, retrySection, widen, include, state, links, counts, tl, selectedSpan, entry, seqModel, endpoints, nameOf,
       copyLink, linkText, linkCopied, evidence, evidenceLabel, exportAs, originPageLabel, fmt, formatNs, windowText, sectionSummary,
-      ROOT_PARENT, NO_LOGS_TEXT, NO_SPANS_TEXT, SCOPE_BOUNDARY_TEXT
+      ROOT_PARENT, NO_LOGS_TEXT, NO_SPANS_TEXT, SCOPE_BOUNDARY_TEXT, SNAPSHOT_LOGS_TEXT
     }
   }
 })

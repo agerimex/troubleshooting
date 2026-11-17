@@ -19,6 +19,30 @@ export interface QualityEvidence {
   note: string
   // Only in a CLI result file: the viewer link it printed.
   link?: string
+  // Only in a CLI result file: the evidence trace's spans as they were when
+  // it was checked (troubleshooting-check snapshot.go).
+  snapshot?: SavedSnapshot
+}
+
+// SavedSnapshot keeps an evidence trace's spans (names, services, kinds,
+// times, status), so it can be shown after the raw spans expired or the
+// Troubleshooting that recorded them is gone. No logs, attributes or events.
+export interface SavedSnapshot {
+  spans?: SavedSpan[]
+  truncated?: boolean
+  error?: string
+}
+
+export interface SavedSpan {
+  span_id: string
+  parent_id: string
+  service: string
+  name: string
+  kind: string
+  start: string // Unix ns
+  duration_us: number // -1: invalid
+  status: string
+  peer?: string // peer.service or db.system of a CLIENT span
 }
 
 export interface QualityBaseline {
@@ -76,6 +100,7 @@ export interface QualityRequest {
 
 export interface QualitySource {
   commit?: string
+  pr_head?: string
   ref?: string
   ci_run?: string
   rules?: string

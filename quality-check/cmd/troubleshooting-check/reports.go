@@ -199,7 +199,8 @@ func htmlReport(ev Evaluation) string {
 }
 
 // sourceText says what was tested and which rules decided, e.g.
-// "commit 1a2b3c4d5e6f (feat/x) · rules main@89ab01234567:quality.yaml, sha256 0123456789ab".
+// "commit 1a2b3c4d5e6f (feat/x), merging head 0a1b2c3d4e5f · rules
+// main@89ab01234567:quality.yaml, sha256 0123456789ab".
 // Empty if nothing is known.
 func sourceText(s *Source) string {
 	if s == nil {
@@ -210,6 +211,9 @@ func sourceText(s *Source) string {
 		c := "commit " + short(s.Commit)
 		if s.Ref != "" {
 			c += " (" + s.Ref + ")"
+		}
+		if s.PRHead != "" {
+			c += ", merging head " + short(s.PRHead)
 		}
 		parts = append(parts, c)
 	} else if s.Ref != "" {

@@ -363,3 +363,42 @@ func TestSnapshotAtQueryLimit(t *testing.T) {
 		t.Errorf("html: %s", h)
 	}
 }
+
+// A pull request's merge commit is the tested commit; its head is recorded
+// next to it only when it differs.
+func TestPRHeadRecorded(t *testing.T) {
+	rules := writeFile(t, "quality.yaml", rulesYAML)
+	s := server(t, 200, answer("passed"), nil)
+	dir := t.TempDir()
+	run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42", "--commit", "aaaaaaaaaaaa1111", "--pr-head", "bbbbbbbbbbbb2222",
+		"--json", filepath.Join(dir, "r.json"), "--no-snapshot"}, io.Discard, io.Discard, fixedNow)
+	var ev Evaluation
+	b, _ := os.ReadFile(filepath.Join(dir, "r.json"))
+	if err := json.Unmarshal(b, &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.Source.Commit != "aaaaaaaaaaaa1111" || ev.Source.PRHead != "bbbbbbbbbbbb2222" ||
+		!strings.Contains(sourceText(ev.Source), "commit aaaaaaaaaaaa, merging head bbbbbbbbbbbb") {
+		t.Errorf("source: %+v / %s", ev.Source, sourceText(ev.Source))
+	}
+	if prHead("ABC", "abc") != "" || prHead("abc", "") != "" {
+		t.Error("the head equal to the tested commit (or none) is not recorded")
+	}
+}
+
+// run.executions is part of the rules file and reaches the API.
+func TestRunDeclarationSent(t *testing.T) {
+	var got request
+	s := server(t, 200, answer("passed"), &got)
+	rules := writeFile(t, "quality.yaml", "version: 1\nrun:\n  executions: 41\n"+strings.TrimPrefix(rulesYAML, "version: 1\n"))
+	if code := run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42", "--no-snapshot"}, io.Discard, io.Discard, fixedNow); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if got.Rules.Run == nil || got.Rules.Run.Executions != 41 {
+		t.Errorf("run declaration: %+v", got.Rules.Run)
+	}
+	bad := writeFile(t, "bad.yaml", "version: 1\nrun:\n  executionz: 41\n"+strings.TrimPrefix(rulesYAML, "version: 1\n"))
+	if _, _, err := loadRules(bad); err == nil {
+		t.Error("a misspelled run key is accepted")
+	}
+}

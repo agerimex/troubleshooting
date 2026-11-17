@@ -361,7 +361,7 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
       <div class="container qg-steps">
         <div class="qg-step">
           <h3><span>1</span> Tag the test run</h3>
-          <p>One resource attribute on the service under test. Downstream services join through their recorded parents. Use a new id for every CI attempt.</p>
+          <p v-pre>One resource attribute on the service under test. Downstream services join through their recorded parents. In CI, use a new id for every run and attempt (<code>ci-${{ github.run_id }}-${{ github.run_attempt }}</code>): a pull request number repeats on every push.</p>
           <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="Environment variable"><code>OTEL_RESOURCE_ATTRIBUTES=\
   troubleshooting.run=pr-42-1</code></pre></div>
         </div>

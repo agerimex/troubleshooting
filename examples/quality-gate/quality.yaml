@@ -1,6 +1,8 @@
 # Quality rules of the example application, checked in CI
 # (.github/workflows/ci.yml, job quality-example; docs/quality-gate.md).
 version: 1
+run:
+  executions: 41      # the tests make 41 requests: fewer recorded means lost spans
 entry:
   service: example-orders
   operation: GET /orders/{id}

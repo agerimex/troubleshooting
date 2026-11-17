@@ -68,10 +68,17 @@ type Check struct {
 	To              string   `yaml:"to,omitempty" json:"to,omitempty"`
 }
 
+// RunDecl is what the test run declares about itself: run.executions in
+// quality.yaml (docs/quality-gate.md).
+type RunDecl struct {
+	Executions int `yaml:"executions,omitempty" json:"executions,omitempty"`
+}
+
 type Rules struct {
-	Version int     `yaml:"version" json:"version"`
-	Entry   *Entry  `yaml:"entry,omitempty" json:"entry,omitempty"`
-	Checks  []Check `yaml:"checks" json:"checks"`
+	Version int      `yaml:"version" json:"version"`
+	Run     *RunDecl `yaml:"run,omitempty" json:"run,omitempty"`
+	Entry   *Entry   `yaml:"entry,omitempty" json:"entry,omitempty"`
+	Checks  []Check  `yaml:"checks" json:"checks"`
 }
 
 type request struct {
@@ -140,7 +147,8 @@ type Evaluation struct {
 }
 
 type Source struct {
-	Commit      string `json:"commit,omitempty"`    // the tested commit (a PR's head, not its merge commit)
+	Commit      string `json:"commit,omitempty"`    // the tested commit: what was checked out (a PR's merge commit by default)
+	PRHead      string `json:"pr_head,omitempty"`   // the pull request's head commit, if the tested commit merges it
 	Ref         string `json:"ref,omitempty"`       // its branch or tag
 	CIRun       string `json:"ci_run,omitempty"`    // link to the CI run
 	Rules       string `json:"rules"`               // the rules file as given
@@ -154,7 +162,7 @@ type options struct {
 	since, baselineSince                                      time.Duration
 	timeout                                                   time.Duration
 	basicAuth                                                 string
-	commit, ref, ciRun, rulesRef                              string
+	commit, prHead, ref, ciRun, rulesRef                      string
 	noSnapshot                                                bool
 }
 
@@ -184,7 +192,8 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs.StringVar(&o.htmlPath, "html", "", "write a self-contained HTML report to this file")
 	fs.StringVar(&o.mdPath, "markdown", "", "write a Markdown summary (for a CI job summary or a PR comment) to this file")
 	fs.DurationVar(&o.timeout, "timeout", 2*time.Minute, "request timeout")
-	fs.StringVar(&o.commit, "commit", "", "the tested commit, recorded in the result (in CI: a pull request's head commit)")
+	fs.StringVar(&o.commit, "commit", "", "the tested commit (what was checked out), recorded in the result")
+	fs.StringVar(&o.prHead, "pr-head", "", "the pull request's head commit, recorded in the result if it differs from --commit")
 	fs.StringVar(&o.ref, "ref", "", "the tested branch or tag, recorded in the result")
 	fs.StringVar(&o.ciRun, "ci-run", "", "link to the CI run, recorded in the result")
 	fs.StringVar(&o.rulesRef, "rules-ref", "", "where the rules file was read from (e.g. origin/main:quality.yaml), recorded in the result")
@@ -209,7 +218,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	if !o.noSnapshot && (o.jsonPath != "" || o.htmlPath != "") {
 		addSnapshots(o, &ev)
 	}
-	ev.Source = &Source{Commit: o.commit, Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}
+	ev.Source = &Source{Commit: o.commit, PRHead: prHead(o.commit, o.prHead), Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}
 	if o.ui != "none" {
 		addLinks(&ev, o.ui)
 	}
@@ -471,4 +480,13 @@ func htmlName(path string) string {
 		return ""
 	}
 	return filepath.Base(path)
+}
+
+// prHead is the pull request's head when it differs from the tested commit
+// (a merge commit tests the head merged into its base), else "".
+func prHead(commit, head string) string {
+	if head == "" || strings.EqualFold(head, commit) {
+		return ""
+	}
+	return head
 }

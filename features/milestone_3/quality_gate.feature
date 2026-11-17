@@ -176,3 +176,37 @@ Feature: Check a test run against quality rules
     When the CLI writes --json or --html
     Then each evidence keeps a snapshot of its trace's spans, shown as a static timeline with the evidence span highlighted
     And a failed read is noted and never changes a status
+
+  # Stage 4: verdicts that stand on enough evidence; saved evidence in the UI.
+
+  @QG-SUF-001
+  Scenario: A run that declares its executions reports lost ones
+    Given quality.yaml declares run.executions 50
+    When only 41 executions of the entry were recorded
+    Then every check is insufficient with reason missing_executions, never a pass
+
+  @QG-SUF-002
+  Scenario: No database call in a whole run is not a pass
+    Given a db_calls check with max_per_execution 3
+    When no execution of the run recorded a database call
+    Then it is insufficient with reason no_database_calls and says how to declare an operation that makes none
+    But with max_per_execution 0 it passes
+
+  @QG-SUF-003
+  Scenario: Executions that never ended can't support a latency pass
+    Given 18 of 20 executions have no valid duration and the other 2 are within the limit
+    Then the latency check is insufficient with reason invalid_durations and an execution without a duration as evidence
+    But a limit already broken by the measured executions still fails
+
+  @QG-SRC-002
+  Scenario: A pull request's merge commit and head are recorded separately
+    When the action checks a pull request
+    Then source.commit is the checked-out commit and source.pr_head its head, shown as "commit …, merging head …"
+    And the comment is skipped once the head has moved on
+
+  @QG-UI-005
+  Scenario: A CI result's saved snapshot opens when the live spans are gone
+    Given a result file whose evidence trace is no longer on this Troubleshooting
+    When Open timeline or Open sequence is clicked
+    Then the viewer shows the saved snapshot, marked as such, with logs "not kept", not "none"
+    But while the live spans exist, the live report is shown

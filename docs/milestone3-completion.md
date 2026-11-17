@@ -165,7 +165,7 @@ Tests: `TestNoEvidenceLinks`, `TestWindowText`, the updated
 
 # Review fixes (2026-11-17)
 
-A review of everything since `164cfec` found, and this fixes:
+Merged as `37d337d` (#14). A review of everything since `164cfec` found, and this fixes:
 
 - **Siblings counted as missing spans.** A span under the same unrecorded
   parent as the entry (an uninstrumented gateway's other call) made a
@@ -194,3 +194,71 @@ Tests: `TestQualityIncompleteExecutions` (sibling, past the read end),
 `TestQualityForeignFields`, `TestQualityValidate` (three new cases),
 `TestRulesOneDocument`, `TestSnapshotAtQueryLimit`,
 `TestCommentWithPersonalToken`, `TestNoEvidenceLinks` (no HTML report).
+
+# Stage 4: verdicts that stand on enough evidence; saved evidence in the UI
+
+Implementation: branch `feat/quality-stage-4` after `37d337d`, uncommitted at
+the time of writing (2026-11-17). It answers the web agent's review of `main`
+(missing telemetry turning a failure into a pass, CI identity, saved evidence
+the UI couldn't show) and fixes the flaky milestone 2 fixture.
+
+## What changed
+
+- **Flaky fixture.** The API's refresher runs once at startup, which in CI is
+  during the fixture load; an hour it reached before its records arrived kept
+  a revision without them (a whole hour is read from its committed revision)
+  until the next refresh, so the milestone 2 checks saw 0 calls in about half
+  the runs. `load` now rebuilds `T-3h` up to the current hour once the data is
+  visible (`rebuildLoaded`). Reproduced deterministically by starting the API
+  before the load with a 10-minute interval: the old fixture had 16 failing
+  lines, the new one none.
+- **Lost executions.** `run.executions` in `quality.yaml` declares how many
+  executions of each checked entry the tests make; it is every check's
+  default minimum (latency at least 20), and fewer is `missing_executions`.
+- **No database calls** in a whole run is `no_database_calls` unless the
+  limit is 0.
+- **Invalid durations** make a latency pass `invalid_durations` (all invalid:
+  "none of the N executions has a valid duration"); a measured failure stands.
+- **Provenance.** The action records the checked-out commit
+  (`git rev-parse HEAD`: a pull request's merge commit) as `commit` and the
+  head as `pr_head` ("commit …, merging head …"); the comment's stale check
+  uses the head. CLI `--pr-head`.
+- **Run ids.** Every CI example uses
+  `ci-${{ github.run_id }}-${{ github.run_attempt }}`; a pull request number
+  repeats on every push.
+- **Saved evidence in the UI.** A result file's evidence carries its snapshot
+  to the viewer (`ExecutionTarget.snapshot`); when the live report has no
+  spans of the trace, the viewer shows `snapshotReport` with a "Saved snapshot
+  from the CI result" banner, no completeness verdict, logs "not kept", and
+  Timeline and Sequence. The Quality page shows "saved snapshot: N spans".
+- The example declares `run.executions: 41`.
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-SUF-001 | `TestQualityEvidenceSufficiency` (declared executions); real services: the example with `executions: 50` is unresolved, "executions were lost" | Go unit; manual |
+| QG-SUF-002 | `TestQualityEvidenceSufficiency` (no database calls, limit 0) | Go unit |
+| QG-SUF-003 | `TestQualityEvidenceSufficiency` (18 of 20 invalid, a measured failure, all invalid) | Go unit |
+| QG-SRC-002 | `TestPRHeadRecorded`, UI `quality.spec.ts` (merging head); the action's wiring parsed from `action.yml`; real services: "commit …, merging head …" | CLI; Vitest; manual |
+| QG-UI-005 | `e2e/quality.e2e.ts` QG-UI-005; `quality.spec.ts` (saved snapshots) | Playwright; Vitest |
+
+## Verification run (2026-11-17)
+
+- `go test ./...` in log-analysis, quality-check, examples/quality-gate;
+  `go vet` in fixtures/regression: pass. `npx vitest run` (97 tests),
+  `npx playwright test` (94 tests), `npm run type-check`, `npm run build`: pass.
+- The full fixture on a fresh test volume with the new receiver and API: no
+  failures (QG checks included).
+- The example through the new CLI on real services: good run passed (41
+  declared executions), the regression failed, 50 declared was unresolved.
+- Not run in GitHub yet; the action's `git rev-parse HEAD` runs on the first
+  push.
+
+## Not done yet
+
+- Requirements catalogue and evaluation history (the web agent's step 3).
+- A branch that was never recorded at all can't be detected from spans; the
+  declarations narrow it, the result never claims more than "not observed".
+- Website: whether the quality gate becomes the main story is still the
+  owner's decision.

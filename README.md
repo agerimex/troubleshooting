@@ -70,7 +70,7 @@ In GitHub Actions:
 - uses: agerimex/troubleshooting/quality-check@main   # pin a commit for real use
   with:
     url: http://localhost:8095
-    run: pr-${{ github.event.number }}-${{ github.run_attempt }}
+    run: ci-${{ github.run_id }}-${{ github.run_attempt }}
     rules: quality.yaml
     rules-from: base                                  # a pull request can't loosen its own limits
 ```

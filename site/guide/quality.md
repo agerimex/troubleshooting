@@ -16,7 +16,7 @@ Give the spans of the run an id with the attribute `troubleshooting.run`, prefer
 OTEL_RESOURCE_ATTRIBUTES=troubleshooting.run=pr-42-1
 ```
 
-With `log-sender`: `sender.WithResourceAttributes(map[string]string{"troubleshooting.run": "pr-42-1"})`. Only the entry service needs it: spans of downstream services belong to the run through their recorded parent in the same trace. Use a new id per CI attempt, e.g. `pr-<number>-<attempt>`.
+With `log-sender`: `sender.WithResourceAttributes(map[string]string{"troubleshooting.run": "pr-42-1"})`. Only the entry service needs it: spans of downstream services belong to the run through their recorded parent in the same trace. Use a new id for every CI run and attempt, `ci-${{ github.run_id }}-${{ github.run_attempt }}` (plus the job name when a matrix runs the same tests): a pull request number repeats on every push, and two runs with one id mix their executions.
 
 ## 2. Write the rules
 
@@ -24,6 +24,8 @@ Keep a `quality.yaml` next to the code:
 
 ```yaml
 version: 1
+run:                         # optional: what the test run declares
+  executions: 200            # each checked entry runs this often: fewer means lost spans
 entry:                       # the operation an execution starts with
   service: recording-api
   operation: start_session
@@ -46,8 +48,8 @@ checks:
 
 | Check | Measures | Passes when |
 | --- | --- | --- |
-| `latency` | The percentile of the entry spans’ own durations (exact nearest rank) | The value is at most `max_ms` (equal passes), over at least `min_executions` (default 20) |
-| `db_calls` | Client spans with `db.system` (or `db.system.name`) per execution | **Every** execution has at most `max_per_execution`, not on average |
+| `latency` | The percentile of the entry spans’ own durations (exact nearest rank) | The value is at most `max_ms` (equal passes), over at least `min_executions` (default 20), and every execution ended (an execution without a valid duration makes a pass “not enough data”) |
+| `db_calls` | Client spans with `db.system` (or `db.system.name`) per execution | **Every** execution has at most `max_per_execution`, not on average; a run without any database call is “not enough data” unless the limit is 0 |
 | `forbidden_call` | A span of service `to` called from another service, or a client span naming it in `peer.service` / `server.address` | No execution calls it: “not observed in this run” |
 
 A check can have its own `entry`, and `advisory: true` shows it without letting it decide. Unknown and duplicate keys are errors, and so is a field of another check type (`max_ms` on a `db_calls` check), so a misspelled or misplaced limit is never silently ignored. SQL text and logs are never parsed.
@@ -86,7 +88,7 @@ FAIL    db-calls  fx…-qg-api / start_session (server)
   uses: agerimex/troubleshooting/quality-check@main   # pin a commit for real use
   with:
     url: http://localhost:8095          # where your Troubleshooting runs
-    run: pr-${{ github.event.number }}-${{ github.run_attempt }}
+    run: ci-${{ github.run_id }}-${{ github.run_attempt }}
     rules: quality.yaml
     baseline: main-118                  # optional: the id of a run you tagged earlier
     since: 1h
@@ -112,12 +114,12 @@ The action builds the CLI, checks the run, writes the Markdown summary to the jo
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
     OTEL_EXPORTER_OTLP_INSECURE: "true"
-    OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=pr-${{ github.run_id }}-${{ github.run_attempt }}
+    OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=ci-${{ github.run_id }}-${{ github.run_attempt }}
 - uses: agerimex/troubleshooting/quality-check@main
   with:
     url: ${{ steps.troubleshooting.outputs.url }}
     ui: ${{ steps.troubleshooting.outputs.ui }}   # none: the job's server is gone afterwards; report.html keeps the evidence
-    run: pr-${{ github.run_id }}-${{ github.run_attempt }}
+    run: ci-${{ github.run_id }}-${{ github.run_attempt }}
     rules-from: base
 ```
 
@@ -141,7 +143,7 @@ Every check shows its value, the limit with the advisory target, the baseline an
 ![Evidence opened from the quality check](/landing/quality-evidence.webp)
 *The execution with the most database calls: twenty `permission_lookup` calls where the baseline makes one.*
 
-**Open a result file** shows a CI `result.json` the same way, so a failed build can be investigated in the UI; its evidence buttons work while the raw spans are retained. **Export JSON** and **Export HTML** save the result as shown. The rules and run ids are remembered in this browser only; evaluations are not stored.
+**Open a result file** shows a CI `result.json` the same way, so a failed build can be investigated in the UI. Its evidence opens live while the raw spans are retained; when they are gone (expired, or recorded by a Troubleshooting started inside the job) **Open timeline** and **Open sequence** show the saved snapshot from the file instead, marked as such: the spans with their names, services, kinds, times and status, without logs, attributes or events. **Export JSON** and **Export HTML** save the result as shown. The rules and run ids are remembered in this browser only; evaluations are not stored.
 
 ## How to read a result
 
@@ -149,7 +151,7 @@ Every check shows its value, the limit with the advisory target, the baseline an
 | --- | --- |
 | Pass | The run kept the limit |
 | Fail | The run broke the limit; the evidence names an execution that did |
-| Not enough data | No executions, fewer than needed, incomplete executions (a span below the entry names a parent that was not recorded, or the execution runs more than 5 minutes past the window), spans outside retention, or a query limit. Never a pass |
+| Not enough data | No executions, fewer than needed or than `run.executions` declares, incomplete executions (a span below the entry names a parent that was not recorded, or the execution runs more than 5 minutes past the window), spans outside retention, or a query limit. Never a pass |
 
 - **Gate**: any failed blocking check → *failed*; otherwise any check without enough data → *unresolved*; otherwise *passed*.
 - **Targets** are *met* or *open* and never change a status. **Advisory** checks are shown and never decide.

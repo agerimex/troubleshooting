@@ -907,3 +907,24 @@ func (c *checker) m2Replay(ctx context.Context, o options, otlp *otlpSender) err
 	}
 	return sendLogsChunked(ctx, c.d, o.sender, logs)
 }
+
+// rebuildLoaded rebuilds the statistics of every completed hour the fixture
+// wrote, once all of it is stored. The API's refresher also runs once when it
+// starts, which in CI is while the fixture loads: an hour it reaches before
+// its records arrive gets a revision without them, and a whole hour is read
+// from its committed revision until the next refresh (1 min later), so the
+// checks would see 0 calls. A rebuild that starts after the load makes the
+// committed revisions deterministic.
+func (c *checker) rebuildLoaded(ctx context.Context) error {
+	from, to := c.d.m2Hour(-3), c.d.base.Truncate(time.Hour)
+	outcomes, err := c.api.rebuild(ctx, ns(from), ns(to))
+	if err != nil {
+		return fmt.Errorf("rebuilding the statistics of %s to %s: %w", from.Format(time.RFC3339), to.Format(time.RFC3339), err)
+	}
+	for _, o := range outcomes {
+		if o.Outcome == "failed" || o.Error != "" {
+			return fmt.Errorf("rebuilding bucket %s: %s %s", o.BucketStart, o.Outcome, o.Error)
+		}
+	}
+	return nil
+}

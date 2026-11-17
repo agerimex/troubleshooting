@@ -100,11 +100,26 @@ type QualityCheck struct {
 	TargetPer       *int          `json:"target_per_execution,omitempty" yaml:"target_per_execution,omitempty"`
 	From            string        `json:"from,omitempty" yaml:"from,omitempty"`
 	To              string        `json:"to,omitempty" yaml:"to,omitempty"`
+	// declared is run.executions when it set MinExecutions (not in JSON):
+	// fewer executions then mean lost executions, not a small run.
+	declared int
 }
+
+// QualityRun is what the test run declares about itself. Executions is the
+// number of executions of each checked entry the tests make: every check
+// then needs at least that many, and fewer means executions were lost (not
+// exported, not tagged) rather than a smaller run.
+type QualityRun struct {
+	Executions int `json:"executions,omitempty" yaml:"executions,omitempty"`
+}
+
+// MaxDeclaredExecutions bounds run.executions.
+const MaxDeclaredExecutions = 1_000_000
 
 // QualityRules is the rules file (quality.yaml), version 1.
 type QualityRules struct {
 	Version int            `json:"version" yaml:"version"`
+	Run     *QualityRun    `json:"run,omitempty" yaml:"run,omitempty"`
 	Entry   *QualityEntry  `json:"entry,omitempty" yaml:"entry,omitempty"`
 	Checks  []QualityCheck `json:"checks" yaml:"checks"`
 }
@@ -230,6 +245,13 @@ func (q *QualityRequest) Validate() error {
 			return invalid("entry: %s", err.Error())
 		}
 	}
+	declared := 0
+	if r.Run != nil {
+		if r.Run.Executions < 0 || r.Run.Executions > MaxDeclaredExecutions {
+			return invalid("run.executions must be between 0 and %d", MaxDeclaredExecutions)
+		}
+		declared = r.Run.Executions
+	}
 	seen := map[string]bool{}
 	for i := range r.Checks {
 		c := &r.Checks[i]
@@ -240,7 +262,7 @@ func (q *QualityRequest) Validate() error {
 			return invalid("check %s: duplicate id", c.ID)
 		}
 		seen[c.ID] = true
-		if err := validateCheck(c, r.Entry); err != nil {
+		if err := validateCheck(c, r.Entry, declared); err != nil {
 			return invalid("check %s: %s", c.ID, err.Error())
 		}
 	}
@@ -294,7 +316,9 @@ func foreignFields(c *QualityCheck) error {
 	return fmt.Errorf("%s %s apply to a %s check", strings.Join(bad, ", "), verb, c.Type)
 }
 
-func validateCheck(c *QualityCheck, entry *QualityEntry) error {
+// validateCheck checks one check and fills its defaults; declared is the
+// run's declared executions (0: none), the default minimum of every check.
+func validateCheck(c *QualityCheck, entry *QualityEntry, declared int) error {
 	if c.Entry == nil {
 		if entry == nil {
 			return fmt.Errorf("no entry: set entry on the check or at the top of the rules")
@@ -324,6 +348,9 @@ func validateCheck(c *QualityCheck, entry *QualityEntry) error {
 		if c.TargetMs != nil && (!finitePositive(c.TargetMs) || *c.TargetMs > *c.MaxMs) {
 			return fmt.Errorf("target_ms must be a positive number no larger than max_ms")
 		}
+		if c.MinExecutions == 0 && declared > 0 {
+			c.MinExecutions, c.declared = max(declared, defaultMinLatency), declared
+		}
 		if c.MinExecutions == 0 {
 			c.MinExecutions = defaultMinLatency
 		}
@@ -344,6 +371,9 @@ func validateCheck(c *QualityCheck, entry *QualityEntry) error {
 		}
 	default:
 		return fmt.Errorf("type must be %s, %s or %s", CheckLatency, CheckDBCalls, CheckForbidden)
+	}
+	if c.MinExecutions == 0 && declared > 0 {
+		c.MinExecutions, c.declared = declared, declared
 	}
 	if c.MinExecutions == 0 {
 		c.MinExecutions = 1
@@ -620,6 +650,11 @@ func insufficientExecutions(c QualityCheck, r *QualityCheckResult, n int) bool {
 		r.Summary = "no executions of " + c.Entry.String() + " in this run and window"
 		return true
 	}
+	if n < c.MinExecutions && c.declared > 0 && n < c.declared {
+		r.Status, r.Reason = CheckInsufficient, "missing_executions"
+		r.Summary = fmt.Sprintf("%d executions, the run declares %d: executions were lost (not exported, not tagged or outside the window)", n, c.declared)
+		return true
+	}
 	if n < c.MinExecutions {
 		r.Status, r.Reason = CheckInsufficient, "too_few_executions"
 		r.Summary = fmt.Sprintf("%d executions, at least %d needed", n, c.MinExecutions)
@@ -640,15 +675,18 @@ func measureLatency(c QualityCheck, exs []execution, r *QualityCheckResult) {
 		}
 		ms = append(ms, float64(ex.Entry.Duration)/1000)
 	}
-	if invalidN > 0 {
-		r.Details = append(r.Details, fmt.Sprintf("%d executions have no valid duration and are left out", invalidN))
-	}
 	if len(ms) > 0 {
 		sorted := append([]float64(nil), ms...)
 		sort.Float64s(sorted)
 		r.Value = fptr(nearestRank(sorted, c.Percentile))
 	}
 	label := "p" + fmtNum(c.Percentile)
+	if len(ms) == 0 && len(exs) > 0 {
+		r.Status, r.Reason = CheckInsufficient, "invalid_durations"
+		r.Summary = fmt.Sprintf("none of the %d executions has a valid duration (the entry never ended, or ended before it started)", len(exs))
+		r.Evidence = append(r.Evidence, evidenceOf(exs[0], nil, "execution without a valid duration"))
+		return
+	}
 	if insufficientExecutions(c, r, len(ms)) {
 		if r.Value != nil {
 			r.Summary += fmt.Sprintf(" (%s so far %s)", label, fmtMs(*r.Value))
@@ -682,6 +720,7 @@ func measureLatency(c QualityCheck, exs []execution, r *QualityCheckResult) {
 		}
 	}
 	r.Evidence = append(r.Evidence, evidenceOf(exs[worst], nil, "slowest execution: "+fmtMs(float64(exs[worst].Entry.Duration)/1000)))
+	requireDurations(exs, invalidN, label, r)
 }
 
 // dbCalls are the recorded database calls of an execution: CLIENT spans
@@ -753,9 +792,6 @@ func measureDBCalls(c QualityCheck, exs []execution, r *QualityCheckResult) {
 	if r.Violations > 0 {
 		r.Summary += fmt.Sprintf(", %d over the limit", r.Violations)
 	}
-	if total == 0 {
-		r.Details = append(r.Details, "no database calls were recorded: check that database calls are instrumented (CLIENT spans with db.system)")
-	}
 	if c.TargetPer != nil {
 		if worstN <= *c.TargetPer {
 			r.TargetStatus = TargetMet
@@ -767,6 +803,12 @@ func measureDBCalls(c QualityCheck, exs []execution, r *QualityCheckResult) {
 	if worstN > 0 {
 		r.Details = append(r.Details, repeatedNames(dbCalls(exs[worst]))...)
 		r.Evidence = append(r.Evidence, evidenceOf(exs[worst], nil, fmt.Sprintf("execution with the most database calls: %d", worstN)))
+	}
+	if total == 0 && *c.MaxPerExecution > 0 {
+		// No database call in the whole run is far more often missing
+		// instrumentation than an operation that reads nothing: not a pass.
+		r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "no_database_calls", ""
+		r.Summary = fmt.Sprintf("no database calls were recorded in %d executions: are they instrumented (CLIENT spans with db.system)? If %s really makes none, set max_per_execution: 0", len(exs), c.Entry.String())
 	}
 }
 
@@ -989,4 +1031,27 @@ func EvaluateQuality(ctx context.Context, req QualityRequest) QualityResult {
 	run = loadRun(ctx, req.Rules, req.Run, from, to)
 	wg.Wait()
 	return buildQualityResult(req, run, base, clock.Now())
+}
+
+// requireDurations: executions without a valid duration (their entry never
+// ended, or ended before it started) are left out of the percentile. They are
+// often the slowest ones (timeouts, crashes), so a pass can't stand on the
+// rest; a failure stands, since the measured executions already broke the
+// limit.
+func requireDurations(exs []execution, invalidN int, label string, r *QualityCheckResult) {
+	if invalidN == 0 {
+		return
+	}
+	r.Details = append(r.Details, fmt.Sprintf("%d of %d executions have no valid duration (the entry never ended, or ended before it started) and are left out", invalidN, len(exs)))
+	if r.Status != CheckPass {
+		return
+	}
+	r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "invalid_durations", ""
+	r.Summary = fmt.Sprintf("%d of %d executions have no valid duration, so the %s can't be shown to hold (%s)", invalidN, len(exs), label, r.Summary)
+	for _, ex := range exs {
+		if ex.Entry.Duration < 0 {
+			r.Evidence = append([]QualityEvidence{evidenceOf(ex, nil, "execution without a valid duration")}, r.Evidence...)
+			break
+		}
+	}
 }

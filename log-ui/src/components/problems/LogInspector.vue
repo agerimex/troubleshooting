@@ -19,7 +19,8 @@
         @click="scope = 'trace'" data-testid="scope-trace">All trace logs ({{ report.logs.records.length }})</button>
     </div>
 
-    <div v-if="report.logs.status !== 'ok'" class="state bad" role="alert" data-testid="inspector-logs-unavailable">
+    <div v-if="notKept" class="state" data-testid="inspector-logs-not-kept">{{ notKept }}</div>
+    <div v-else-if="report.logs.status !== 'ok'" class="state bad" role="alert" data-testid="inspector-logs-unavailable">
       The log source is unavailable ({{ report.logs.error || report.logs.status }}): logs are missing, not absent.
       <button type="button" class="link" @click="$emit('retry-logs')" data-testid="inspector-retry-logs">Retry logs</button>
     </div>
@@ -116,7 +117,10 @@ export default defineComponent({
     initialLog: { type: String, default: '' },
     // focusLog opens one log of the selected span (a log marker was picked);
     // a new object each time, so the same log can be focused again.
-    focusLog: { type: Object as PropType<{ recordId: string } | null>, default: null }
+    focusLog: { type: Object as PropType<{ recordId: string } | null>, default: null },
+    // notKept: the report's logs were never kept (a saved snapshot); said
+    // plainly instead of an outage with a retry.
+    notKept: { type: String, default: '' }
   },
   emits: ['retry-logs', 'scope'],
   setup (props, { emit }) {
