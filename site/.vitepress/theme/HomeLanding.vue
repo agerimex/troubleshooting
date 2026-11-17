@@ -401,19 +401,22 @@ checks:
       </div>
     </section>
 
-    <section class="planned-band" id="planned" aria-labelledby="planned-title">
-      <div class="section container split">
+    <section class="planned-band" id="requirements" aria-labelledby="req-title">
+      <div class="section container split req-split">
         <div>
-          <p class="eyebrow"><span class="outline-dot"></span> PLANNED · NOT BUILT YET</p>
-          <h2 id="planned-title">Requirements,<br><em>and their history.</em></h2>
-          <p>Today a check is a line in <code>quality.yaml</code>. Next, a check can name the requirement it enforces, with an owner and a reason, and every evaluation is kept, so you can see when a requirement started failing and which release fixed it.</p>
-        </div>
-        <div>
-          <p class="planned-ask">Have a regression your tests didn’t catch? Tell us the operation, what must stay true and what broke it: real cases decide what comes next.</p>
+          <p class="eyebrow"><span class="status-dot"></span> NEW · REQUIREMENTS &amp; HISTORY</p>
+          <h2 id="req-title">Requirements,<br><em>and their history.</em></h2>
+          <p>Name what must stay true, with an owner and a reason, next to the checks that enforce it in <code>quality.yaml</code>. A requirement is met only when its own checks pass; one without a check is listed and never met.</p>
+          <p>Record each run on <code>main</code> and every requirement gets a history: when it started failing, which commit fixed it, and the evidence of every failure, kept after its spans expire.</p>
           <div class="start-links">
+            <a class="text-link" :href="link('/guide/quality#requirements-and-their-history')">Requirements in the handbook <span aria-hidden="true">→</span></a>
             <a class="text-link next-cta" :href="issueUrl">Bring a real regression <span class="external-arrow" aria-hidden="true"></span></a>
           </div>
         </div>
+        <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable requirements screenshot">
+          <figcaption>Requirements <span>Fixture data</span></figcaption>
+          <img :src="shot('quality-requirements.webp')" width="2072" height="1760" loading="lazy" alt="Quality page, Requirements: three requirements of the project recording with owner, reason, check statuses and a row of history cells, met, violated twice, not enough data, met twice.">
+        </figure>
       </div>
     </section>
 
@@ -675,8 +678,9 @@ h3 { font-size: 26px; font-weight: 560; line-height: 1.2; letter-spacing: -.03em
 .qg-rules-note { margin-top: 16px; color: var(--muted); font-size: 14px; }
 .qg-evidence + .qg-evidence { padding-top: 0; }
 .planned-band { background: var(--background); }
-.planned-band .split { align-items: end; }
-.planned-ask { color: var(--muted); max-width: 465px; }
+.planned-band .split { align-items: start; }
+.req-split .screenshot-frame { max-height: 520px; }
+.req-split > div { padding-top: 24px; }
 .qg-evidence { padding-block: clamp(48px, 6vw, 80px); align-items: start; }
 .qg-evidence > div { padding-top: 40px; }
 .qg-evidence .screenshot-frame { max-height: 560px; }

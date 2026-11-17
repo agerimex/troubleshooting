@@ -4,6 +4,7 @@
 # change that adds a query per row (N+1) fails while normal variation does
 # not. Latency is advisory: CI machines are too noisy for a hard limit.
 version: 1
+project: troubleshooting-api
 entry:
   service: LogAnalysis
   operation: /api/v1/trace-report
@@ -43,3 +44,15 @@ checks:
     type: db_calls
     entry: {service: LogAnalysis, operation: /api/v1/quality/evaluate, span_kind: server}
     max_per_execution: 3
+
+requirements:
+  - id: REQ-BOUNDED-QUERIES
+    title: An investigation request runs a fixed number of ClickHouse queries
+    owner: troubleshooting maintainers
+    why: A query per row or per span (N+1) makes a large trace or window slow and loads ClickHouse for every user.
+    checks: [trace-report-queries, view-spans-queries, stats-calls-queries, compare-queries, quality-evaluate-queries]
+  - id: REQ-REPORT-LATENCY
+    title: The trace report answers within 3 seconds in CI
+    owner: troubleshooting maintainers
+    why: Investigation starts with the report; CI machines are noisy, so this is advisory.
+    checks: [trace-report-p95]

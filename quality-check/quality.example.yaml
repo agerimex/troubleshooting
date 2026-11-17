@@ -30,3 +30,23 @@ checks:
   - id: no-directory
     type: forbidden_call
     to: directory-api
+
+# Optional: requirements say why the checks exist. Each names its owner and
+# the checks that enforce it; its status comes from those checks (met,
+# violated, not enough data). A requirement without checks is listed as not
+# evaluated: written down, never met.
+requirements:
+  - id: REQ-START
+    title: A recording session starts within 800 ms
+    owner: recording-team
+    why: Participants leave a session that takes more than a second to start.
+    checks: [startup-p95, db-calls]
+  - id: REQ-DIRECTORY
+    title: Starting a session never waits for the directory
+    owner: recording-team
+    why: The directory is slow and has no availability guarantee.
+    checks: [no-directory]
+  - id: REQ-OUTAGE
+    title: Recording continues during an analytics outage
+    owner: recording-team
+    why: Analytics is optional; a recording is not.

@@ -109,8 +109,11 @@ func TestRequestReportAndJSON(t *testing.T) {
 	if got.Run != "pr-42" || got.Baseline != "main" || got.TimeTo != itoa(now.UnixNano()) || got.TimeFrom != itoa(now.Add(-30*time.Minute).UnixNano()) {
 		t.Errorf("request: %+v", got)
 	}
-	if got.BaselineFrom != "" || len(got.Rules.Checks) != 3 || *got.Rules.Checks[0].MaxMs != 800 || got.Rules.Entry.SpanKind != "server" {
-		t.Errorf("rules: %+v", got.Rules)
+	if got.RulesYAML != rulesYAML || got.Record || got.Source == nil || got.Source.Rules != rules {
+		t.Errorf("rules: %q, record %v, source %+v", got.RulesYAML, got.Record, got.Source)
+	}
+	if got.BaselineFrom != "" {
+		t.Errorf("baseline window: %+v", got)
 	}
 	text := out.String()
 	for _, want := range []string{
@@ -394,8 +397,8 @@ func TestRunDeclarationSent(t *testing.T) {
 	if code := run([]string{"--url", s.URL, "--rules", rules, "--run", "pr-42", "--no-snapshot"}, io.Discard, io.Discard, fixedNow); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if got.Rules.Run == nil || got.Rules.Run.Executions != 41 {
-		t.Errorf("run declaration: %+v", got.Rules.Run)
+	if !strings.Contains(got.RulesYAML, "run:\n  executions: 41\n") {
+		t.Errorf("run declaration: %q", got.RulesYAML)
 	}
 	bad := writeFile(t, "bad.yaml", "version: 1\nrun:\n  executionz: 41\n"+strings.TrimPrefix(rulesYAML, "version: 1\n"))
 	if _, _, err := loadRules(bad); err == nil {

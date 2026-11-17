@@ -133,6 +133,7 @@ jobs:
           rules: examples/quality-gate/quality.yaml
           since: 30m
           comment: "false"
+          record: "true" # the job's own Troubleshooting: checks recording, not a real history
           artifact: example-quality-report
       - name: Tests with the planted regression
         working-directory: examples/quality-gate
@@ -154,6 +155,7 @@ jobs:
           since: 30m
           fail-on: never
           comment: "false"
+          record: "true"
           artifact: example-regression-report
       - name: The regression must fail the gate
         env:
@@ -161,6 +163,18 @@ jobs:
         run: |
           if [ "$GATE" != failed ]; then
             echo "::error title=Quality gate example::the planted regression gave '$GATE', not failed"
+            exit 1
+          fi
+      - name: Both evaluations are the requirements' history
+        env:
+          API: ${{ steps.troubleshooting.outputs.url }}
+        run: |
+          cat=$(curl -sf "$API/api/v1/quality/requirements?project=example-orders")
+          echo "$cat" | jq '.data.Catalogue.requirements[] | {id, status, history: [.history[].status]}'
+          got=$(echo "$cat" | jq -r '[.data.Catalogue.requirements[] | .id + "=" + ([.history[].status] | join(","))] | join(" ")')
+          want="REQ-ORDER-READ=violated,met REQ-NO-LEGACY=violated,met"
+          if [ "$got" != "$want" ]; then
+            echo "::error title=Quality gate example::requirement history '$got', want '$want'"
             exit 1
           fi
       - name: Troubleshooting logs

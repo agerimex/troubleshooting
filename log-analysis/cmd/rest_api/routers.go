@@ -51,6 +51,10 @@ func (app *application) routers() http.Handler {
 		r.Get("/api/v1/detection-rules", app.getDetectionRules)
 		r.Post("/api/v1/detection-rules", app.saveDetectionRules)
 		r.Post("/api/v1/quality/evaluate", app.qualityEvaluate)
+		r.Get("/api/v1/quality/projects", app.qualityProjects)
+		r.Get("/api/v1/quality/evaluations", app.qualityEvaluations)
+		r.Get("/api/v1/quality/evaluations/{id}", app.qualityEvaluation)
+		r.Get("/api/v1/quality/requirements", app.qualityRequirements)
 	})
 
 	mux.Group(func(r chi.Router) {

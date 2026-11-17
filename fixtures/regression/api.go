@@ -102,6 +102,11 @@ func (a *api) post(ctx context.Context, path string, body any, data any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return a.do(req, data)
+}
+
+// do sends a request and reads the answer's data into data.
+func (a *api) do(req *http.Request, data any) error {
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return err

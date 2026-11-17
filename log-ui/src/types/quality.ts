@@ -84,8 +84,91 @@ export interface QualityEvaluation {
   gate: Gate
   checks: QualityCheckResult[]
   evaluated_at: string
-  // Added by the CLI: the tested commit and the rules that decided.
+  // The tested commit and the rules that decided (the CLI's, or sent with a
+  // recorded evaluation).
   source?: QualitySource
+  // The rules' project and requirements (stage 5); absent in older results.
+  project?: string
+  requirements?: RequirementResult[]
+  // Set when the evaluation was recorded.
+  id?: string
+  recorded_at?: string
+  record_error?: string
+}
+
+export type RequirementStatus = 'met' | 'violated' | 'insufficient' | 'not_evaluated'
+
+export interface RequirementResult {
+  id: string
+  title: string
+  owner?: string
+  why?: string
+  checks: string[]
+  status: RequirementStatus | string
+  summary: string
+}
+
+// A recorded evaluation in the history list.
+export interface EvaluationSummary {
+  id: string
+  project: string
+  recorded_at: string
+  run: string
+  gate: Gate | string
+  source: QualitySource
+  checks: { id: string, status: string }[]
+  requirements: { id: string, status: string }[]
+}
+
+export interface QualityProject {
+  project: string
+  evaluations: number
+  last_recorded_at: string
+  last_gate: string
+}
+
+// A requirement's status in one recorded evaluation; 'absent' when that
+// evaluation's rules didn't have it.
+export interface HistoryPoint {
+  evaluation_id: string
+  recorded_at: string
+  commit?: string
+  ref?: string
+  rules_sha256?: string
+  status: string
+}
+
+export interface Streak {
+  since: HistoryPoint
+  evaluations: number
+  at_least?: boolean
+  status_before?: string
+}
+
+export interface CatalogueEntry extends RequirementResult {
+  streak: Streak
+  history: HistoryPoint[] // newest first
+}
+
+export interface Catalogue {
+  project: string
+  ref?: string
+  latest: EvaluationSummary | null
+  requirements: CatalogueEntry[]
+  checks: QualityCheckResult[]
+  unlinked: string[]
+}
+
+// A recorded evaluation exactly as stored, with the rules text it used.
+export interface QualityRecord {
+  evaluation: QualityEvaluation
+  rules: string
+}
+
+export interface HistoryFilter {
+  project: string
+  ref?: string
+  before?: string
 }
 
 export interface QualityRequest {

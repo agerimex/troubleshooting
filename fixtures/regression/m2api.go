@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 )
@@ -346,27 +344,7 @@ func (a *api) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	payload, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	var envelope struct {
-		Error   bool            `json:"error"`
-		Message string          `json:"message"`
-		Data    json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(payload, &envelope); err != nil {
-		return &apiError{Status: resp.StatusCode, Message: "not JSON: " + string(payload)}
-	}
-	if resp.StatusCode/100 != 2 || envelope.Error {
-		return &apiError{Status: resp.StatusCode, Message: envelope.Message}
-	}
-	return json.Unmarshal(envelope.Data, out)
+	return a.do(req, out)
 }
 
 func (a *api) analysis(ctx context.Context, id string) (apiAnalysis, error) {

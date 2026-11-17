@@ -10,9 +10,13 @@ It is a small, working slice of the direction proposed in
 spec it keeps: separate pass / fail / not-enough-data states, limits apart
 from advisory targets, a baseline that is shown but never decides, call counts
 per execution (never from shape edges), and "not observed" instead of
-"impossible". It leaves out for now: imported, digest-pinned requirement
-revisions, a run registry and lifecycle, stored evaluations,
-load and outage experiments, and an enforced CI trust model (see "Trust" below).
+"impossible", requirements with an owner and a reason assessed only by their
+own checks (a requirement without a check is never met), and stored
+evaluations as a requirement's history (stage 5). It leaves out for now:
+imported, digest-pinned requirement revisions (the rules file in Git is the
+revision; each record keeps its text and sha256), a run registry and
+lifecycle, load and outage experiments, and an enforced CI trust model (see
+"Trust" below).
 
 ## How it works
 
@@ -89,7 +93,9 @@ load and outage experiments, and an enforced CI trust model (see "Trust" below).
    Troubleshooting that is gone after the job; the evidence then names its
    trace and its snapshot in report.html). `--from`/`--to` (RFC 3339)
    replace `--since`; `--baseline-since`/`--baseline-from`/`--baseline-to` give
-   the baseline its own window (default: the run's). With Caddy basic auth set
+   the baseline its own window (default: the run's). `--record` keeps the
+   evaluation in Troubleshooting as the project's history and prints its link
+   (see "Requirements and history"). With Caddy basic auth set
    `TROUBLESHOOTING_BASIC_AUTH=user:password`.
 
 Output (the reference fixture's candidate):
@@ -127,6 +133,7 @@ the gate.
     rules-from: base                    # read the rules from the PR's base branch
     fail-on: unresolved                 # or "failed", or "never" (report only)
     comment: auto                       # PR comment on pull_request events; "true" / "false"
+    record: auto                        # keep the evaluation as history on push events; "true" / "false"
 ```
 
 Outputs: `gate` (passed / failed / unresolved / error) and `exit-code`.
@@ -234,7 +241,86 @@ execution in Timeline & Sequence, and "Back to Quality" returns. **Open a
 result file** shows a CI result (`result.json` of the CLI or the action)
 the same way, with working evidence buttons while its raw spans are retained.
 **Export JSON / HTML** save the result as shown. The rules and run ids are
-remembered in the browser only; evaluations are not stored.
+remembered in the browser only; a check made on the page is not recorded.
+
+The page has three tabs: **Requirements**, **History** and **Check a run**
+(the above). It opens on Requirements once something is recorded, and keeps
+the tab chosen last.
+
+- **Requirements** is a project's catalogue (pick the project, optionally a
+  branch or tag): the latest recorded evaluation (gate, commit, time, "Open
+  evaluation"), then every requirement of its rules with status, owner, reason,
+  its checks with their status, since when the status holds ("Violated since
+  commit 0123456789ab (2 evaluations); met before.") and its history as a row
+  of cells, oldest on the left, one per recorded evaluation (at most 30):
+  green met, red violated, amber not enough data, grey not evaluated, dashed
+  when that evaluation's rules didn't have it, outlined when the rules changed
+  from the evaluation before. A cell opens that evaluation. Checks no
+  requirement lists are named below.
+- **History** lists the recorded evaluations, newest first (time, gate,
+  commit and branch, run, requirement counts), 50 at a time.
+- An opened evaluation shows exactly what was recorded, with its rules
+  ("Rules of this evaluation") and **Copy link**: `#/quality?evaluation=<id>`
+  reopens it. Its evidence opens live while the raw spans are retained and as
+  the recorded snapshot after that.
+
+## Requirements and history (stage 5)
+
+**Requirements** say why the checks exist. They are a list in the same rules
+file, next to the checks, so they are reviewed like code:
+
+```yaml
+project: recording          # optional; names the history (default: the entry's service)
+requirements:
+  - id: REQ-START
+    title: A recording session starts within 800 ms
+    owner: recording-team
+    why: Participants leave a session that takes more than a second to start.
+    checks: [startup-p95, db-calls]
+  - id: REQ-OUTAGE
+    title: Recording continues during an analytics outage
+    owner: recording-team
+```
+
+Ids follow the check id rules and are unique; a title is required (at most 200
+characters), owner (100) and why (1 000) are optional; every listed check must
+exist in the file, once. At most 50 requirements. A check may serve several
+requirements, or none.
+
+A requirement's **status** comes from its own checks in the same evaluation:
+`violated` if one of them failed (missing data of another is still named),
+else `insufficient` if one had not enough data, else `met`; a requirement
+without checks is `not_evaluated` ("no check enforces it yet"): written down,
+never met. Advisory checks count for their requirement too (advisory only
+means a check doesn't decide the gate). The gate itself is unchanged: it is
+decided by the checks. Every result has `project` and `requirements` (`[]`
+without requirements), and the CLI's text, Markdown and HTML reports list them
+above the checks.
+
+**Recording.** With `record: true` (CLI `--record`, action input `record`)
+the API stores the evaluation as it answered it, under the rules' project, in
+`quality_evaluations` (created by the receiver; no TTL), together with:
+
+- the exact rules text (so the request must send `rules_yaml`, as the CLI and
+  the UI do) and its sha256, computed by the API;
+- `source` as sent (commit, PR head, ref, CI run, where the rules were read
+  from);
+- a **snapshot** of each evidence trace (up to 200 spans), taken from the spans
+  the evaluation already read, in the format of the CLI's `result.json`; the
+  CLI then doesn't read those again.
+
+The answer then has `id` (24 hex digits) and `recorded_at`. A recorded
+evaluation is never changed. The id is derived from the inputs (project, run,
+windows, rules, commit, ref, CI run), so a retried request records once and
+answers with the first record's id and time; a new CI attempt is a new CI run
+and a new record. A failed write leaves the result valid and says so in
+`record_error` (the CLI prints a warning; the exit code still follows the
+gate).
+
+The action records on **push** events by default (`record: auto`), so a
+project's history follows its branches and tags, not every pull request push;
+`true` or `false` choose explicitly. Recording only helps with a
+Troubleshooting that outlives the job, not with `quality-check/stack`.
 
 ## Semantics (quality-gate-v1)
 
@@ -354,15 +440,43 @@ Invalid rules or windows are 400 with a message naming the check. Otherwise
 `executions`, `violations`, `details`, `evidence` (trace id, span id, window
 to open it) and `baseline` (status, value, executions, summary). A run that
 can't be read is a 200 whose checks are `insufficient`, so the gate is
-unresolved, never passed. Nothing is stored; the same request on the same data
-gives the same answer.
+unresolved, never passed. Without `record` nothing is stored, and the same
+request on the same data gives the same answer. With `record: true` (and
+`source`, optional) see "Requirements and history" above; the evaluation then
+also has `id`, `recorded_at` or `record_error`, and evidence `snapshot`s.
+
+The history (GET, newest first):
+
+- `GET /api/v1/quality/projects`: `data.Projects`, each `project`,
+  `evaluations`, `last_recorded_at`, `last_gate`.
+- `GET /api/v1/quality/evaluations?project=&ref=&before=&limit=`:
+  `data.Evaluations` (summaries: `id`, `project`, `recorded_at`, `run`,
+  `gate`, `source`, the status of each check and requirement) and `data.Next`,
+  the `before` (Unix ns) of the next page or empty. `limit` 1–200, default 50.
+- `GET /api/v1/quality/evaluations/{id}`: `data.Record` with `evaluation`
+  (exactly as recorded) and `rules` (the text); 404 for an unknown id.
+- `GET /api/v1/quality/requirements?project=&ref=`: `data.Catalogue` with
+  `latest` (the newest summary, or null), `requirements` (the latest
+  evaluation's, each with `history`: up to 30 points newest first, `status`
+  `absent` where that evaluation's rules didn't have it; and `streak`: `since`,
+  the oldest point of the current run of equal statuses, `evaluations` in it,
+  `status_before`, or `at_least` when it reaches the end of what was read),
+  `checks` (the latest evaluation's, without snapshots) and `unlinked` (checks
+  no requirement lists).
 
 ## Code
 
 - `log-analysis/internal/data/quality.go`: request validation, the bounded
   canonical span query (`qualityQuery`) and the pure evaluator
   (`evaluateRun`, `requireComplete`, `gateOf`); unit tests in `quality_test.go`.
-- `log-analysis/cmd/rest_api/quality.go`: the endpoint.
+- `log-analysis/internal/data/quality_requirements.go`: requirements
+  (validation, status from checks), `source`, evidence snapshots of a record;
+  `quality_history.go`: recording (a native batch insert: the rules text has
+  newlines, which a `{name:String}` parameter can't carry), the history and the
+  catalogue (`buildCatalogue`, `streakOf`, pure); tests in
+  `quality_requirements_test.go` (also every rules file of this repository).
+- `log-receiver/internal/driver/schema.go`: `quality_evaluations`.
+- `log-analysis/cmd/rest_api/quality.go`: the endpoints.
 - `quality-check/` (module `github.com/agerimex/troubleshooting/quality-check`):
   the CLI, standard library plus `gopkg.in/yaml.v3`: `main.go` (check,
   `source`), `reports.go`, `snapshot.go` (evidence snapshots), `comment.go`
@@ -371,22 +485,32 @@ gives the same answer.
   (Troubleshooting inside a CI job).
 - `examples/quality-gate/`: the example application and its `quality.yaml`
   (CI job `quality-example`).
-- `fixtures/regression/qg.go`: the reference runs and their literal answers.
-- `log-ui/src/components/QualityView.vue` with the pure parts in
-  `src/services/quality.ts` (unit tests `quality.spec.ts`, browser tests
-  `e2e/quality.e2e.ts`).
+- `fixtures/regression/qg.go`: the reference runs and their literal answers;
+  `qghistory.go`: the same runs recorded as three commits (QG-HIST-001).
+- `log-ui/src/components/QualityView.vue` (tabs, recorded projects, opening
+  a record) with `components/quality/QualityResult.vue` (one evaluation),
+  `QualityRequirements.vue` (catalogue) and `QualityHistory.vue`; the pure
+  parts in `src/services/quality.ts` (unit tests `quality.spec.ts`,
+  `qualityHistory.spec.ts`; browser tests `e2e/quality.e2e.ts`,
+  `e2e/qualityHistory.e2e.ts`).
 - `.github/quality.yaml`: this repository's rules; `TROUBLESHOOTING_RUN` tags
   the API's own spans (`log-analysis/cmd/rest_api/main.go`).
 
 Stages 1 (API, CLI, fixture), 2 (reports, Quality page, action, own CI) and 3
 (trusted rules, provenance, PR comment, Troubleshooting in the job, evidence
-snapshots, incomplete executions) are recorded in
+snapshots, incomplete executions), 4 (evidence sufficiency, provenance of a
+pull request, saved snapshots in the UI) and 5 (requirements, recorded
+evaluations, the catalogue and history on the Quality page) are recorded in
 `docs/milestone3-completion.md`.
 
 ## Not done (only if asked)
 
-Stored evaluations and a history per run, a "latest run on main" baseline
-(needs a run registry), imported requirement revisions with digests, load and
-outage experiments, sync-call semantics and allowlists, published container
-images for the in-job stack (it builds the receiver and API, about a minute),
-showing snapshots on the Quality page when raw spans have expired.
+A "latest run on main" baseline (needs a run registry; the history now has the
+latest recorded evaluation per branch, but not its run's spans after raw
+retention), imported requirement revisions with digests and a diff between
+them (the record keeps each rules text; the UI marks where it changed),
+requirement kinds and support relations, filters of the catalogue by status,
+deleting recorded evaluations (today only with SQL: `ALTER TABLE
+quality_evaluations DELETE WHERE "Project" = '…'`), load and outage
+experiments, sync-call semantics and allowlists, published container images
+for the in-job stack (it builds the receiver and API, about a minute).

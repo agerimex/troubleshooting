@@ -21,7 +21,10 @@ import (
 // whose resource (or span) attribute troubleshooting.run names it; an
 // execution is one entry span of the run and the spans below it in its trace.
 // The evaluation reads canonical raw spans, so it works only within raw span
-// retention, and it is computed on request (nothing is stored).
+// retention. It is computed on request; with record it is also stored, with
+// the rules and evidence snapshots, as the project's history
+// (quality_history.go). Requirements (quality_requirements.go) group checks
+// under a named intent with an owner and a reason.
 
 const (
 	QualityContract = "quality-gate-v1"
@@ -118,10 +121,14 @@ const MaxDeclaredExecutions = 1_000_000
 
 // QualityRules is the rules file (quality.yaml), version 1.
 type QualityRules struct {
-	Version int            `json:"version" yaml:"version"`
-	Run     *QualityRun    `json:"run,omitempty" yaml:"run,omitempty"`
-	Entry   *QualityEntry  `json:"entry,omitempty" yaml:"entry,omitempty"`
-	Checks  []QualityCheck `json:"checks" yaml:"checks"`
+	Version int `json:"version" yaml:"version"`
+	// Project names the history the evaluations are recorded under (default:
+	// the service of the entry).
+	Project      string               `json:"project,omitempty" yaml:"project,omitempty"`
+	Run          *QualityRun          `json:"run,omitempty" yaml:"run,omitempty"`
+	Entry        *QualityEntry        `json:"entry,omitempty" yaml:"entry,omitempty"`
+	Checks       []QualityCheck       `json:"checks" yaml:"checks"`
+	Requirements []QualityRequirement `json:"requirements,omitempty" yaml:"requirements,omitempty"`
 }
 
 // QualityRequest evaluates Run in the window [TimeFrom, TimeTo) of entry
@@ -139,6 +146,12 @@ type QualityRequest struct {
 	Baseline     string `json:"baseline,omitempty"`
 	BaselineFrom string `json:"baseline_time_from,omitempty"`
 	BaselineTo   string `json:"baseline_time_to,omitempty"`
+	// Record stores the evaluation as the project's history (it needs
+	// rules_yaml, so the exact rules are kept); Source says what was tested.
+	Record bool           `json:"record,omitempty"`
+	Source *QualitySource `json:"source,omitempty"`
+	// rulesText is rules_yaml as sent, kept for the record.
+	rulesText string
 }
 
 var checkIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -206,7 +219,13 @@ func (q *QualityRequest) Validate() error {
 		if err != nil {
 			return err
 		}
-		q.Rules, q.RulesYAML = rules, ""
+		q.Rules, q.rulesText, q.RulesYAML = rules, q.RulesYAML, ""
+	}
+	if q.Record && q.rulesText == "" {
+		return invalid("record needs rules_yaml: the exact rules are kept with the evaluation")
+	}
+	if err := q.Source.validate(); err != nil {
+		return err
 	}
 	q.Run = strings.TrimSpace(q.Run)
 	q.Baseline = strings.TrimSpace(q.Baseline)
@@ -266,7 +285,10 @@ func (q *QualityRequest) Validate() error {
 			return invalid("check %s: %s", c.ID, err.Error())
 		}
 	}
-	return nil
+	if err := validateRequirements(r); err != nil {
+		return err
+	}
+	return validateProject(r)
 }
 
 func normalizeEntry(e *QualityEntry) error {
@@ -389,6 +411,9 @@ type QualityEvidence struct {
 	TimeFrom string `json:"time_from"`
 	TimeTo   string `json:"time_to"`
 	Note     string `json:"note"`
+	// Snapshot keeps the trace's spans in a recorded evaluation, so its
+	// history shows the evidence after the raw spans expired.
+	Snapshot *QualitySnapshot `json:"snapshot,omitempty"`
 }
 
 // QualityBaseline is the same check measured on the baseline run, for
@@ -434,6 +459,16 @@ type QualityResult struct {
 	Gate         string               `json:"gate"`
 	Checks       []QualityCheckResult `json:"checks"`
 	EvaluatedAt  string               `json:"evaluated_at"`
+	// Project and Requirements: the requirements of the rules with a status
+	// from their checks (quality_requirements.go).
+	Project      string                     `json:"project"`
+	Requirements []QualityRequirementResult `json:"requirements"`
+	Source       *QualitySource             `json:"source,omitempty"`
+	// ID is set when the evaluation was recorded (record); RecordError when
+	// recording failed (the result itself is still valid).
+	ID          string `json:"id,omitempty"`
+	RecordedAt  string `json:"recorded_at,omitempty"`
+	RecordError string `json:"record_error,omitempty"`
 }
 
 // qSpan is the part of a canonical span the evaluator needs.
@@ -445,6 +480,8 @@ type qSpan struct {
 	DB                      bool
 	Peer                    string // peer.service, else server.address
 	Run                     string
+	Status                  int8   // 0 unset, 1 error, 2 ok
+	PeerService, DBSystem   string // for snapshots
 }
 
 // runSpans is what was loaded for one run. Problem (a reason code) makes
@@ -938,6 +975,12 @@ func buildQualityResult(req QualityRequest, run, baseline runSpans, now time.Tim
 		}
 	}
 	res.Gate = gateOf(res.Checks)
+	res.Project = req.Rules.Project
+	res.Requirements = requirementResults(req.Rules.Requirements, res.Checks)
+	res.Source = req.Source
+	if req.Record {
+		addSnapshots(&res, run)
+	}
 	return res
 }
 
@@ -959,7 +1002,9 @@ func qualityQuery(entries []QualityEntry, from, to int64) string {
 	return `SELECT "TraceId", "SpanId", "ParentSpanId", "ServiceName", "SpanName", "SpanKind", "UnixTime", "Duration",
 		("SpanAttributes"['db.system'] != '' OR "SpanAttributes"['db.system.name'] != '') AS "IsDB",
 		if("SpanAttributes"['peer.service'] != '', "SpanAttributes"['peer.service'], "SpanAttributes"['server.address']) AS "Peer",
-		` + runAttr + ` AS "Run"
+		` + runAttr + ` AS "Run", "StatusCode",
+		"SpanAttributes"['peer.service'] AS "PeerService",
+		if("SpanAttributes"['db.system'] != '', "SpanAttributes"['db.system'], "SpanAttributes"['db.system.name']) AS "DBSystem"
 	FROM otel_traces
 	WHERE "UnixTime" >= ` + num(from) + ` AND "UnixTime" < ` + num(to+int64(qualityLookahead)) + `
 	AND "TraceId" IN (SELECT DISTINCT "TraceId" FROM otel_traces
@@ -999,7 +1044,7 @@ func loadRun(ctx context.Context, rules QualityRules, run string, from, to int64
 	var out runSpans
 	for rows.Next() {
 		var s qSpan
-		if err = rows.Scan(&s.TraceID, &s.SpanID, &s.Parent, &s.Service, &s.Name, &s.Kind, &s.Start, &s.Duration, &s.DB, &s.Peer, &s.Run); err != nil {
+		if err = rows.Scan(&s.TraceID, &s.SpanID, &s.Parent, &s.Service, &s.Name, &s.Kind, &s.Start, &s.Duration, &s.DB, &s.Peer, &s.Run, &s.Status, &s.PeerService, &s.DBSystem); err != nil {
 			return queryProblem(ctx, err)
 		}
 		out.Spans = append(out.Spans, s)

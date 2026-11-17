@@ -210,3 +210,53 @@ Feature: Check a test run against quality rules
     When Open timeline or Open sequence is clicked
     Then the viewer shows the saved snapshot, marked as such, with logs "not kept", not "none"
     But while the live spans exist, the live report is shown
+
+  # Stage 5: requirements and their history.
+
+  @QG-REQ-001
+  Scenario: A requirement's status comes from its own checks
+    Given rules whose requirement REQ-START lists startup-p95 and db-calls, and REQ-OUTAGE lists no check
+    When the candidate run is checked
+    Then REQ-START is violated with "failed: startup-p95, db-calls"
+    And REQ-OUTAGE is not evaluated: "no check enforces it yet", never met
+    And with one check failing and another without data the requirement stays violated and names the missing data
+    And the gate is still decided by the checks
+
+  @QG-REQ-002
+  Scenario: Requirements are checked like the rest of the rules
+    Then a requirement naming a check that isn't in the rules, listing one twice, without a title, with a duplicate id or an unknown key is a 400
+    And the project defaults to the entry's service
+
+  @QG-HIST-001
+  Scenario: Recorded evaluations become each requirement's history
+    Given the baseline, candidate and fix recorded as three commits of main
+    Then the history lists them newest first with their gate, commit and rules sha256
+    And the catalogue shows REQ-START met, its history met, violated, met, and "met since" the fix's commit, violated before
+    And a recorded evaluation keeps its rules text and a snapshot of each evidence execution
+    And an unknown evaluation id is a 404
+
+  @QG-HIST-002
+  Scenario: A retried record is one record
+    When the same evaluation is recorded again with the same inputs
+    Then the answer has the first record's id and time, and the history still has three evaluations
+    But a new CI attempt is a new record
+
+  @QG-HIST-003
+  Scenario: Recording is chosen per run and never decides the gate
+    Then the CLI records only with --record and the action by default only on push events
+    And a failed write is a warning with the result unchanged and the exit code from the gate
+
+  @QG-UI-006
+  Scenario: The Quality page shows a project's requirements with their history
+    Given recorded evaluations of a project
+    Then the page opens on Requirements, with each requirement's status, owner, reason, checks and since when its status holds
+    And its history cells run oldest to newest, and a cell opens that evaluation with its rules and a copyable link
+
+  @QG-UI-007
+  Scenario: The history lists recorded evaluations; a link reopens one
+    Then History lists the evaluations newest first, page by page
+    And #/quality?evaluation=<id> opens that evaluation, and an unknown id is an error, not an empty page
+
+  @QG-UI-008
+  Scenario: Nothing recorded yet
+    Then the page opens on Check a run, and Requirements explains how to record

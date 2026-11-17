@@ -3,7 +3,7 @@ import { ROOT_PARENT } from '@/services/spanTree'
 import { type Span } from '@/types/filter'
 import { type Report } from '@/types/report'
 import { escapeHtml, htmlPage } from '@/services/report'
-import { type CheckStatus, type Gate, type QualityCheckResult, type QualityEvaluation, type QualityEvidence, type QualitySource, type SavedSnapshot } from '@/types/quality'
+import { type CatalogueEntry, type CheckStatus, type Gate, type HistoryPoint, type QualityCheckResult, type QualityEvaluation, type QualityEvidence, type QualityRecord, type QualitySource, type SavedSnapshot } from '@/types/quality'
 
 // Pure parts of the Quality page (docs/quality-gate.md): windows, labels,
 // evidence targets, reading a CLI result file and the HTML export.
@@ -133,7 +133,94 @@ export function parseResult (text: string): [string | null, QualityEvaluation | 
     c.details = Array.isArray(c.details) ? c.details.filter((d: unknown) => typeof d === 'string') : []
     c.evidence = Array.isArray(c.evidence) ? c.evidence.filter((e: any) => e && typeof e.trace_id === 'string') : []
   }
+  // Results from before requirements have none.
+  data.requirements = Array.isArray(data.requirements)
+    ? data.requirements.filter((r: any) => r && typeof r.id === 'string' && typeof r.status === 'string').map((r: any) => ({
+      ...r, title: typeof r.title === 'string' ? r.title : '', summary: typeof r.summary === 'string' ? r.summary : '',
+      checks: Array.isArray(r.checks) ? r.checks.filter((x: unknown) => typeof x === 'string') : []
+    }))
+    : []
   return [null, data as QualityEvaluation]
+}
+
+// --- Requirements and history (stage 5)
+
+export const REQUIREMENT_LABEL: Record<string, string> = {
+  met: 'Met', violated: 'Violated', insufficient: 'Not enough data', not_evaluated: 'Not evaluated', absent: 'Not in the rules'
+}
+
+export function requirementLabel (status: string): string {
+  return REQUIREMENT_LABEL[status] ?? status
+}
+
+// requirementCounts: "1 violated, 2 met, 1 not evaluated", worst first.
+export function requirementCounts (statuses: { status: string }[]): string {
+  const n = new Map<string, number>()
+  for (const s of statuses) {
+    n.set(s.status, (n.get(s.status) ?? 0) + 1)
+  }
+  const order = ['violated', 'insufficient', 'met', 'not_evaluated']
+  const keys = [...order.filter((k) => n.has(k)), ...[...n.keys()].filter((k) => !order.includes(k)).sort()]
+  return keys.map((k) => n.get(k) + ' ' + requirementLabel(k).toLowerCase()).join(', ')
+}
+
+// streakText says since when a requirement's status holds, e.g. "Violated
+// since commit 0123456789ab (2 evaluations); met before."
+export function streakText (e: CatalogueEntry): string {
+  const s = e.streak
+  if (!s || !s.since || s.evaluations < 1) {
+    return ''
+  }
+  const label = requirementLabel(e.status)
+  const n = s.evaluations === 1 ? 'this evaluation only' : s.evaluations + ' evaluations'
+  if (s.at_least) {
+    return label + ' in all ' + (s.evaluations === 1 ? 'one recorded evaluation' : s.evaluations + ' recorded evaluations') + ' read.'
+  }
+  const at = s.since.commit ? 'commit ' + short(s.since.commit) : nsLabel(s.since.recorded_at)
+  return label + ' since ' + at + ' (' + n + ')' + (s.status_before ? '; ' + requirementLabel(s.status_before).toLowerCase() + ' before.' : '.')
+}
+
+const nsLabel = (iso: string) => (iso ? iso.replace('T', ' ').replace(/\.\d+Z$|Z$/, ' UTC') : '')
+
+// recordedText shows a recorded time as "2026-11-17 12:05:05 UTC".
+export function recordedText (iso: string | undefined): string {
+  return nsLabel(iso ?? '')
+}
+
+// historyCells: the history oldest first (left to right), each with a label.
+export function historyCells (history: HistoryPoint[]): (HistoryPoint & { label: string })[] {
+  return [...history].reverse().map((h) => ({
+    ...h,
+    label: requirementLabel(h.status) + ' · ' + (h.commit ? 'commit ' + short(h.commit) + (h.ref ? ' (' + h.ref + ')' : '') + ' · ' : '') + nsLabel(h.recorded_at)
+  }))
+}
+
+// rulesChanged: the rules (sha256) differ from the next older evaluation's.
+export function rulesChanged (history: HistoryPoint[], i: number): boolean {
+  return i + 1 < history.length && !!history[i].rules_sha256 && !!history[i + 1].rules_sha256 && history[i].rules_sha256 !== history[i + 1].rules_sha256
+}
+
+const evaluationIdPattern = /^[0-9a-f]{24}$/
+
+export function validEvaluationId (id: string): boolean {
+  return evaluationIdPattern.test(id)
+}
+
+// evaluationHash is the link of a recorded evaluation.
+export function evaluationHash (id: string): string {
+  return '#/quality?evaluation=' + id
+}
+
+// parseRecord checks a recorded evaluation as the API returns it.
+export function parseRecord (data: any): [string | null, QualityRecord | null] {
+  if (!data || typeof data !== 'object') {
+    return ['The recorded evaluation is missing.', null]
+  }
+  const [err, ev] = parseResult(JSON.stringify(data.evaluation ?? null))
+  if (err || !ev) {
+    return [err, null]
+  }
+  return [null, { evaluation: ev, rules: typeof data.rules === 'string' ? data.rules : '' }]
 }
 
 export function nsToIso (ns: string | undefined): string {
@@ -155,8 +242,15 @@ export function exportHtml (ev: QualityEvaluation): string {
       `<td>${e(valueText(c.value, c.unit))}</td><td>${e(limitText(c))}</td>${hasBaseline ? `<td>${e(baselineText(c))}</td>` : ''}` +
       `<td>${e(c.executions)}</td><td>${e(c.summary)}${items.length ? '<ul>' + items.join('') + '</ul>' : ''}</td></tr>`
   }).join('')
+  const reqs = ev.requirements ?? []
+  const reqTable = reqs.length
+    ? `\n<h2>Requirements: ${e(requirementCounts(reqs))}</h2>\n<table><thead><tr><th>Status</th><th>Requirement</th><th>Owner</th><th>Why</th><th>Checks</th></tr></thead><tbody>${
+      reqs.map((r) => `<tr><td>${e(requirementLabel(r.status))}</td><td><b>${e(r.id)}</b><br>${e(r.title)}</td><td>${e(r.owner ?? '')}</td><td>${e(r.why ?? '')}</td><td>${e(r.checks.join(', '))}<br>${e(r.summary)}</td></tr>`).join('')
+    }</tbody></table>\n<h2>Checks</h2>`
+    : ''
+  const recorded = ev.id ? `\n<p>Recorded evaluation <code>${e(ev.id)}</code>${ev.project ? ` of project <code>${e(ev.project)}</code>` : ''}, ${e(recordedText(ev.recorded_at))}.</p>` : ''
   const body = `<h1>Quality gate: ${e(gateLabel(ev.gate))}</h1>
-<p>Run <code>${e(ev.run)}</code>, ${e(nsToIso(ev.time_from))} to ${e(nsToIso(ev.time_to))}${hasBaseline ? `; baseline <code>${e(ev.baseline)}</code>, ${e(nsToIso(ev.baseline_time_from))} to ${e(nsToIso(ev.baseline_time_to))}` : ''}. ${e(ev.contract)}, evaluated ${e(ev.evaluated_at)}.</p>${sourceText(ev.source) ? `\n<p>${e(sourceText(ev.source))}</p>` : ''}
+<p>Run <code>${e(ev.run)}</code>, ${e(nsToIso(ev.time_from))} to ${e(nsToIso(ev.time_to))}${hasBaseline ? `; baseline <code>${e(ev.baseline)}</code>, ${e(nsToIso(ev.baseline_time_from))} to ${e(nsToIso(ev.baseline_time_to))}` : ''}. ${e(ev.contract)}, evaluated ${e(ev.evaluated_at)}.</p>${sourceText(ev.source) ? `\n<p>${e(sourceText(ev.source))}</p>` : ''}${recorded}${reqTable}
 <table><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>${hasBaseline ? '<th>Baseline</th>' : ''}<th>Executions</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table>
 <p>${e(ev.method)}. Statuses describe this run only: a pass means "not observed in this run", not a guarantee; a missing measurement is never a pass.</p>`
   return htmlPage('Quality gate: ' + gateLabel(ev.gate), body)

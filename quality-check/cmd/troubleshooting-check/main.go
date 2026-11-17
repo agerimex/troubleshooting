@@ -6,7 +6,7 @@
 // Usage:
 //
 //	troubleshooting-check --url http://localhost:8095 --rules quality.yaml \
-//	    --run pr-42-1 [--baseline main-118] [--since 1h] [--json result.json] [--html report.html] [--markdown summary.md]
+//	    --run pr-42-1 [--baseline main-118] [--since 1h] [--json result.json] [--html report.html] [--markdown summary.md] [--record]
 //
 //	troubleshooting-check comment --markdown summary.md --repo owner/name --pr 42 [--commit sha]
 //
@@ -74,21 +74,37 @@ type RunDecl struct {
 	Executions int `yaml:"executions,omitempty" json:"executions,omitempty"`
 }
 
-type Rules struct {
-	Version int      `yaml:"version" json:"version"`
-	Run     *RunDecl `yaml:"run,omitempty" json:"run,omitempty"`
-	Entry   *Entry   `yaml:"entry,omitempty" json:"entry,omitempty"`
-	Checks  []Check  `yaml:"checks" json:"checks"`
+// Requirement names an intent, its owner and reason, and the checks that
+// enforce it (docs/quality-gate.md, "Requirements").
+type Requirement struct {
+	ID     string   `yaml:"id" json:"id"`
+	Title  string   `yaml:"title" json:"title"`
+	Owner  string   `yaml:"owner,omitempty" json:"owner,omitempty"`
+	Why    string   `yaml:"why,omitempty" json:"why,omitempty"`
+	Checks []string `yaml:"checks,omitempty" json:"checks,omitempty"`
 }
 
+type Rules struct {
+	Version      int           `yaml:"version" json:"version"`
+	Project      string        `yaml:"project,omitempty" json:"project,omitempty"`
+	Run          *RunDecl      `yaml:"run,omitempty" json:"run,omitempty"`
+	Entry        *Entry        `yaml:"entry,omitempty" json:"entry,omitempty"`
+	Checks       []Check       `yaml:"checks" json:"checks"`
+	Requirements []Requirement `yaml:"requirements,omitempty" json:"requirements,omitempty"`
+}
+
+// request sends the rules file as text: the API reads it as strictly as
+// loadRules, and a recorded evaluation keeps exactly that text.
 type request struct {
-	Rules        Rules  `json:"rules"`
-	Run          string `json:"run"`
-	TimeFrom     string `json:"time_from"`
-	TimeTo       string `json:"time_to"`
-	Baseline     string `json:"baseline,omitempty"`
-	BaselineFrom string `json:"baseline_time_from,omitempty"`
-	BaselineTo   string `json:"baseline_time_to,omitempty"`
+	RulesYAML    string  `json:"rules_yaml"`
+	Record       bool    `json:"record,omitempty"`
+	Source       *Source `json:"source,omitempty"`
+	Run          string  `json:"run"`
+	TimeFrom     string  `json:"time_from"`
+	TimeTo       string  `json:"time_to"`
+	Baseline     string  `json:"baseline,omitempty"`
+	BaselineFrom string  `json:"baseline_time_from,omitempty"`
+	BaselineTo   string  `json:"baseline_time_to,omitempty"`
 }
 
 type Evidence struct {
@@ -140,10 +156,27 @@ type Evaluation struct {
 	Gate         string        `json:"gate"`
 	Checks       []CheckResult `json:"checks"`
 	EvaluatedAt  string        `json:"evaluated_at"`
+	Project      string        `json:"project,omitempty"`
+	// Requirements: the rules' requirements with a status from their checks.
+	Requirements []RequirementResult `json:"requirements,omitempty"`
+	// ID and RecordedAt: set when the API recorded the evaluation (--record).
+	ID          string `json:"id,omitempty"`
+	RecordedAt  string `json:"recorded_at,omitempty"`
+	RecordError string `json:"record_error,omitempty"`
 	// Source is added by the CLI (the API doesn't know it): what was tested
 	// and which rules decided, so a result can't be mistaken for one of
 	// another commit or of other rules.
 	Source *Source `json:"source,omitempty"`
+}
+
+type RequirementResult struct {
+	ID      string   `json:"id"`
+	Title   string   `json:"title"`
+	Owner   string   `json:"owner,omitempty"`
+	Why     string   `json:"why,omitempty"`
+	Checks  []string `json:"checks"`
+	Status  string   `json:"status"`
+	Summary string   `json:"summary"`
 }
 
 type Source struct {
@@ -163,7 +196,7 @@ type options struct {
 	timeout                                                   time.Duration
 	basicAuth                                                 string
 	commit, prHead, ref, ciRun, rulesRef                      string
-	noSnapshot                                                bool
+	noSnapshot, record                                        bool
 }
 
 func main() {
@@ -198,6 +231,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs.StringVar(&o.ciRun, "ci-run", "", "link to the CI run, recorded in the result")
 	fs.StringVar(&o.rulesRef, "rules-ref", "", "where the rules file was read from (e.g. origin/main:quality.yaml), recorded in the result")
 	fs.BoolVar(&o.noSnapshot, "no-snapshot", false, "don't keep the spans of each evidence execution in --json and --html")
+	fs.BoolVar(&o.record, "record", false, "record the evaluation in Troubleshooting as the project's history (requirements and their history on the Quality page)")
 	o.basicAuth = os.Getenv("TROUBLESHOOTING_BASIC_AUTH")
 	if err := fs.Parse(args); err != nil {
 		return exitError
@@ -205,7 +239,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	if o.ui == "" {
 		o.ui = o.url
 	}
-	req, digest, err := buildRequest(o, now())
+	req, err := buildRequest(o, now())
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return exitError
@@ -216,9 +250,16 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 		return exitError
 	}
 	if !o.noSnapshot && (o.jsonPath != "" || o.htmlPath != "") {
-		addSnapshots(o, &ev)
+		addSnapshots(o, &ev) // a recorded evaluation already has them
 	}
-	ev.Source = &Source{Commit: o.commit, PRHead: prHead(o.commit, o.prHead), Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}
+	ev.Source = req.Source
+	if o.record {
+		if ev.RecordError != "" {
+			fmt.Fprintln(stderr, "warning:", ev.RecordError)
+		} else if ev.ID == "" {
+			fmt.Fprintln(stderr, "warning: the API did not record the evaluation (an older Troubleshooting?)")
+		}
+	}
 	if o.ui != "none" {
 		addLinks(&ev, o.ui)
 	}
@@ -235,6 +276,9 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 		}
 	}
 	fmt.Fprint(stdout, report(ev))
+	if ev.ID != "" {
+		fmt.Fprintf(stdout, "\nRecorded as evaluation %s%s\n", ev.ID, recordLink(o.ui, ev.ID))
+	}
 	return exitCode(ev.Gate)
 }
 
@@ -260,27 +304,33 @@ func exitCode(gate string) int {
 // loadRules parses YAML (JSON is YAML too), rejecting unknown keys and
 // duplicate keys.
 func loadRules(path string) (Rules, string, error) {
+	r, _, digest, err := readRules(path)
+	return r, digest, err
+}
+
+// readRules is loadRules with the file's text.
+func readRules(path string) (Rules, string, string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return Rules{}, "", err
+		return Rules{}, "", "", err
 	}
 	// The same limits as the API's ParseQualityRules, so the CLI and the
 	// Quality page accept the same files.
 	if len(b) > maxRulesBytes {
-		return Rules{}, "", fmt.Errorf("%s: the rules are larger than %d bytes", path, maxRulesBytes)
+		return Rules{}, "", "", fmt.Errorf("%s: the rules are larger than %d bytes", path, maxRulesBytes)
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	var r Rules
 	if err := dec.Decode(&r); err != nil {
-		return Rules{}, "", fmt.Errorf("%s: %w", path, err)
+		return Rules{}, "", "", fmt.Errorf("%s: %w", path, err)
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
-		return Rules{}, "", fmt.Errorf("%s: only one YAML document is allowed", path)
+		return Rules{}, "", "", fmt.Errorf("%s: only one YAML document is allowed", path)
 	}
 	sum := sha256.Sum256(b)
-	return r, hex.EncodeToString(sum[:]), nil
+	return r, string(b), hex.EncodeToString(sum[:]), nil
 }
 
 // window resolves --from/--to or --since into Unix nanoseconds.
@@ -307,17 +357,18 @@ func window(from, to string, since time.Duration, now time.Time) (string, string
 	return strconv.FormatInt(start.UnixNano(), 10), strconv.FormatInt(end.UnixNano(), 10), nil
 }
 
-func buildRequest(o options, now time.Time) (request, string, error) {
+func buildRequest(o options, now time.Time) (request, error) {
 	if strings.TrimSpace(o.run) == "" {
-		return request{}, "", errors.New("--run is required")
+		return request{}, errors.New("--run is required")
 	}
-	rules, digest, err := loadRules(o.rules)
+	_, text, digest, err := readRules(o.rules)
 	if err != nil {
-		return request{}, "", err
+		return request{}, err
 	}
-	req := request{Rules: rules, Run: o.run, Baseline: o.baseline}
+	req := request{RulesYAML: text, Record: o.record, Run: o.run, Baseline: o.baseline,
+		Source: &Source{Commit: o.commit, PRHead: prHead(o.commit, o.prHead), Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}}
 	if req.TimeFrom, req.TimeTo, err = window(o.from, o.to, o.since, now); err != nil {
-		return request{}, "", err
+		return request{}, err
 	}
 	if o.baseline != "" && (o.baselineSince != 0 || o.baselineFrom != "" || o.baselineTo != "") {
 		since := o.baselineSince
@@ -325,10 +376,10 @@ func buildRequest(o options, now time.Time) (request, string, error) {
 			since = o.since
 		}
 		if req.BaselineFrom, req.BaselineTo, err = window(o.baselineFrom, o.baselineTo, since, now); err != nil {
-			return request{}, "", fmt.Errorf("baseline %w", err)
+			return request{}, fmt.Errorf("baseline %w", err)
 		}
 	}
-	return req, digest, nil
+	return req, nil
 }
 
 // maxRulesBytes is the API's MaxQualityRulesBytes.
@@ -433,6 +484,16 @@ func report(ev Evaluation) string {
 	if s := sourceText(ev.Source); s != "" {
 		fmt.Fprintf(&b, "%s\n", s)
 	}
+	if len(ev.Requirements) > 0 {
+		fmt.Fprintf(&b, "\nRequirements: %s\n", requirementCounts(ev.Requirements))
+		for _, r := range ev.Requirements {
+			owner := ""
+			if r.Owner != "" {
+				owner = " (owner " + r.Owner + ")"
+			}
+			fmt.Fprintf(&b, "%-14s %s  %s%s\n%-14s %s\n", titleOf(requirementWord, r.Status), r.ID, r.Title, owner, "", r.Summary)
+		}
+	}
 	for _, c := range ev.Checks {
 		word := statusWord[c.Status]
 		if word == "" {
@@ -480,6 +541,14 @@ func htmlName(path string) string {
 		return ""
 	}
 	return filepath.Base(path)
+}
+
+// recordLink is ": <ui>/#/quality?evaluation=<id>", or "" without a UI.
+func recordLink(ui, id string) string {
+	if ui == "none" || ui == "" {
+		return ""
+	}
+	return ": " + strings.TrimRight(strings.SplitN(ui, "#", 2)[0], "/") + "/#/quality?evaluation=" + url.QueryEscape(id)
 }
 
 // prHead is the pull request's head when it differs from the tested commit

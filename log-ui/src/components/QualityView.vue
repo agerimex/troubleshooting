@@ -2,121 +2,138 @@
   <div class="card qv" data-testid="quality-view">
     <div class="text-xs opacity-80">Test runs</div>
     <h2 class="title">Quality</h2>
-    <p class="text-sm opacity-80">Check a test run against your rules: latency limits, database calls per execution and forbidden calls. Every failure opens the execution behind it. A missing measurement is never a pass.</p>
+    <p class="text-sm opacity-80">Requirements kept in your repository, checked on every test run: latency limits, database calls per execution and forbidden calls. Every failure opens the execution behind it. A missing measurement is never a pass.</p>
 
-    <form class="form" @submit.prevent="evaluate" data-testid="quality-form">
-      <label class="fld rules">Rules (quality.yaml)
-        <textarea v-model="rulesYaml" rows="12" spellcheck="false" data-testid="quality-rules" aria-describedby="quality-rules-help"></textarea>
-        <span id="quality-rules-help" class="help">YAML as in <code>quality.yaml</code>; unknown keys are errors. <button type="button" class="link" @click="rulesYaml = EXAMPLE_RULES" data-testid="quality-example">Insert example</button></span>
-      </label>
-      <div class="side">
-        <label class="fld">Run (troubleshooting.run)
-          <input v-model="run" required placeholder="pr-42-1" data-testid="quality-run"/>
+    <div class="tabs" role="tablist" aria-label="Quality views">
+      <button v-for="(t, i) in TABS" :key="t.value" ref="tabButtons" type="button" role="tab" :id="'quality-tab-' + t.value"
+        :aria-selected="tab === t.value" :aria-controls="'quality-panel-' + t.value" :tabindex="tab === t.value ? 0 : -1"
+        :data-testid="'quality-tab-' + t.value" @click="selectTab(t.value)" @keydown="onTabKey($event, i)">{{ t.label }}</button>
+    </div>
+
+    <div v-show="tab !== 'check'" :id="'quality-panel-' + tab" role="tabpanel" :aria-labelledby="'quality-tab-' + tab" class="panel">
+      <template v-if="saved">
+        <button type="button" class="link back" @click="closeSaved" data-testid="quality-saved-back">← Back to {{ tab === 'history' ? 'the history' : 'the requirements' }}</button>
+        <QualityResult :result="saved.evaluation" :rules="saved.rules" sourceLabel="Recorded evaluation" @open-execution="$emit('open-execution', $event)"/>
+      </template>
+      <template v-else>
+        <p v-if="savedError" class="state bad" role="alert" data-testid="quality-saved-error">{{ savedError }}</p>
+        <p v-if="projectsError" class="state bad" role="alert" data-testid="quality-projects-error">The recorded projects could not be read: {{ projectsError }} <button type="button" class="link" @click="loadProjects">Retry</button></p>
+        <div v-else-if="projectsLoaded && projects.length === 0" class="empty" data-testid="quality-projects-empty">
+          <p><b>Nothing is recorded yet.</b> A recorded evaluation keeps its result, its rules and the spans of its evidence, so each requirement gets a history: when it started failing and which commit fixed it.</p>
+          <p class="text-sm">Record from CI with the Action's <code>record</code> input (on by default for pushes), or with <code>troubleshooting-check --record</code>. Requirements are a <code>requirements:</code> list in <code>quality.yaml</code>; until then, <b>Check a run</b> works without recording.</p>
+        </div>
+        <template v-else-if="project">
+          <div class="filters">
+            <label class="fld">Project
+              <select v-model="project" data-testid="quality-project">
+                <option v-for="p in projects" :key="p.project" :value="p.project">{{ p.project }} ({{ p.evaluations }})</option>
+              </select>
+            </label>
+            <label class="fld">Branch or tag
+              <input v-model.lazy="refName" placeholder="any" data-testid="quality-ref" @keydown.enter="($event.target as HTMLInputElement).blur()"/>
+            </label>
+            <button type="button" class="link" @click="reloadKey++" data-testid="quality-reload">Refresh</button>
+          </div>
+          <QualityRequirements v-if="tab === 'requirements'" :project="project" :refName="refName.trim()" :reloadKey="reloadKey" @open-evaluation="openEvaluation"/>
+          <QualityHistory v-else :project="project" :refName="refName.trim()" :reloadKey="reloadKey" @open-evaluation="openEvaluation"/>
+        </template>
+        <p v-else class="text-sm opacity-80" role="status">Loading…</p>
+      </template>
+    </div>
+
+    <div v-show="tab === 'check'" id="quality-panel-check" role="tabpanel" aria-labelledby="quality-tab-check" class="panel">
+      <form class="form" @submit.prevent="evaluate" data-testid="quality-form">
+        <label class="fld rules">Rules (quality.yaml)
+          <textarea v-model="rulesYaml" rows="12" spellcheck="false" data-testid="quality-rules" aria-describedby="quality-rules-help"></textarea>
+          <span id="quality-rules-help" class="help">YAML as in <code>quality.yaml</code>; unknown keys are errors. <button type="button" class="link" @click="rulesYaml = EXAMPLE_RULES" data-testid="quality-example">Insert example</button></span>
         </label>
-        <label class="fld">Window
-          <select v-model="preset" data-testid="quality-window">
-            <option v-for="w in WINDOW_PRESETS" :key="w.value" :value="w.value">{{ w.label }}</option>
-          </select>
-        </label>
-        <label class="fld">Baseline run (optional)
-          <input v-model="baseline" placeholder="main-118" data-testid="quality-baseline"/>
-        </label>
-        <label class="fld">Baseline window
-          <select v-model="baselinePreset" :disabled="!baseline.trim()" data-testid="quality-baseline-window">
-            <option value="">Same as the run</option>
-            <option v-for="w in WINDOW_PRESETS" :key="w.value" :value="w.value">{{ w.label }}</option>
-          </select>
-        </label>
-        <div class="actions">
-          <PrimeButton type="submit" label="Check run" size="small" :loading="loading" :disabled="loading || !run.trim() || !rulesYaml.trim()" data-testid="quality-evaluate"/>
-          <label class="file link" data-testid="quality-open-file">Open a result file
-            <input type="file" accept=".json,application/json" class="sr-only" @change="openFile" data-testid="quality-file"/>
+        <div class="side">
+          <label class="fld">Run (troubleshooting.run)
+            <input v-model="run" required placeholder="pr-42-1" data-testid="quality-run"/>
           </label>
-        </div>
-      </div>
-    </form>
-
-    <p v-if="error" class="state bad" role="alert" data-testid="quality-error">{{ error }}</p>
-
-    <section v-if="result" class="result" aria-labelledby="quality-gate" data-testid="quality-result">
-      <div class="gate" :class="result.gate" data-testid="quality-gate-box">
-        <h3 id="quality-gate" data-testid="quality-gate">Quality gate: {{ gateLabel(result.gate) }}</h3>
-        <p class="text-sm">
-          Run <code>{{ result.run }}</code> · {{ windowText(result.time_from, result.time_to) }}
-          <template v-if="result.baseline"> · baseline <code>{{ result.baseline }}</code> · {{ windowText(result.baseline_time_from, result.baseline_time_to) }}</template>
-        </p>
-        <p class="text-xs opacity-80">{{ source }} · evaluated {{ result.evaluated_at }} · {{ result.contract }}</p>
-        <p v-if="sourceText(result.source)" class="text-xs opacity-80" data-testid="quality-source">
-          {{ sourceText(result.source) }}<template v-if="ciRunLink(result.source)"> · <a :href="ciRunLink(result.source)" target="_blank" rel="noopener noreferrer">CI run</a></template>
-        </p>
-        <div class="exports">
-          <button type="button" class="link" @click="saveJson" data-testid="quality-export-json">Export JSON</button>
-          <button type="button" class="link" @click="saveHtml" data-testid="quality-export-html">Export HTML</button>
-        </div>
-      </div>
-
-      <ul class="checks" data-testid="quality-checks">
-        <li v-for="c in result.checks" :key="c.id" class="check" :data-testid="'quality-check-' + c.id">
-          <div class="head">
-            <span class="status" :class="c.status" :data-testid="'quality-status-' + c.id">{{ statusLabel(c.status) }}</span>
-            <b>{{ c.id }}</b><span v-if="c.advisory" class="pill">advisory</span>
-            <span class="text-xs opacity-80">{{ entryText(c) }}</span>
+          <label class="fld">Window
+            <select v-model="preset" data-testid="quality-window">
+              <option v-for="w in WINDOW_PRESETS" :key="w.value" :value="w.value">{{ w.label }}</option>
+            </select>
+          </label>
+          <label class="fld">Baseline run (optional)
+            <input v-model="baseline" placeholder="main-118" data-testid="quality-baseline"/>
+          </label>
+          <label class="fld">Baseline window
+            <select v-model="baselinePreset" :disabled="!baseline.trim()" data-testid="quality-baseline-window">
+              <option value="">Same as the run</option>
+              <option v-for="w in WINDOW_PRESETS" :key="w.value" :value="w.value">{{ w.label }}</option>
+            </select>
+          </label>
+          <div class="actions">
+            <PrimeButton type="submit" label="Check run" size="small" :loading="loading" :disabled="loading || !run.trim() || !rulesYaml.trim()" data-testid="quality-evaluate"/>
+            <label class="file link" data-testid="quality-open-file">Open a result file
+              <input type="file" accept=".json,application/json" class="sr-only" @change="openFile" data-testid="quality-file"/>
+            </label>
           </div>
-          <dl class="nums">
-            <div><dt>Value{{ c.unit && c.unit !== 'ms' ? ' (' + c.unit + ')' : '' }}</dt><dd :data-testid="'quality-value-' + c.id">{{ valueText(c.value, c.unit) }}</dd></div>
-            <div><dt>Limit</dt><dd>{{ limitText(c) }}</dd></div>
-            <div v-if="c.baseline"><dt>Baseline</dt><dd :data-testid="'quality-baseline-' + c.id">{{ baselineText(c) }}</dd></div>
-            <div><dt>Executions</dt><dd>{{ c.executions }}</dd></div>
-          </dl>
-          <p class="summary">{{ c.summary }}</p>
-          <ul v-if="c.details.length" class="details">
-            <li v-for="(d, i) in c.details" :key="i">{{ d }}</li>
-          </ul>
-          <div v-for="(e, i) in c.evidence" :key="i" class="evidence">
-            <span>Evidence: {{ e.note }}</span>
-            <template v-if="targetOf(c, e)">
-              <button type="button" class="link" @click="open(c, e, 'timeline')" :data-testid="'quality-open-timeline-' + c.id">Open timeline</button>
-              <button type="button" class="link" @click="open(c, e, 'sequence')" :data-testid="'quality-open-sequence-' + c.id">Open sequence</button>
-              <span v-if="snapshotCount(e)" class="text-xs opacity-80" :data-testid="'quality-snapshot-' + c.id"
-                title="Shown when the live spans of this trace are not available">saved snapshot: {{ snapshotCount(e) }} spans</span>
-            </template>
-            <span v-else class="text-xs opacity-80">trace {{ e.trace_id }} (not a valid execution link)</span>
-          </div>
-        </li>
-      </ul>
-      <p class="text-xs opacity-80 mt-2">{{ result.method }}. Statuses describe this run only: a pass means "not observed in this run", not a guarantee. Advisory checks, targets and the baseline are shown but never decide the gate.</p>
-    </section>
+          <p class="text-xs opacity-80">A check made here is not recorded.</p>
+        </div>
+      </form>
+
+      <p v-if="error" class="state bad" role="alert" data-testid="quality-error">{{ error }}</p>
+      <QualityResult v-if="result" :result="result" :sourceLabel="source" @open-execution="$emit('open-execution', $event)"/>
+    </div>
   </div>
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, watch } from 'vue'
+import { defineComponent, nextTick, ref, watch, type PropType } from 'vue'
 import PrimeButton from 'primevue/button'
 import qualityApi from '@/api/quality.api'
 import { Quality } from '@/logs-api/quality.impl'
-import { download } from '@/services/report'
-import { type ExecutionView } from '@/services/navigation'
-import {
-  EXAMPLE_RULES, WINDOW_PRESETS, baselineText, entryText, evidenceTarget, exportHtml, exportJson, gateLabel, limitText,
-  ciRunLink, nsToIso, parseResult, presetWindow, savedSpans, sourceText, statusLabel, valueText
-} from '@/services/quality'
-import { type QualityCheckResult, type QualityEvaluation, type QualityEvidence } from '@/types/quality'
+import QualityResult from '@/components/quality/QualityResult.vue'
+import QualityRequirements from '@/components/quality/QualityRequirements.vue'
+import QualityHistory from '@/components/quality/QualityHistory.vue'
+import { EXAMPLE_RULES, WINDOW_PRESETS, evaluationHash, parseRecord, parseResult, presetWindow } from '@/services/quality'
+import { type QualityEvaluation, type QualityProject, type QualityRecord } from '@/types/quality'
 
 const DRAFT_KEY = 'troubleshooting.quality.draft'
+const TAB_KEY = 'troubleshooting.quality.tab'
 
-// QualityView checks a test run against rules (docs/quality-gate.md), or
-// shows a result file from CI (troubleshooting-check --json). Evaluations
-// are not stored: the result is what the API answered just now, or the file.
+type Tab = 'requirements' | 'history' | 'check'
+const TABS: { value: Tab, label: string }[] = [
+  { value: 'requirements', label: 'Requirements' },
+  { value: 'history', label: 'History' },
+  { value: 'check', label: 'Check a run' }
+]
+
+function readStorage (key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+function writeStorage (key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // storage unavailable: nothing to remember
+  }
+}
+
+// QualityView (docs/quality-gate.md): the requirements catalogue and history
+// of recorded evaluations (stage 5), and checking a run as typed or opening
+// a CI result file (not recorded).
 export default defineComponent({
   name: 'QualityView',
-  components: { PrimeButton },
-  emits: ['open-execution'],
-  setup (_, { emit }) {
+  components: { PrimeButton, QualityResult, QualityRequirements, QualityHistory },
+  props: {
+    // A recorded evaluation to open (#/quality?evaluation=<id>).
+    evaluationRoute: { type: Object as PropType<{ id: string, n: number } | null>, default: null }
+  },
+  emits: ['open-execution', 'navigate'],
+  setup (props, { emit }) {
     qualityApi.init(new Quality())
     // The rules and run ids stay in this browser as a convenience only.
     let draft: any = {}
     try {
-      draft = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? '{}') ?? {}
+      draft = JSON.parse(readStorage(DRAFT_KEY) ?? '{}') ?? {}
     } catch {
       draft = {}
     }
@@ -126,20 +143,104 @@ export default defineComponent({
     const preset = ref<string>(WINDOW_PRESETS.some((w) => w.value === draft.preset) ? draft.preset : '1h')
     const baselinePreset = ref<string>(WINDOW_PRESETS.some((w) => w.value === draft.baselinePreset) ? draft.baselinePreset : '')
     watch([rulesYaml, run, baseline, preset, baselinePreset], () => {
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ rulesYaml: rulesYaml.value, run: run.value, baseline: baseline.value, preset: preset.value, baselinePreset: baselinePreset.value }))
-      } catch {
-        // storage unavailable: nothing to remember
-      }
+      writeStorage(DRAFT_KEY, JSON.stringify({ rulesYaml: rulesYaml.value, run: run.value, baseline: baseline.value, preset: preset.value, baselinePreset: baselinePreset.value }))
     })
 
+    // The tab: the one chosen last; else Requirements once something is
+    // recorded, and Check a run before that.
+    const storedTab = readStorage(TAB_KEY)
+    const tab = ref<Tab>(TABS.some((t) => t.value === storedTab) ? storedTab as Tab : 'check')
+    const tabButtons = ref<HTMLButtonElement[]>([])
+    function selectTab (t: Tab) {
+      tab.value = t
+      writeStorage(TAB_KEY, t)
+      if (saved.value) {
+        closeSaved()
+      }
+    }
+    function onTabKey (event: KeyboardEvent, i: number) {
+      const next = ({ ArrowRight: (i + 1) % TABS.length, ArrowLeft: (i + TABS.length - 1) % TABS.length, Home: 0, End: TABS.length - 1 } as Record<string, number>)[event.key]
+      if (next === undefined) {
+        return
+      }
+      event.preventDefault()
+      selectTab(TABS[next].value)
+      nextTick(() => tabButtons.value[next]?.focus())
+    }
+
+    // Recorded projects.
+    const projects = ref<QualityProject[]>([])
+    const projectsLoaded = ref(false)
+    const projectsError = ref('')
+    const project = ref('')
+    const refName = ref('')
+    const reloadKey = ref(0)
+    async function loadProjects () {
+      projectsError.value = ''
+      const [err, list] = await qualityApi.projects()
+      projectsLoaded.value = true
+      if (err || !list) {
+        projectsError.value = err ?? 'no answer'
+        return
+      }
+      projects.value = list
+      if (!project.value || !list.some((p) => p.project === project.value)) {
+        project.value = list[0]?.project ?? ''
+      }
+      if (list.length > 0 && storedTab === null && !props.evaluationRoute) {
+        tab.value = 'requirements'
+      }
+    }
+    loadProjects()
+
+    // A recorded evaluation, opened from the catalogue, the history or a link.
+    const saved = ref<QualityRecord | null>(null)
+    const savedError = ref('')
+    let savedSeq = 0
+    async function openEvaluation (id: string) {
+      const my = ++savedSeq
+      savedError.value = ''
+      const [err, data] = await qualityApi.record(id)
+      if (my !== savedSeq) {
+        return
+      }
+      const [perr, rec] = err ? [err, null] : parseRecord(data)
+      if (perr || !rec) {
+        savedError.value = 'The evaluation ' + id + ' could not be opened: ' + perr
+        saved.value = null
+        return
+      }
+      if (tab.value === 'check') {
+        tab.value = 'history'
+      }
+      saved.value = rec
+      const p = rec.evaluation.project
+      if (p && !projects.value.some((x) => x.project === p)) {
+        await loadProjects()
+      }
+      if (p) {
+        project.value = p
+      }
+      emit('navigate', evaluationHash(id))
+    }
+    function closeSaved () {
+      savedSeq++
+      saved.value = null
+      emit('navigate', '#/quality')
+    }
+    watch(() => props.evaluationRoute, (r) => {
+      if (r) {
+        openEvaluation(r.id)
+      }
+    }, { immediate: true })
+
+    // Checking a run as typed, or a CI result file.
     const loading = ref(false)
     const error = ref('')
     const result = ref<QualityEvaluation | null>(null)
     const source = ref('')
     // A newer request wins: an older answer arriving later is ignored.
     let seq = 0
-
     async function evaluate () {
       const my = ++seq
       loading.value = true
@@ -163,7 +264,6 @@ export default defineComponent({
       result.value = ev
       source.value = 'Checked now'
     }
-
     async function openFile (event: Event) {
       const input = event.target as HTMLInputElement
       const file = input.files?.[0]
@@ -183,38 +283,11 @@ export default defineComponent({
       source.value = 'From the file ' + file.name
     }
 
-    // snapshotCount: the spans of the evidence's saved snapshot (a CI result).
-    function snapshotCount (e: QualityEvidence) {
-      return savedSpans(e.snapshot, e.trace_id).length
-    }
-    function targetOf (c: QualityCheckResult, e: QualityEvidence) {
-      return evidenceTarget(c, e)
-    }
-    function open (c: QualityCheckResult, e: QualityEvidence, view: ExecutionView) {
-      const t = evidenceTarget(c, e, view)
-      if (t) {
-        emit('open-execution', t)
-      }
-    }
-    function windowText (from?: string, to?: string) {
-      return nsToIso(from) + ' – ' + nsToIso(to) + ' (exclusive)'
-    }
-    const fileBase = () => 'quality-' + (result.value?.run ?? 'run').replace(/[^\w.-]+/g, '_')
-    function saveJson () {
-      if (result.value) {
-        download(fileBase() + '.json', 'application/json', exportJson(result.value))
-      }
-    }
-    function saveHtml () {
-      if (result.value) {
-        download(fileBase() + '.html', 'text/html', exportHtml(result.value))
-      }
-    }
-
     return {
-      EXAMPLE_RULES, WINDOW_PRESETS, rulesYaml, run, baseline, preset, baselinePreset, loading, error, result, source,
-      evaluate, openFile, targetOf, open, snapshotCount, windowText, saveJson, saveHtml,
-      gateLabel, statusLabel, valueText, limitText, baselineText, entryText, sourceText, ciRunLink
+      TABS, EXAMPLE_RULES, WINDOW_PRESETS, tab, tabButtons, selectTab, onTabKey,
+      projects, projectsLoaded, projectsError, project, refName, reloadKey, loadProjects,
+      saved, savedError, openEvaluation, closeSaved,
+      rulesYaml, run, baseline, preset, baselinePreset, loading, error, result, source, evaluate, openFile
     }
   }
 })
@@ -223,7 +296,16 @@ export default defineComponent({
 <style scoped>
 .qv { font-size: 14px; }
 .title { font-size: 25px; font-weight: 500; margin: 0; }
-.form { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; margin-top: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px 18px; margin-top: 12px; border-bottom: 1px solid var(--surface-border); }
+.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 2px; margin-bottom: -1px; color: var(--text-color-secondary); font: inherit; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--primary-color); border-bottom-color: var(--primary-color); }
+.tabs button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+.panel { margin-top: 12px; }
+.back { margin-bottom: 4px; }
+.empty { padding: 12px; border: 1px dashed var(--surface-border); border-radius: 8px; }
+.empty p + p { margin-top: 6px; }
+.filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; margin-bottom: 12px; }
+.form { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 800px) { .form { grid-template-columns: minmax(0, 1fr); } }
 .side { display: flex; flex-direction: column; gap: 10px; }
 .fld { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-color-secondary); min-width: 0; }
@@ -235,29 +317,6 @@ export default defineComponent({
 .file { cursor: pointer; }
 .file:focus-within { outline: 2px solid var(--primary-color); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.result { margin-top: 16px; }
-.gate { padding: 12px; border-radius: 8px; border: 1px solid var(--surface-border); }
-.gate h3 { font-size: 18px; margin: 0 0 4px; }
-.gate.passed { background: rgba(74, 222, 128, 0.1); }
-.gate.failed { background: rgba(248, 113, 113, 0.12); }
-.gate.failed h3 { color: #fca5a5; }
-.gate.unresolved { background: rgba(251, 191, 36, 0.12); }
-.gate.unresolved h3 { color: #fcd34d; }
-.exports { display: flex; gap: 14px; margin-top: 6px; }
-.checks { list-style: none; padding: 0; margin: 12px 0 0; border-top: 1px solid var(--surface-border); }
-.check { padding: 12px 0; border-bottom: 1px solid var(--surface-border); }
-.head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.status { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
-.status.pass { background: rgba(74, 222, 128, 0.15); color: #86efac; }
-.status.fail { background: rgba(248, 113, 113, 0.15); color: #fca5a5; }
-.status.insufficient { background: rgba(251, 191, 36, 0.15); color: #fcd34d; }
-.pill { font-size: 12px; background: var(--surface-hover); padding: 1px 8px; border-radius: 6px; }
-.nums { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 8px 0 4px; }
-.nums dt { font-size: 12px; color: var(--text-color-secondary); }
-.nums dd { margin: 0; font-weight: 600; }
-.summary { margin: 4px 0; }
-.details { margin: 4px 0; padding-left: 18px; font-size: 13px; }
-.evidence { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; margin-top: 4px; }
 .state { padding: 8px; border-radius: 6px; font-size: 13px; margin-top: 10px; }
 .state.bad { background: rgba(248, 113, 113, 0.12); color: #fca5a5; }
 .link { background: none; border: 0; color: var(--primary-color); cursor: pointer; padding: 0; font: inherit; }
