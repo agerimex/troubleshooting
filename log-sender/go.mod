@@ -3,7 +3,7 @@ module github.com/agerimex/troubleshooting/log-sender
 go 1.21.5
 
 require (
-	github.com/agerimex/troubleshooting/protos v0.0.0-20250610202227-67b33e660507
+	github.com/agerimex/troubleshooting/protos v0.0.0-20261118173553-a5eb3407b92e
 	github.com/rs/zerolog v1.31.0
 	google.golang.org/grpc v1.57.0
 	google.golang.org/protobuf v1.31.0
