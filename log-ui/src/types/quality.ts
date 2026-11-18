@@ -94,6 +94,10 @@ export interface QualityEvaluation {
   id?: string
   recorded_at?: string
   record_error?: string
+  // Sent to the history under id, but not read back: the verdict is the local one.
+  record_unconfirmed?: boolean
+  // In how many checked executions lost child spans could be seen.
+  child_counts?: { executions: number, counted: number, status: 'all' | 'partial' | 'none' | string }
   recorded_before?: boolean
   reevaluated?: boolean
   // What the verdicts rest on: which lost spans the recorded data can show.

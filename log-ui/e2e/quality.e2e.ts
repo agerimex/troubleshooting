@@ -94,6 +94,12 @@ test('QG-UI-003: a CI result file opens with its evidence; other files are refus
   await page.getByTestId('quality-file').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bad)) })
   await expect(page.getByTestId('quality-source')).not.toContainText('CI run')
   await expect(page.getByTestId('quality-source').getByRole('link')).toHaveCount(0)
+  // An id with a record error is not a confirmed record (review of b7c2e87).
+  const unconfirmed = { ...ev, id: '0123456789abcdef01234567', recorded_at: '2026-11-18T12:00:00Z', record_unconfirmed: true, record_error: 'reading it back failed (timeout)' }
+  await page.getByTestId('quality-file').setInputFiles({ name: 'unconfirmed.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(unconfirmed)) })
+  await expect(page.getByTestId('quality-recorded')).toContainText('Not confirmed: sent to the history as 0123456789abcdef01234567')
+  await expect(page.getByTestId('quality-recorded')).toContainText('reading it back failed (timeout)')
+  await expect(page.getByTestId('quality-recorded')).not.toContainText('Recorded 2026')
   await page.getByTestId('quality-file').setInputFiles({ name: 'other.json', mimeType: 'application/json', buffer: Buffer.from('{"contract":"x"}') })
   await expect(page.getByTestId('quality-error')).toContainText('other.json: The file is not a quality-gate-v1 evaluation')
 })

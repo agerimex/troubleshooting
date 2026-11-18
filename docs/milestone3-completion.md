@@ -436,3 +436,44 @@ findings, none reproduced by the reviewer against a running instance.
   environment provenance, comparable load experiments and outage verification
   (the reviewer's larger vision); a pilot with one external application is the
   next step the review recommends.
+
+# Stage 8: coverage per execution, unconfirmed records
+
+Implementation: uncommitted after `b7c2e87` at the time of writing
+(2026-11-18). It answers the web agent's review of `b7c2e87`.
+
+## What changed
+
+- **Child-span coverage per execution** (high). One span with a positive
+  child count selected "Lost child spans are detected too" for the whole run,
+  so a run mixing a log-sender execution with 199 OTLP executions that lost
+  spans passed with that assurance (the reviewer's reproduction). Now each
+  execution is `Counted` only when its entry and every span with recorded
+  same-service children report a count, the result has `child_counts`
+  (executions, counted, all/partial/none), and the assumption says "detected
+  in N of M executions only" for a partial run. `run.child_counts: required`
+  makes `db_calls` and `forbidden_call` passes with uncounted executions
+  `unverified_child_counts` (unresolved); it is part of the requirements'
+  criteria (left out of the hash when not set, so recorded criteria stay
+  equal).
+- **Unconfirmed records** (medium). When the insert went through but the read
+  back failed, the CLI printed "Recorded as evaluation". The API now sets
+  `record_unconfirmed` and keeps the id; the CLI prints "Not confirmed: …"
+  with the link (also for an API that sends only `record_error` with an id),
+  and the Quality page shows the same for a result file.
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-SUF-007 | `TestQualityMixedChildCoverage` (the review's reproduction, the policy, a parent without a count, criteria) | Go unit |
+| QG-HIST-007 | `TestQualityRecordReadBackFails`; CLI `TestUnconfirmedRecord`, `TestChildCountsRule`; `e2e/quality.e2e.ts` QG-UI-003 | Go unit; CLI; Playwright |
+
+## Still open
+
+As the review lists: controlled-run comparability (runner registration and
+finalization, expected entry identities, scenario, environment, dataset,
+instrumentation and workload revisions), sync-only call rules and scoped
+allowlists, independent import and promotion of requirement revisions, load
+and outage verification. Next acceptance test: one real pull request in a
+second repository.

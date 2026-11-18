@@ -109,6 +109,8 @@ type QualityCheck struct {
 	// declared is run.executions when it set MinExecutions (not in JSON):
 	// fewer executions then mean lost executions, not a small run.
 	declared int
+	// countsRequired is run.child_counts: required (not in JSON).
+	countsRequired bool
 }
 
 // QualityRun is what the test run declares about itself. Executions is the
@@ -117,7 +119,15 @@ type QualityCheck struct {
 // exported, not tagged) rather than a smaller run.
 type QualityRun struct {
 	Executions int `json:"executions,omitempty" yaml:"executions,omitempty"`
+	// ChildCounts "required": a db_calls or forbidden_call check can't pass
+	// while an execution doesn't record how many child spans its spans
+	// started (lost child spans couldn't be seen there). Default "" reports
+	// the coverage without requiring it.
+	ChildCounts string `json:"child_counts,omitempty" yaml:"child_counts,omitempty"`
 }
+
+// ChildCountsRequired is the value of run.child_counts that requires them.
+const ChildCountsRequired = "required"
 
 // MaxDeclaredExecutions bounds run.executions.
 const MaxDeclaredExecutions = 1_000_000
@@ -279,6 +289,9 @@ func (q *QualityRequest) Validate() error {
 			return invalid("run.executions must be between 0 and %d", MaxDeclaredExecutions)
 		}
 		declared = r.Run.Executions
+		if r.Run.ChildCounts != "" && r.Run.ChildCounts != ChildCountsRequired {
+			return invalid("run.child_counts must be %q or left out", ChildCountsRequired)
+		}
 	}
 	seen := map[string]bool{}
 	for i := range r.Checks {
@@ -293,6 +306,7 @@ func (q *QualityRequest) Validate() error {
 		if err := validateCheck(c, r.Entry, declared); err != nil {
 			return invalid("check %s: %s", c.ID, err.Error())
 		}
+		c.countsRequired = r.Run != nil && r.Run.ChildCounts == ChildCountsRequired
 	}
 	if err := validateRequirements(r); err != nil {
 		return err
@@ -475,7 +489,10 @@ type QualityResult struct {
 	// from their checks (quality_requirements.go).
 	// Assumptions say what a verdict rests on: what the recorded spans can
 	// and can't show about lost spans.
-	Assumptions  []string                   `json:"assumptions"`
+	Assumptions []string `json:"assumptions"`
+	// ChildCounts: in how many checked executions lost child spans could be
+	// seen (nil when nothing was loaded).
+	ChildCounts  *QualityChildCoverage      `json:"child_counts,omitempty"`
 	Project      string                     `json:"project"`
 	Requirements []QualityRequirementResult `json:"requirements"`
 	Source       *QualitySource             `json:"source,omitempty"`
@@ -488,7 +505,12 @@ type QualityResult struct {
 	// this is that record, exactly as recorded. Reevaluated: recorded as a
 	// deliberate re-evaluation of inputs recorded before.
 	RecordedBefore bool `json:"recorded_before,omitempty"`
-	Reevaluated    bool `json:"reevaluated,omitempty"`
+	// RecordUnconfirmed: the evaluation was sent to the history under ID, but
+	// reading the stored record back failed, so this answer is the local
+	// verdict and the stored one may differ (two instances recording at once).
+	// RecordError says why.
+	RecordUnconfirmed bool `json:"record_unconfirmed,omitempty"`
+	Reevaluated       bool `json:"reevaluated,omitempty"`
 }
 
 // qSpan is the part of a canonical span the evaluator needs.
@@ -532,6 +554,13 @@ type execution struct {
 	// its own process than were recorded (only known when the sender records
 	// child counts): children were lost. nil if there is none.
 	Unrecorded *qSpan
+	// Counted: the execution records how many child spans its spans started,
+	// so lost child spans would show (Unrecorded). A recorded count of 0 and
+	// no count at all (OTLP) look the same, so this needs the entry span to
+	// report a count and every span with recorded children of its own
+	// service to report one too; an execution whose spans start no children
+	// can't establish it.
+	Counted bool
 }
 
 // unrecordedChildren returns the first span (in start order) of the
@@ -556,6 +585,24 @@ func (ix spanIndex) unrecordedChildren(ex execution) *qSpan {
 		}
 	}
 	return first
+}
+
+// counted: see execution.Counted.
+func (ix spanIndex) counted(ex execution) bool {
+	if ex.Entry.Children <= 0 {
+		return false
+	}
+	for _, s := range ex.Subtree {
+		if s.Children > 0 {
+			continue
+		}
+		for _, c := range ix.children[s.TraceID+":"+s.SpanID] {
+			if c.Service == s.Service {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type spanIndex struct {
@@ -638,6 +685,7 @@ func (ix spanIndex) executions(spans []qSpan, e QualityEntry, run string, from, 
 			return ex.Subtree[i].SpanID < ex.Subtree[j].SpanID
 		})
 		ex.Unrecorded = ix.unrecordedChildren(ex)
+		ex.Counted = ix.counted(ex)
 		out = append(out, ex)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -688,7 +736,35 @@ func measure(c QualityCheck, exs []execution, ix spanIndex) QualityCheckResult {
 		measureForbidden(c, exs, &r, ix)
 		requireComplete(exs, &r)
 	}
+	if c.countsRequired && (c.Type == CheckDBCalls || c.Type == CheckForbidden) {
+		requireChildCounts(exs, &r)
+	}
 	return r
+}
+
+// requireChildCounts (run.child_counts: required): a pass needs every
+// execution to record its child counts; a failure stands.
+func requireChildCounts(exs []execution, r *QualityCheckResult) {
+	var first *execution
+	n := 0
+	for i := range exs {
+		if !exs[i].Counted {
+			n++
+			if first == nil {
+				first = &exs[i]
+			}
+		}
+	}
+	if n == 0 {
+		return
+	}
+	r.Details = append(r.Details, fmt.Sprintf("%d of %d executions don't record how many child spans their spans started, so spans lost there can't be seen (run.child_counts: required)", n, len(exs)))
+	if r.Status != CheckPass {
+		return
+	}
+	r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "unverified_child_counts", ""
+	r.Summary = fmt.Sprintf("%d of %d executions don't record child counts, so the limit can't be shown to hold (%s)", n, len(exs), r.Summary)
+	r.Evidence = append([]QualityEvidence{evidenceOf(*first, nil, "execution without child counts: lost child spans can't be seen in it")}, r.Evidence...)
 }
 
 // requireComplete: a call count or the absence of a call can't pass while an
@@ -1008,7 +1084,18 @@ func measureForbidden(c QualityCheck, exs []execution, r *QualityCheckResult, ix
 }
 
 // evaluateRun measures every check on one run's spans.
-func evaluateRun(rules QualityRules, data runSpans, run string, from, to int64) []QualityCheckResult {
+// QualityChildCoverage says in how many of the checked executions lost child
+// spans could be seen: Counted of Executions record their child counts.
+// Status is "all", "partial" or "none".
+type QualityChildCoverage struct {
+	Executions int    `json:"executions"`
+	Counted    int    `json:"counted"`
+	Status     string `json:"status"`
+}
+
+// evaluateRun measures every check; the coverage is over the distinct
+// executions of all checked entries (nil when nothing was loaded).
+func evaluateRun(rules QualityRules, data runSpans, run string, from, to int64) ([]QualityCheckResult, *QualityChildCoverage) {
 	out := make([]QualityCheckResult, 0, len(rules.Checks))
 	if data.Problem != "" {
 		for _, c := range rules.Checks {
@@ -1016,19 +1103,38 @@ func evaluateRun(rules QualityRules, data runSpans, run string, from, to int64) 
 				Status: CheckInsufficient, Reason: data.Problem, Summary: data.Detail,
 				Details: []string{}, Evidence: []QualityEvidence{}})
 		}
-		return out
+		return out, nil
 	}
 	ix := indexSpans(data.Spans)
 	cache := map[QualityEntry][]execution{}
+	cov := &QualityChildCoverage{}
+	seen := map[*qSpan]bool{}
 	for _, c := range rules.Checks {
 		exs, ok := cache[*c.Entry]
 		if !ok {
 			exs = ix.executions(data.Spans, *c.Entry, run, from, to)
 			cache[*c.Entry] = exs
+			for _, ex := range exs {
+				if !seen[ex.Entry] {
+					seen[ex.Entry] = true
+					cov.Executions++
+					if ex.Counted {
+						cov.Counted++
+					}
+				}
+			}
 		}
 		out = append(out, measure(c, exs, ix))
 	}
-	return out
+	switch {
+	case cov.Executions > 0 && cov.Counted == cov.Executions:
+		cov.Status = "all"
+	case cov.Counted > 0:
+		cov.Status = "partial"
+	default:
+		cov.Status = "none"
+	}
+	return out, cov
 }
 
 // gateOf: a blocking failure fails the gate; otherwise a blocking check
@@ -1057,17 +1163,19 @@ func buildQualityResult(req QualityRequest, run, baseline runSpans, now time.Tim
 		TimeFrom: req.TimeFrom, TimeTo: req.TimeTo,
 		Baseline: req.Baseline, BaselineFrom: req.BaselineFrom, BaselineTo: req.BaselineTo,
 		EvaluatedAt: now.UTC().Format(time.RFC3339)}
-	res.Checks = evaluateRun(req.Rules, run, req.Run, from, to)
+	var coverage *QualityChildCoverage
+	res.Checks, coverage = evaluateRun(req.Rules, run, req.Run, from, to)
 	if req.Baseline != "" {
 		bFrom, bTo, _ := parseWindow(req.BaselineFrom, req.BaselineTo, "")
-		base := evaluateRun(req.Rules, baseline, req.Baseline, bFrom, bTo)
+		base, _ := evaluateRun(req.Rules, baseline, req.Baseline, bFrom, bTo)
 		for i := range res.Checks {
 			b := base[i]
 			res.Checks[i].Baseline = &QualityBaseline{Status: b.Status, Value: b.Value, Executions: b.Executions, Summary: b.Summary}
 		}
 	}
 	res.Gate = gateOf(res.Checks)
-	res.Assumptions = assumptionsOf(run)
+	res.Assumptions = assumptionsOf(coverage)
+	res.ChildCounts = coverage
 	res.Project = req.Rules.Project
 	res.Requirements = requirementResults(req.Rules.Requirements, res.Checks)
 	setRequirementCriteria(res.Requirements, req.Rules)
@@ -1201,19 +1309,21 @@ const (
 	AssumptionCaught   = "Caught as not enough data: fewer executions than run.executions, a span naming a parent that was not recorded, executions past the spans read, and fewer database calls than min_per_execution."
 	AssumptionChildren = "Lost child spans are detected too: these spans record how many children they started."
 	AssumptionNoCounts = "Child spans lost without a trace can't be detected: these spans don't record how many children they started (log-sender records it; OTLP doesn't carry it)."
+	// AssumptionPartialCounts takes the counted and checked executions.
+	AssumptionPartialCounts = "Lost child spans are detected in %d of %d executions only: the others don't record how many children their spans started (log-sender records it; OTLP doesn't carry it), so spans lost there can't be detected. run.child_counts: required makes that unresolved."
 )
 
-// assumptionsOf: whether lost child spans can be detected depends on the
-// sender recording child counts.
-func assumptionsOf(run runSpans) []string {
+// assumptionsOf: whether lost child spans can be detected is decided per
+// checked execution (execution.Counted), never by one span for the whole run.
+func assumptionsOf(cov *QualityChildCoverage) []string {
 	out := []string{AssumptionRecorded, AssumptionCaught}
-	if run.Problem != "" {
+	switch {
+	case cov == nil || cov.Executions == 0:
 		return out
-	}
-	for _, s := range run.Spans {
-		if s.Children > 0 {
-			return append(out, AssumptionChildren)
-		}
+	case cov.Status == "all":
+		return append(out, AssumptionChildren)
+	case cov.Status == "partial":
+		return append(out, fmt.Sprintf(AssumptionPartialCounts, cov.Counted, cov.Executions))
 	}
 	return append(out, AssumptionNoCounts)
 }

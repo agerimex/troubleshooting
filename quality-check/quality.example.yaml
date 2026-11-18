@@ -5,6 +5,7 @@ version: 1
 # often; fewer recorded executions means lost ones (unresolved, not a pass).
 run:
   executions: 200
+  # child_counts: required   # a pass then needs child counts in every execution (log-sender records them; OTLP doesn't)
 
 # The operation an execution starts with; a check can set its own entry.
 entry:

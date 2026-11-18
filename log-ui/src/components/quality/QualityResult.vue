@@ -10,7 +10,10 @@
       <p v-if="sourceText(result.source)" class="text-xs opacity-80" data-testid="quality-source">
         {{ sourceText(result.source) }}<template v-if="ciRunLink(result.source)"> · <a :href="ciRunLink(result.source)" target="_blank" rel="noopener noreferrer">CI run</a></template>
       </p>
-      <p v-if="result.id" class="text-xs opacity-80" data-testid="quality-recorded">
+      <p v-if="result.id && (result.record_unconfirmed || result.record_error)" class="text-xs state bad" data-testid="quality-recorded">
+        Not confirmed: sent to the history as <code>{{ result.id }}</code>, but the API couldn't verify what is stored, so the recorded verdict may differ from this one. {{ result.record_error }}
+      </p>
+      <p v-else-if="result.id" class="text-xs opacity-80" data-testid="quality-recorded">
         Recorded {{ recordedText(result.recorded_at) }} as <code>{{ result.id }}</code><template v-if="result.project"> in project <code>{{ result.project }}</code></template><template v-if="result.reevaluated"> · a re-evaluation of inputs recorded before</template>
       </p>
       <div class="exports">
