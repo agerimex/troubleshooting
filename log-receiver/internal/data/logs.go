@@ -127,6 +127,9 @@ func (l *Log) InsertLogRecords(ctx context.Context, records []LogRecord) error {
 		return err
 	}
 	for _, r := range records {
+		if Redaction {
+			redactRecord(&r)
+		}
 		// Column order must match the INSERT above.
 		if err := batch.Append(
 			r.UnixTime,

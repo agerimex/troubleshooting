@@ -86,6 +86,12 @@ func getenv(key, def string) string {
 }
 
 func main() {
+	// Redaction of secrets and SQL arguments in what is stored (data/redact.go);
+	// TROUBLESHOOTING_REDACT=off keeps everything as sent.
+	if os.Getenv("TROUBLESHOOTING_REDACT") == "off" {
+		data.Redaction = false
+		log.Println("TROUBLESHOOTING_REDACT=off: spans and logs are stored as sent, SQL arguments and URL credentials included")
+	}
 	clickhouse, err := driver.Connect(driver.ConfigFromEnv())
 	if err != nil {
 		log.Fatalf("Failed to connect to clickhouse: %v", err)

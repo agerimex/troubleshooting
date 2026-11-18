@@ -126,13 +126,13 @@ deploy or change shared config without asking me; ask before deleting anything.
    Run the app from a scratch copy with its own fresh test database (logins may invalidate other
    sessions' tokens), with TROUBLESHOOTING_ADDR=127.0.0.1:50055 TROUBLESHOOTING_RUN=<run id>.
    Send requests that carry a password you choose, a ?token=SECRET123, and anything with URL
-   credentials. Wait 6 s, then each of these must print 0
-   (Q="docker exec logs-clickhouse-server clickhouse-client --query"):
-     $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND arrayExists(k -> k LIKE 'db.sql.args%' OR k LIKE 'db.query.parameter%', mapKeys(SpanAttributes))"
+   credentials. Wait 6 s, then:
+     go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@main
+     troubleshooting-check privacy --url http://127.0.0.1:8094 --service <service>   # must exit 0
+   It finds SQL arguments, URL credentials (keys too), tokens in query strings, bearer tokens and
+   password hashes. Your own values it can't know, so also check that the password and a
+   returned token are nowhere (Q="docker exec logs-clickhouse-server clickhouse-client --query"):
      $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND positionCaseInsensitive(concat(SpanName,' ',StatusMessage,' ',toString(SpanAttributes),' ',toString(ResourceAttributes),' ',toString(\`Events.Attributes\`),' ',toString(\`Links.Attributes\`)), '<needle>') > 0"
-       (run once each for SECRET123, the password, a returned token, a real credential)
-     $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND match(concat(toString(mapKeys(SpanAttributes)),' ',toString(mapValues(SpanAttributes)),' ',toString(ResourceAttributes),' ',toString(\`Events.Attributes\`)), '[a-z][a-z0-9+.-]*://[^/@ ]+@')"
-     $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND match(toString(SpanAttributes), '[?&](token|access_token|key|password|secret)=')"
    Then kill the receiver mid-run and check that the app keeps answering at normal speed.
 
 5. QUALITY GATE. Write a workload script (N requests per operation, default 50; one account
@@ -165,7 +165,7 @@ deploy or change shared config without asking me; ask before deleting anything.
 * `Authorization` headers and other headers, cookies, request and response bodies.
 * Names or ids of people in span names. Use route patterns (`/api/v1/users/{id}`), not raw paths.
 
-Then verify against the stored spans, as in the prompt above: no row may contain a password, a token you just used or `://user:pass@`.
+log-sender and the receiver redact the most common of these by default (below), but only the application knows its own data. Then verify against the stored spans: `troubleshooting-check privacy --service <service>` must exit 0, and no row may contain a password or a token you just used ([docs/privacy.md](docs/privacy.md)).
 
 **2. Send spans, off by default.** Go applications use log-sender (spans with child counts, plus logs that carry their span):
 
@@ -251,6 +251,7 @@ All settings are environment variables; docker-compose reads them from the shell
 | `APP_ENV` | analysis | empty; `development` pretty-prints JSON |
 | `TROUBLESHOOTING_RUN` | analysis: tags its own spans with `troubleshooting.run` (the quality gate of its own CI) | empty = untagged |
 | `TROUBLESHOOTING_TOKEN` | receiver (both ports), log-sender | empty = no token check |
+| `TROUBLESHOOTING_REDACT` | receiver: `off` stores spans and logs as sent; otherwise SQL arguments (unless the sender opted in), URL credentials and query strings are removed before they are stored (`docs/privacy.md`) | on |
 | `UI_AUTH`, `UI_USER`, `UI_PASSWORD_HASH` | UI (Caddy) | `off` |
 | `QUERY_TIMEOUT` | analysis: ClickHouse `max_execution_time` per query (a request runs at most two) | `10s` |
 | `QUERY_MAX_ROWS_TO_READ` | analysis: ClickHouse `max_rows_to_read` per query | `50000000` |

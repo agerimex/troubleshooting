@@ -357,3 +357,25 @@ Feature: Check a test run against quality rules
     Given a result with a requirement that has guardrails
     Then the CLI text, the HTML report and the Markdown summary define a guardrail once
     And docs/quality-gate.md, the handbook and the README say in their first paragraph that a pass means "not observed in this run"
+
+  # Stage 10: privacy by default.
+
+  @PRV-001
+  Scenario: log-sender keeps SQL arguments, tokens and URL credentials out of what it sends
+    Given a span with SQL arguments, a token in http.target, a camera URL with user:password as an attribute key and value, and an event with credentials in url.full
+    Then the span arrives without the arguments, with the path only, with the URLs without user:password, and with troubleshooting.redacted listing the keys
+    And with WithSQLArgs the arguments arrive, log-sender logs that it sends them and the resource has troubleshooting.sql_args=sent
+    And log records lose the same, message included
+
+  @PRV-002
+  Scenario: The receiver holds plain OpenTelemetry senders to the same rules
+    Given the same span from a sender that doesn't redact
+    Then the receiver stores it cleaned, keeps SQL arguments only from a sender marked troubleshooting.sql_args=sent, and leaves clean spans unchanged
+    And TROUBLESHOOTING_REDACT=off stores everything as sent
+
+  @PRV-003
+  Scenario: The privacy scan finds what got through, never showing the value
+    Given stored spans with SQL arguments, a token in a query string, URL credentials, a bearer token and a bcrypt hash, and a span whose sender opted in to SQL arguments
+    When troubleshooting-check privacy scans the service
+    Then it reports each kind with its count and an example span, exits 1, and doesn't flag the opted-in span
+    And a clean service exits 0 with "Nothing found"

@@ -65,6 +65,7 @@ type LogExporter struct {
 	token    string
 	service  string
 	resource map[string]string
+	redact   redaction
 }
 
 // NewLogExporter connects to the log-receiver (WithAddress, WithToken work as
@@ -75,7 +76,7 @@ func NewLogExporter(svcName string, opts ...Option) (*LogExporter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("troubleshooting: connect to %s: %w", cfg.address, err)
 	}
-	return &LogExporter{conn: conn, client: pb.NewLogServiceClient(conn), token: cfg.token, service: svcName, resource: cfg.resource}, nil
+	return &LogExporter{conn: conn, client: pb.NewLogServiceClient(conn), token: cfg.token, service: svcName, resource: cfg.resource, redact: cfg.redact}, nil
 }
 
 // Send stores records and returns nil only after the receiver confirmed that
@@ -114,8 +115,17 @@ func (e *LogExporter) toProto(r LogRecord) *pb.LogMessageRequest {
 	for k, v := range r.Attributes {
 		attributes[toValidUTF8(k)] = toValidUTF8(v)
 	}
+	// The same redaction as for spans (redact.go).
+	attributes, removed := e.redact.stringMap(attributes)
+	message := RedactText(r.Message)
+	if message != r.Message {
+		removed = append(removed, "message")
+	}
+	if m := marker(removed); m != "" {
+		attributes[AttrRedacted] = m
+	}
 	return &pb.LogMessageRequest{
-		Message:     toValidUTF8(r.Message),
+		Message:     toValidUTF8(message),
 		Timestamp:   timestamppb.New(r.Time),
 		RecordId:    r.RecordID,
 		TraceId:     r.TraceID,

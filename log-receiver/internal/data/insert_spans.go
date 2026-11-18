@@ -32,6 +32,9 @@ func (l *Log) InsertTraceData(ctx context.Context, data []*pb.OneSpan) error {
 	for _, d := range data {
 		events := eventsFromProto(d)
 		links := linksFromProto(d)
+		if Redaction {
+			redactSpan(d, &events, &links)
+		}
 		err := batch.Append(
 			d.Timestamp.AsTime().UnixNano(),
 			d.TraceId,

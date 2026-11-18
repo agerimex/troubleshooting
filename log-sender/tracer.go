@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ type config struct {
 	address  string
 	token    string
 	resource map[string]string
+	redact   redaction // redact.go
 }
 
 // Option configures NewTracer and NewCustomExporter.
@@ -108,6 +110,7 @@ type CustomExporter struct {
 	client pb.LogServiceClient
 	token  string
 	err    error
+	redact redaction
 }
 
 func NewCustomExporter(opts ...Option) *CustomExporter {
@@ -118,7 +121,7 @@ func NewCustomExporter(opts ...Option) *CustomExporter {
 	if err != nil {
 		return &CustomExporter{err: fmt.Errorf("troubleshooting: connect to %s: %w", cfg.address, err)}
 	}
-	return &CustomExporter{conn: conn, client: pb.NewLogServiceClient(conn), token: cfg.token}
+	return &CustomExporter{conn: conn, client: pb.NewLogServiceClient(conn), token: cfg.token, redact: cfg.redact}
 }
 
 func (e *CustomExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
@@ -131,7 +134,7 @@ func (e *CustomExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadO
 
 	protoSpans := make([]*pb.OneSpan, 0, len(spans))
 	for _, span := range spans {
-		protoSpans = append(protoSpans, spanToProto(span))
+		protoSpans = append(protoSpans, spanToProtoWith(span, e.redact))
 	}
 
 	if e.token != "" {
@@ -177,20 +180,34 @@ func encodeAttributes(name string, attrs []attribute.KeyValue) *pb.Attribute {
 	return &pb.Attribute{Key: toValidUTF8(name), Value: string(value)}
 }
 
+// spanToProto converts a span with the default redaction (redact.go).
 func spanToProto(span sdktrace.ReadOnlySpan) *pb.OneSpan {
+	return spanToProtoWith(span, redaction{})
+}
+
+func spanToProtoWith(span sdktrace.ReadOnlySpan, r redaction) *pb.OneSpan {
+	spanAttrs, removed := r.attributes(span.Attributes())
+	resourceAttrs, _ := r.attributes(span.Resource().Attributes())
+	name, status := RedactText(span.Name()), RedactText(span.Status().Description)
+	if name != span.Name() {
+		removed = append(removed, "span.name")
+	}
+	if status != span.Status().Description {
+		removed = append(removed, "status.message")
+	}
 	protoSpan := &pb.OneSpan{
 		Timestamp:          timestamppb.New(span.StartTime()),
 		TraceId:            span.SpanContext().TraceID().String(),
 		SpanId:             span.SpanContext().SpanID().String(),
 		ParentSpanId:       span.Parent().SpanID().String(),
 		TraceState:         toValidUTF8(span.Parent().TraceState().String()),
-		SpanName:           toValidUTF8(span.Name()),
+		SpanName:           toValidUTF8(name),
 		SpanKind:           span.SpanKind().String(),
-		ResourceAttributes: attributesToMap(span.Resource().Attributes()),
-		SpanAttributes:     attributesToMap(span.Attributes()),
+		ResourceAttributes: attributesToMap(resourceAttrs),
+		SpanAttributes:     attributesToMap(spanAttrs),
 		ChildSpanCount:     int32(span.ChildSpanCount()),
 		StatusCode:         int32(span.Status().Code),
-		StatusMessage:      toValidUTF8(span.Status().Description),
+		StatusMessage:      toValidUTF8(status),
 		Duration:           span.EndTime().UnixMicro() - span.StartTime().UnixMicro(),
 	}
 
@@ -200,15 +217,22 @@ func spanToProto(span sdktrace.ReadOnlySpan) *pb.OneSpan {
 
 	for _, event := range span.Events() {
 		protoSpan.Events_Timestamp = append(protoSpan.Events_Timestamp, timestamppb.New(event.Time))
-		protoSpan.Events_Name = append(protoSpan.Events_Name, toValidUTF8(event.Name))
-		protoSpan.Events_Attributes = append(protoSpan.Events_Attributes, encodeAttributes(event.Name, event.Attributes))
+		attrs, gone := r.attributes(event.Attributes)
+		removed = append(removed, gone...)
+		protoSpan.Events_Name = append(protoSpan.Events_Name, toValidUTF8(RedactText(event.Name)))
+		protoSpan.Events_Attributes = append(protoSpan.Events_Attributes, encodeAttributes(RedactText(event.Name), attrs))
 	}
 
 	for _, link := range span.Links() {
 		protoSpan.Links_TraceId = append(protoSpan.Links_TraceId, link.SpanContext.TraceID().String())
 		protoSpan.Links_SpanId = append(protoSpan.Links_SpanId, link.SpanContext.SpanID().String())
 		protoSpan.Links_TraceState = append(protoSpan.Links_TraceState, toValidUTF8(link.SpanContext.TraceState().String()))
-		protoSpan.Links_Attributes = append(protoSpan.Links_Attributes, encodeAttributes("", link.Attributes))
+		attrs, gone := r.attributes(link.Attributes)
+		removed = append(removed, gone...)
+		protoSpan.Links_Attributes = append(protoSpan.Links_Attributes, encodeAttributes("", attrs))
+	}
+	if m := marker(removed); m != "" {
+		protoSpan.SpanAttributes[AttrRedacted] = m
 	}
 
 	return protoSpan
@@ -230,8 +254,15 @@ func NewTracer(svcName string, opts ...Option) (trace.Tracer, error) {
 
 	batcher := sdktrace.NewBatchSpanProcessor(customExporter)
 
+	cfg := newConfig(opts)
 	resourceAttrs := []attribute.KeyValue{semconv.ServiceNameKey.String(svcName)}
-	for key, value := range newConfig(opts).resource {
+	if cfg.redact.sqlArgs {
+		// The choice shows in the application's log, not only in its code,
+		// and the receiver keeps the arguments only from such a sender.
+		log.Printf("troubleshooting: SQL arguments are sent to %s", cfg.address)
+		resourceAttrs = append(resourceAttrs, attribute.String(AttrSQLArgs, "sent"))
+	}
+	for key, value := range cfg.resource {
 		if key != string(semconv.ServiceNameKey) {
 			resourceAttrs = append(resourceAttrs, attribute.String(key, value))
 		}
