@@ -64,6 +64,7 @@ type Check struct {
 	TargetMs        *float64 `yaml:"target_ms,omitempty" json:"target_ms,omitempty"`
 	MaxPerExecution *int     `yaml:"max_per_execution,omitempty" json:"max_per_execution,omitempty"`
 	TargetPer       *int     `yaml:"target_per_execution,omitempty" json:"target_per_execution,omitempty"`
+	MinPerExecution *int     `yaml:"min_per_execution,omitempty" json:"min_per_execution,omitempty"`
 	From            string   `yaml:"from,omitempty" json:"from,omitempty"`
 	To              string   `yaml:"to,omitempty" json:"to,omitempty"`
 }
@@ -98,6 +99,7 @@ type Rules struct {
 type request struct {
 	RulesYAML    string  `json:"rules_yaml"`
 	Record       bool    `json:"record,omitempty"`
+	Reevaluate   bool    `json:"reevaluate,omitempty"`
 	Source       *Source `json:"source,omitempty"`
 	Run          string  `json:"run"`
 	TimeFrom     string  `json:"time_from"`
@@ -163,6 +165,13 @@ type Evaluation struct {
 	ID          string `json:"id,omitempty"`
 	RecordedAt  string `json:"recorded_at,omitempty"`
 	RecordError string `json:"record_error,omitempty"`
+	// RecordedBefore: the same evaluation was recorded before, and the API
+	// answered with that record; Reevaluated: a new record of inputs recorded
+	// before (--reevaluate).
+	RecordedBefore bool `json:"recorded_before,omitempty"`
+	Reevaluated    bool `json:"reevaluated,omitempty"`
+	// Assumptions say what the verdicts rest on (which lost spans can be seen).
+	Assumptions []string `json:"assumptions,omitempty"`
 	// Source is added by the CLI (the API doesn't know it): what was tested
 	// and which rules decided, so a result can't be mistaken for one of
 	// another commit or of other rules.
@@ -196,7 +205,7 @@ type options struct {
 	timeout                                                   time.Duration
 	basicAuth                                                 string
 	commit, prHead, ref, ciRun, rulesRef                      string
-	noSnapshot, record                                        bool
+	noSnapshot, record, reevaluate                            bool
 }
 
 func main() {
@@ -232,6 +241,7 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs.StringVar(&o.rulesRef, "rules-ref", "", "where the rules file was read from (e.g. origin/main:quality.yaml), recorded in the result")
 	fs.BoolVar(&o.noSnapshot, "no-snapshot", false, "don't keep the spans of each evidence execution in --json and --html")
 	fs.BoolVar(&o.record, "record", false, "record the evaluation in Troubleshooting as the project's history (requirements and their history on the Quality page)")
+	fs.BoolVar(&o.reevaluate, "reevaluate", false, "with --record: record a new evaluation even if the same run, window, rules and commit were recorded before (otherwise that record is the answer)")
 	o.basicAuth = os.Getenv("TROUBLESHOOTING_BASIC_AUTH")
 	if err := fs.Parse(args); err != nil {
 		return exitError
@@ -252,7 +262,10 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	if !o.noSnapshot && (o.jsonPath != "" || o.htmlPath != "") {
 		addSnapshots(o, &ev) // a recorded evaluation already has them
 	}
-	ev.Source = req.Source
+	// A recorded evaluation names what it recorded; a fresh one what was sent.
+	if ev.ID == "" || ev.Source == nil {
+		ev.Source = req.Source
+	}
 	if o.record {
 		if ev.RecordError != "" {
 			fmt.Fprintln(stderr, "warning:", ev.RecordError)
@@ -277,7 +290,12 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	}
 	fmt.Fprint(stdout, report(ev))
 	if ev.ID != "" {
-		fmt.Fprintf(stdout, "\nRecorded as evaluation %s%s\n", ev.ID, recordLink(o.ui, ev.ID))
+		if ev.RecordedBefore {
+			fmt.Fprintf(stdout, "\nAlready recorded as evaluation %s (%s): this is that record, not a new evaluation; --reevaluate records a new one%s\n",
+				ev.ID, ev.RecordedAt, recordLink(o.ui, ev.ID))
+		} else {
+			fmt.Fprintf(stdout, "\nRecorded as evaluation %s%s\n", ev.ID, recordLink(o.ui, ev.ID))
+		}
 	}
 	return exitCode(ev.Gate)
 }
@@ -365,7 +383,7 @@ func buildRequest(o options, now time.Time) (request, error) {
 	if err != nil {
 		return request{}, err
 	}
-	req := request{RulesYAML: text, Record: o.record, Run: o.run, Baseline: o.baseline,
+	req := request{RulesYAML: text, Record: o.record, Reevaluate: o.reevaluate && o.record, Run: o.run, Baseline: o.baseline,
 		Source: &Source{Commit: o.commit, PRHead: prHead(o.commit, o.prHead), Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}}
 	if req.TimeFrom, req.TimeTo, err = window(o.from, o.to, o.since, now); err != nil {
 		return request{}, err
@@ -522,6 +540,12 @@ func report(ev Evaluation) string {
 			} else {
 				fmt.Fprintf(&b, "        trace %s, span %s\n", e.TraceID, e.SpanID)
 			}
+		}
+	}
+	if len(ev.Assumptions) > 0 {
+		b.WriteString("\n")
+		for _, a := range ev.Assumptions {
+			fmt.Fprintf(&b, "Note: %s\n", a)
 		}
 	}
 	return b.String()

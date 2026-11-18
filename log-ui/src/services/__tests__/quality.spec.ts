@@ -63,7 +63,7 @@ describe('quality page logic', () => {
 
   it('reads a CLI result file or an API answer, and nothing else', () => {
     const ev = candidate()
-    expect(parseResult(JSON.stringify(ev))).toEqual([null, { ...ev, requirements: [] }])
+    expect(parseResult(JSON.stringify(ev))).toEqual([null, { ...ev, requirements: [], assumptions: [] }])
     expect(parseResult(JSON.stringify({ error: false, data: { Evaluation: ev } }))[1]?.gate).toBe('failed')
     expect(parseResult('not json')[0]).toBe('The file is not JSON.')
     expect(parseResult(JSON.stringify({ ...ev, contract: 'quality-gate-v2' }))[0]).toContain('not a quality-gate-v1 evaluation')

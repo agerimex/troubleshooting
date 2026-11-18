@@ -11,7 +11,7 @@
         {{ sourceText(result.source) }}<template v-if="ciRunLink(result.source)"> · <a :href="ciRunLink(result.source)" target="_blank" rel="noopener noreferrer">CI run</a></template>
       </p>
       <p v-if="result.id" class="text-xs opacity-80" data-testid="quality-recorded">
-        Recorded {{ recordedText(result.recorded_at) }} as <code>{{ result.id }}</code><template v-if="result.project"> in project <code>{{ result.project }}</code></template>
+        Recorded {{ recordedText(result.recorded_at) }} as <code>{{ result.id }}</code><template v-if="result.project"> in project <code>{{ result.project }}</code></template><template v-if="result.reevaluated"> · a re-evaluation of inputs recorded before</template>
       </p>
       <div class="exports">
         <button type="button" class="link" @click="saveJson" data-testid="quality-export-json">Export JSON</button>
@@ -70,6 +70,9 @@
       <summary>Rules of this evaluation</summary>
       <pre>{{ rules }}</pre>
     </details>
+    <ul v-if="result.assumptions?.length" class="assumptions text-xs opacity-80" data-testid="quality-assumptions">
+      <li v-for="(a, i) in result.assumptions" :key="i">{{ a }}</li>
+    </ul>
     <p class="text-xs opacity-80 mt-2">{{ result.method }}. Statuses describe this run only: a pass means "not observed in this run", not a guarantee. Advisory checks, targets and the baseline are shown but never decide the gate.</p>
   </section>
 </template>
@@ -171,6 +174,7 @@ export default defineComponent({
 .summary { margin: 4px 0; }
 .details { margin: 4px 0; padding-left: 18px; font-size: 13px; }
 .evidence { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; margin-top: 4px; }
+.assumptions { margin: 10px 0 0; padding-left: 18px; }
 .rules { margin-top: 10px; font-size: 13px; }
 .rules summary { cursor: pointer; color: var(--primary-color); }
 .rules pre { margin: 6px 0 0; padding: 8px; background: var(--surface-ground); border: 1px solid var(--surface-border); border-radius: 6px; overflow-x: auto; font-size: 12px; }

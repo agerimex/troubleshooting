@@ -94,6 +94,10 @@ export interface QualityEvaluation {
   id?: string
   recorded_at?: string
   record_error?: string
+  recorded_before?: boolean
+  reevaluated?: boolean
+  // What the verdicts rest on: which lost spans the recorded data can show.
+  assumptions?: string[]
 }
 
 export type RequirementStatus = 'met' | 'violated' | 'insufficient' | 'not_evaluated'

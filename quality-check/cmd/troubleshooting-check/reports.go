@@ -164,8 +164,12 @@ func markdownReport(ev Evaluation, htmlName string) string {
 			}
 		}
 	}
-	fmt.Fprintf(&b, "\n<sub>%s · %s · evaluated %s. Statuses describe this run only; a pass is \"not observed in this run\", not a guarantee.</sub>\n",
+	fmt.Fprintf(&b, "\n<sub>%s · %s · evaluated %s. Statuses describe this run only; a pass is \"not observed in this run\", not a guarantee.",
 		mdText(ev.Contract), mdText(ev.Method), mdText(ev.EvaluatedAt))
+	for _, a := range ev.Assumptions {
+		fmt.Fprintf(&b, " %s", mdText(a))
+	}
+	b.WriteString("</sub>\n")
 	return b.String()
 }
 
@@ -243,6 +247,13 @@ func htmlReport(ev Evaluation) string {
 	}
 	b.WriteString(`</tbody></table>`)
 	fmt.Fprintf(&b, `<p class="meta">%s. Statuses describe this run only: a pass means "not observed in this run", not a guarantee; a missing measurement is never a pass.</p>`, e(ev.Method))
+	if len(ev.Assumptions) > 0 {
+		b.WriteString(`<ul class="meta">`)
+		for _, a := range ev.Assumptions {
+			fmt.Fprintf(&b, `<li>%s</li>`, e(a))
+		}
+		b.WriteString(`</ul>`)
+	}
 	b.WriteString(`</body></html>`)
 	return b.String()
 }

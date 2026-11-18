@@ -260,3 +260,37 @@ Feature: Check a test run against quality rules
   @QG-UI-008
   Scenario: Nothing recorded yet
     Then the page opens on Check a run, and Requirements explains how to record
+
+  # Stage 6: a correctness pass after the web agent's review of ede9d2e.
+
+  @QG-SUF-004
+  Scenario: Lost child spans can't turn a failure into a pass
+    Given 200 executions with all entry spans recorded, whose spans record how many children they started
+    When 19 of 20 database calls and the whole forbidden branch of every execution are lost
+    Then db_calls and forbidden_call are insufficient with reason incomplete_executions, never a pass
+    But without recorded child counts the loss can't be seen, and the result's assumptions say so
+
+  @QG-SUF-005
+  Scenario: An execution without its database calls is not a pass
+    Given a db_calls check with min_per_execution 2
+    When 5 executions recorded only 1 database call
+    Then the check is insufficient with reason missing_database_calls and the execution with the fewest calls as evidence
+    But a limit already broken still fails
+
+  @QG-SUF-006
+  Scenario: Every result says what its verdicts rest on
+    Then the result's assumptions say that verdicts hold for the recorded spans, which losses are caught, and whether lost child spans can be seen in this data
+    And the CLI's reports and the Quality page show them
+
+  @QG-HIST-004
+  Scenario: A retry is answered with the record, never with a new verdict
+    Given an evaluation recorded as passed
+    When the same request is retried after late spans changed the data
+    Then the answer is the recorded evaluation, passed, with recorded_before, and nothing new is recorded
+    And --reevaluate records a new evaluation with an id of its own, marked as a re-evaluation
+
+  @QG-EVD-002
+  Scenario: A snapshot keeps the counterexample in a large trace
+    Given 220 spans in the evidence trace that start before the forbidden call
+    Then the snapshot keeps the calling span, its ancestors and the callee, within 200 spans
+    And a db_calls evidence keeps all its database calls

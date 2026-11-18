@@ -38,6 +38,7 @@ function recorded (id: string, gate: string) {
     contract: 'quality-gate-v1', method: 'exact nearest-rank percentile of entry span durations', run: 'ci-2', time_from: '1794859200000000000',
     time_to: '1794861000000000000', gate, evaluated_at: '2026-11-17T12:01:00Z', project: 'recording', id, recorded_at: '2026-11-17T12:01:00Z',
     source: { commit: 'c20000000000000000', ref: 'main', rules_sha256: 'ab'.repeat(32) },
+    assumptions: ['Verdicts hold for the recorded spans.', 'Lost child spans are detected too.'], reevaluated: true,
     requirements: [
       { id: 'REQ-START', title: 'A session starts within 800 ms', owner: 'recording-team', checks: ['startup-p95', 'db-calls'], status: 'violated', summary: 'failed: db-calls' },
       { id: 'REQ-OUTAGE', title: 'Recording continues during an analytics outage', checks: [], status: 'not_evaluated', summary: 'no check enforces it yet' }
@@ -102,6 +103,8 @@ test('QG-UI-006: the requirements catalogue shows each requirement with its hist
   await expect(page.getByTestId('quality-gate')).toHaveText('Quality gate: Failed')
   await expect(page).toHaveURL(new RegExp('#/quality\\?evaluation=' + IDS[1] + '$'))
   await expect(page.getByTestId('quality-recorded')).toContainText('Recorded 2026-11-17 12:01:00 UTC as ' + IDS[1] + ' in project recording')
+  await expect(page.getByTestId('quality-recorded')).toContainText('a re-evaluation of inputs recorded before')
+  await expect(page.getByTestId('quality-assumptions')).toContainText('Verdicts hold for the recorded spans.')
   await expect(page.getByTestId('quality-req-status-REQ-START')).toHaveText('Violated')
   await expect(page.getByTestId('quality-requirements-result')).toContainText('Requirements: 1 violated, 1 not evaluated')
   await page.getByTestId('quality-record-rules').locator('summary').click()

@@ -19,7 +19,7 @@
         <p v-if="savedError" class="state bad" role="alert" data-testid="quality-saved-error">{{ savedError }}</p>
         <p v-if="projectsError" class="state bad" role="alert" data-testid="quality-projects-error">The recorded projects could not be read: {{ projectsError }} <button type="button" class="link" @click="loadProjects">Retry</button></p>
         <div v-else-if="projectsLoaded && projects.length === 0" class="empty" data-testid="quality-projects-empty">
-          <p><b>Nothing is recorded yet.</b> A recorded evaluation keeps its result, its rules and the spans of its evidence, so each requirement gets a history: when it started failing and which commit fixed it.</p>
+          <p><b>Nothing is recorded yet.</b> A recorded evaluation keeps its result, its rules and the spans of its evidence, so each requirement gets a history: when it started failing and which commit first passed its checks again.</p>
           <p class="text-sm">Record from CI with the Action's <code>record</code> input (on by default for pushes), or with <code>troubleshooting-check --record</code>. Requirements are a <code>requirements:</code> list in <code>quality.yaml</code>; until then, <b>Check a run</b> works without recording.</p>
         </div>
         <template v-else-if="project">
