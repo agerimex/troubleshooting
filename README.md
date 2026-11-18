@@ -54,7 +54,7 @@ A span's status and a log's severity are what the application recorded. A succes
 
 Checking a test run (quality gate)
 ------
-A change can pass every functional test and still add twenty database calls per request. Tag the spans of a test run, keep rules next to your code, and check the run from CI or a coding agent (`docs/quality-gate.md`):
+A change can pass every functional test and still add twenty database calls per request. Tag the spans of a test run, keep rules next to your code, and check the run from CI or a coding agent (`docs/quality-gate.md`). A pass means the limits were not observed to be broken in this run, nothing more. Without `--since` or `--from`/`--to` the window is the run's own, found from its spans:
 
 ```
 OTEL_RESOURCE_ATTRIBUTES=troubleshooting.run=pr-42-1   # on the application under test

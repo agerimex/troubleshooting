@@ -25,8 +25,11 @@ inputs:
     description: Run to compare with (shown next to each value; never changes the result).
     default: ''
   since:
-    description: Window of the run, ending now (a Go duration, at most 24h).
-    default: 1h
+    description: >-
+      Window of the run, ending now (a Go duration, at most 24h). Empty (default): the run's
+      own window, from its first to its last entry span, so a re-run of the job evaluates
+      the same executions.
+    default: ''
   baseline-since:
     description: Window of the baseline run, ending now (default the run's window).
     default: ''
@@ -159,11 +162,12 @@ runs:
         # The tested commit is what is checked out, not what the event names.
         commit="$TC_COMMIT"
         if [ -z "$commit" ]; then commit=$(git rev-parse HEAD 2>/dev/null || echo "$GITHUB_SHA"); fi
-        args=(--url "$TC_URL" --rules "$rules" --run "$TC_RUN" --since "$TC_SINCE"
+        args=(--url "$TC_URL" --rules "$rules" --run "$TC_RUN"
           --commit "$commit" --pr-head "$TC_PR_HEAD" --ref "$TC_REF" --ci-run "$TC_CI_RUN"
           --json "$out/result.json" --html "$out/report.html" --markdown "$out/summary.md")
         if [ -n "$rules_ref" ]; then args+=(--rules-ref "$rules_ref"); fi
         if [ -n "$TC_BASELINE" ]; then args+=(--baseline "$TC_BASELINE"); fi
+        if [ -n "$TC_SINCE" ]; then args+=(--since "$TC_SINCE"); fi
         if [ -n "$TC_BASELINE_SINCE" ]; then args+=(--baseline-since "$TC_BASELINE_SINCE"); fi
         if [ -n "$TC_UI" ]; then args+=(--ui "$TC_UI"); fi
         if [ "$TC_RECORD" = true ] || { [ "$TC_RECORD" = auto ] && [ "$TC_EVENT" = push ]; }; then args+=(--record); fi

@@ -335,3 +335,25 @@ Feature: Check a test run against quality rules
     Then the answer keeps the id, has record_unconfirmed and says the recorded verdict may differ
     And the CLI prints "Not confirmed: the evaluation was sent to the history as" with the link, never "Recorded as evaluation"
     And the Quality page says the same for such a result file
+
+  # Stage 9: quick wins after the first external pilot.
+
+  @QG-WIN-001
+  Scenario: Without a window, each run's own is used
+    Given the candidate and baseline runs of the reference fixture
+    When the candidate is checked against the baseline without time_from, time_to or a baseline window
+    Then the answer is the same as with the runs' exact windows, with window_from_run and baseline_window_from_run
+    And both windows lie inside the runs' half hour
+    And the CLI sends no window unless --since or --from/--to is given, and falls back to the last --since against an API that needs one
+
+  @QG-EVD-006
+  Scenario: Database calls are explained by their statements
+    Given each database call of an execution is followed by an otelsql sql:rows_close span with db.system
+    Then db_calls counts the calls only, and the details say the rows spans were not counted
+    And the details list the worst execution's calls by db.statement, so a missing statement shows
+
+  @QG-DOC-001
+  Scenario: Results define a guardrail and what a pass means
+    Given a result with a requirement that has guardrails
+    Then the CLI text, the HTML report and the Markdown summary define a guardrail once
+    And docs/quality-gate.md, the handbook and the README say in their first paragraph that a pass means "not observed in this run"

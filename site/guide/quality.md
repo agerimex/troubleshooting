@@ -4,7 +4,7 @@ description: Check a test run against latency limits, database calls per executi
 
 # Quality gate
 
-The quality gate answers “does this change keep its limits?” before it ships. Your tests run against the instrumented application; Troubleshooting then checks that **test run** against rules kept in your repository and links every failure to the execution behind it. It works from the command line, as a GitHub Action, and on the **Quality** page.
+The quality gate answers “does this change keep its limits?” before it ships. Your tests run against the instrumented application; Troubleshooting then checks that **test run** against rules kept in your repository and links every failure to the execution behind it. A pass means the limits were not observed to be broken **in this run**; what the tests didn't execute, or what wasn't instrumented, can't be judged. It works from the command line, as a GitHub Action, and on the **Quality** page.
 
 A change can pass every functional test and still add twenty database calls per request, or call a service it must not. The gate measures what the run actually did, from its spans.
 

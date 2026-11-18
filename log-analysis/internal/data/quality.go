@@ -168,6 +168,13 @@ type QualityRequest struct {
 	Source     *QualitySource `json:"source,omitempty"`
 	// rulesText is rules_yaml as sent, kept for the record.
 	rulesText string
+	// windowFromRun: time_from and time_to were left out, so the window is
+	// the run's own: from its first to its last entry span within the last
+	// MaxQualityWindow (resolveQualityWindows). baselineFromRun: the same for
+	// the baseline. A window from the run is the same on a retry, so a
+	// recorded evaluation records once, which a window counted back from
+	// "now" can't do.
+	windowFromRun, baselineFromRun bool
 }
 
 var checkIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -224,8 +231,11 @@ func parseWindow(fromS, toS, what string) (int64, int64, error) {
 // Validate checks the request and fills defaults (percentile, minimum
 // executions, each check's entry, the baseline window). Errors name the check.
 func (q *QualityRequest) Validate() error {
-	if _, _, err := parseWindow(q.TimeFrom, q.TimeTo, ""); err != nil {
-		return err
+	q.windowFromRun = q.TimeFrom == "" && q.TimeTo == ""
+	if !q.windowFromRun {
+		if _, _, err := parseWindow(q.TimeFrom, q.TimeTo, ""); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(q.RulesYAML) != "" {
 		if q.Rules.Version != 0 || q.Rules.Entry != nil || len(q.Rules.Checks) > 0 {
@@ -261,11 +271,16 @@ func (q *QualityRequest) Validate() error {
 		if q.Baseline == q.Run {
 			return invalid("baseline must be a different run than run")
 		}
-		if q.BaselineFrom == "" && q.BaselineTo == "" {
+		switch {
+		case q.BaselineFrom != "" || q.BaselineTo != "":
+			if _, _, err := parseWindow(q.BaselineFrom, q.BaselineTo, "baseline_"); err != nil {
+				return err
+			}
+		case q.windowFromRun:
+			// Each run's window is its own; the baseline ran at another time.
+			q.baselineFromRun = true
+		default:
 			q.BaselineFrom, q.BaselineTo = q.TimeFrom, q.TimeTo
-		}
-		if _, _, err := parseWindow(q.BaselineFrom, q.BaselineTo, "baseline_"); err != nil {
-			return err
 		}
 	}
 	r := &q.Rules
@@ -511,6 +526,10 @@ type QualityResult struct {
 	// RecordError says why.
 	RecordUnconfirmed bool `json:"record_unconfirmed,omitempty"`
 	Reevaluated       bool `json:"reevaluated,omitempty"`
+	// WindowFromRun: the request left out the window and TimeFrom/TimeTo are
+	// the run's own (the same for the baseline with BaselineFromRun).
+	WindowFromRun   bool `json:"window_from_run,omitempty"`
+	BaselineFromRun bool `json:"baseline_window_from_run,omitempty"`
 }
 
 // qSpan is the part of a canonical span the evaluator needs.
@@ -528,6 +547,22 @@ type qSpan struct {
 	// process, as recorded by the sender (log-sender); 0 when unknown (OTLP
 	// doesn't carry it).
 	Children int32
+	// Statement is db.statement (db.query.text) as recorded, at most
+	// maxStatementChars, for the evidence of db_calls.
+	Statement string
+}
+
+// maxStatementChars bounds a statement in a result.
+const maxStatementChars = 160
+
+// notDBCalls are span names of database instrumentation that report on a
+// call already counted (or on client-side work) rather than making one:
+// go.nhat.io/otelsql's rows, last-insert-id and session spans. They carry
+// db.system like the call itself, and counting them would count a query
+// twice.
+var notDBCalls = map[string]bool{
+	"sql:rows_close": true, "sql:rows_next": true, "sql:rows_affected": true,
+	"sql:last_insert_id": true, "sql:reset_session": true,
 }
 
 // runSpans is what was loaded for one run. Problem (a reason code) makes
@@ -899,15 +934,42 @@ func measureLatency(c QualityCheck, exs []execution, r *QualityCheckResult) {
 }
 
 // dbCalls are the recorded database calls of an execution: CLIENT spans
-// with db.system or db.system.name, the entry included.
+// with db.system or db.system.name, the entry included, except the spans
+// that only report on a call (notDBCalls).
 func dbCalls(ex execution) []*qSpan {
 	var out []*qSpan
 	for _, s := range append([]*qSpan{ex.Entry}, ex.Subtree...) {
-		if s.DB && s.Kind == "client" {
+		if s.DB && s.Kind == "client" && !notDBCalls[s.Name] {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// notCounted are the database spans of an execution that dbCalls leaves out.
+func notCounted(ex execution) []*qSpan {
+	var out []*qSpan
+	for _, s := range append([]*qSpan{ex.Entry}, ex.Subtree...) {
+		if s.DB && s.Kind == "client" && notDBCalls[s.Name] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// callDetails lists an execution's database calls grouped by statement
+// (by span name when a call recorded none), most frequent first: a drop
+// from 5 calls to 4 shows which statement is missing.
+func callDetails(calls []*qSpan) []string {
+	keyed := make([]*qSpan, len(calls))
+	for i, s := range calls {
+		k := *s
+		if st := strings.Join(strings.Fields(s.Statement), " "); st != "" {
+			k.Name = st
+		}
+		keyed[i] = &k
+	}
+	return repeatedNames(keyed)
 }
 
 // repeatedNames lists span names with their counts, most frequent first.
@@ -976,7 +1038,10 @@ func measureDBCalls(c QualityCheck, exs []execution, r *QualityCheckResult) {
 		}
 	}
 	if worstN > 0 {
-		r.Details = append(r.Details, repeatedNames(dbCalls(exs[worst]))...)
+		r.Details = append(r.Details, callDetails(dbCalls(exs[worst]))...)
+		if skipped := notCounted(exs[worst]); len(skipped) > 0 {
+			r.Details = append(r.Details, fmt.Sprintf("not counted, they report on a call rather than make one: %s", strings.Join(repeatedNames(skipped), ", ")))
+		}
 		r.Evidence = append(r.Evidence, evidenceOf(exs[worst], nil, fmt.Sprintf("execution with the most database calls: %d", worstN)))
 	}
 	if total == 0 && *c.MaxPerExecution > 0 {
@@ -1162,7 +1227,7 @@ func buildQualityResult(req QualityRequest, run, baseline runSpans, now time.Tim
 	res := QualityResult{Contract: QualityContract, Method: QualityPercentileMethod, Run: req.Run,
 		TimeFrom: req.TimeFrom, TimeTo: req.TimeTo,
 		Baseline: req.Baseline, BaselineFrom: req.BaselineFrom, BaselineTo: req.BaselineTo,
-		EvaluatedAt: now.UTC().Format(time.RFC3339)}
+		EvaluatedAt: now.UTC().Format(time.RFC3339), WindowFromRun: req.windowFromRun, BaselineFromRun: req.baselineFromRun}
 	var coverage *QualityChildCoverage
 	res.Checks, coverage = evaluateRun(req.Rules, run, req.Run, from, to)
 	if req.Baseline != "" {
@@ -1191,22 +1256,15 @@ func buildQualityResult(req QualityRequest, run, baseline runSpans, now time.Tim
 // lookahead after the window (an execution may end after it). It reads one row
 // more than MaxQualitySpans to detect a run that is too large.
 func qualityQuery(entries []QualityEntry, from, to int64) string {
-	pairs := make([][2]string, 0, len(entries))
-	seen := map[[2]string]bool{}
-	for _, e := range entries {
-		p := [2]string{e.Service, e.Operation}
-		if !seen[p] {
-			seen[p] = true
-			pairs = append(pairs, p)
-		}
-	}
+	pairs := entryPairs(entries)
 	runAttr := spanAttr(AttrRun)
 	return `SELECT "TraceId", "SpanId", "ParentSpanId", "ServiceName", "SpanName", "SpanKind", "UnixTime", "Duration",
 		("SpanAttributes"['db.system'] != '' OR "SpanAttributes"['db.system.name'] != '') AS "IsDB",
 		if("SpanAttributes"['peer.service'] != '', "SpanAttributes"['peer.service'], "SpanAttributes"['server.address']) AS "Peer",
 		` + runAttr + ` AS "Run", "StatusCode",
 		"SpanAttributes"['peer.service'] AS "PeerService",
-		if("SpanAttributes"['db.system'] != '', "SpanAttributes"['db.system'], "SpanAttributes"['db.system.name']) AS "DBSystem", "ChildSpanCount"
+		if("SpanAttributes"['db.system'] != '', "SpanAttributes"['db.system'], "SpanAttributes"['db.system.name']) AS "DBSystem", "ChildSpanCount",
+		substringUTF8(if("SpanAttributes"['db.statement'] != '', "SpanAttributes"['db.statement'], "SpanAttributes"['db.query.text']), 1, ` + num(maxStatementChars) + `) AS "Statement"
 	FROM otel_traces
 	WHERE "UnixTime" >= ` + num(from) + ` AND "UnixTime" < ` + num(to+int64(qualityLookahead)) + `
 	AND "TraceId" IN (SELECT DISTINCT "TraceId" FROM otel_traces
@@ -1216,6 +1274,122 @@ func qualityQuery(entries []QualityEntry, from, to int64) string {
 	ORDER BY "TraceId", "SpanId", ` + winnerOrder + `
 	LIMIT 1 BY "TraceId", "SpanId"
 	LIMIT ` + num(MaxQualitySpans+1)
+}
+
+// entryPairs are the distinct (service, operation) pairs of the entries.
+func entryPairs(entries []QualityEntry) [][2]string {
+	pairs := make([][2]string, 0, len(entries))
+	seen := map[[2]string]bool{}
+	for _, e := range entries {
+		p := [2]string{e.Service, e.Operation}
+		if !seen[p] {
+			seen[p] = true
+			pairs = append(pairs, p)
+		}
+	}
+	return pairs
+}
+
+func ruleEntries(rules QualityRules) []QualityEntry {
+	entries := make([]QualityEntry, 0, len(rules.Checks))
+	for _, c := range rules.Checks {
+		entries = append(entries, *c.Entry)
+	}
+	return entries
+}
+
+// qualityRunRangeQuery finds the start times of the first and last entry
+// span of each run in [lo, hi): one query for the run and the baseline
+// ({qualityRun:String} and {qualityBaseline:String}, the same run when only
+// one is looked up), one row per run that has entry spans.
+func qualityRunRangeQuery(entries []QualityEntry, lo, hi int64) string {
+	runAttr := spanAttr(AttrRun)
+	return `SELECT ` + runAttr + ` AS "Run", count(), min("UnixTime"), max("UnixTime") FROM otel_traces
+	WHERE "UnixTime" >= ` + num(lo) + ` AND "UnixTime" < ` + num(hi) + `
+	AND ` + runAttr + ` IN ({qualityRun:String}, {qualityBaseline:String})
+	AND ("ServiceName", "SpanName") IN ` + pairsLiteral(entryPairs(entries)) + `
+	GROUP BY "Run"`
+}
+
+// runWindowBounds is where a window from the run is looked for: the last
+// MaxQualityWindow (less a minute, so the window found always fits), within
+// raw retention, up to a minute after now (a sender's clock may be ahead).
+func runWindowBounds(now time.Time, retentionSeconds int64) (int64, int64) {
+	lo := now.Add(-MaxQualityWindow + time.Minute).UnixNano()
+	if h := rawHorizon(now, retentionSeconds); h > lo {
+		lo = h
+	}
+	return lo, now.Add(time.Minute).UnixNano()
+}
+
+// runWindow turns a run's first and last entry start into its window
+// [first, last+1); a run without entry spans gets the whole search range, so
+// its checks report no executions.
+func runWindow(n uint64, first, last, lo, hi int64) (int64, int64) {
+	if n == 0 {
+		return lo, hi
+	}
+	return first, last + 1
+}
+
+// runRanges reads the first and last entry start of each run in [lo, hi)
+// with one query: [count, first, last] per run that has entry spans.
+func runRanges(ctx context.Context, rules QualityRules, run, baseline string, lo, hi int64) (map[string][3]int64, error) {
+	query := qualityRunRangeQuery(ruleEntries(rules), lo, hi)
+	params := []any{clickhouse.Named("qualityRun", run), clickhouse.Named("qualityBaseline", baseline)}
+	ctx, span := startQuerySpan(ctx, "SELECT quality run windows", query, params)
+	var err error
+	defer func() { endQuerySpan(span, err) }()
+	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][3]int64{}
+	for rows.Next() {
+		var name string
+		var n uint64
+		var first, last int64
+		if err = rows.Scan(&name, &n, &first, &last); err != nil {
+			return nil, err
+		}
+		out[name] = [3]int64{int64(n), first, last}
+	}
+	err = rows.Err()
+	return out, err
+}
+
+// resolveQualityWindows fills the windows a request left out from the runs'
+// spans, with one query for both runs (a request's database calls are
+// checked by this repository's own gate). A failed lookup leaves the whole
+// search range and is returned as the problem of each run it was for, so
+// their checks are insufficient, never passed.
+func resolveQualityWindows(ctx context.Context, req *QualityRequest) (runProblem, baseProblem *runSpans) {
+	if !req.windowFromRun && !req.baselineFromRun {
+		return nil, nil
+	}
+	lo, hi := runWindowBounds(clock.Now(), policyFor(ctx).TracesSeconds)
+	base := req.Run
+	if req.baselineFromRun {
+		base = req.Baseline
+	}
+	found, err := runRanges(ctx, req.Rules, req.Run, base, lo, hi)
+	window := func(run string) (string, string, *runSpans) {
+		if err != nil {
+			p := queryProblem(ctx, err)
+			return num(lo), num(hi), &p
+		}
+		r := found[run]
+		from, to := runWindow(uint64(r[0]), r[1], r[2], lo, hi)
+		return num(from), num(to), nil
+	}
+	if req.windowFromRun {
+		req.TimeFrom, req.TimeTo, runProblem = window(req.Run)
+	}
+	if req.baselineFromRun {
+		req.BaselineFrom, req.BaselineTo, baseProblem = window(req.Baseline)
+	}
+	return runProblem, baseProblem
 }
 
 func queryProblem(ctx context.Context, err error) runSpans {
@@ -1229,11 +1403,7 @@ func loadRun(ctx context.Context, rules QualityRules, run string, from, to int64
 	if from < rawHorizon(clock.Now(), pol.TracesSeconds) {
 		return runSpans{Problem: "outside_retention", Detail: "part of the window is outside raw span retention"}
 	}
-	entries := make([]QualityEntry, 0, len(rules.Checks))
-	for _, c := range rules.Checks {
-		entries = append(entries, *c.Entry)
-	}
-	query := qualityQuery(entries, from, to)
+	query := qualityQuery(ruleEntries(rules), from, to)
 	params := []any{clickhouse.Named("qualityRun", run)}
 	ctx, span := startQuerySpan(ctx, "SELECT quality run", query, params)
 	var err error
@@ -1246,7 +1416,7 @@ func loadRun(ctx context.Context, rules QualityRules, run string, from, to int64
 	var out runSpans
 	for rows.Next() {
 		var s qSpan
-		if err = rows.Scan(&s.TraceID, &s.SpanID, &s.Parent, &s.Service, &s.Name, &s.Kind, &s.Start, &s.Duration, &s.DB, &s.Peer, &s.Run, &s.Status, &s.PeerService, &s.DBSystem, &s.Children); err != nil {
+		if err = rows.Scan(&s.TraceID, &s.SpanID, &s.Parent, &s.Service, &s.Name, &s.Kind, &s.Start, &s.Duration, &s.DB, &s.Peer, &s.Run, &s.Status, &s.PeerService, &s.DBSystem, &s.Children, &s.Statement); err != nil {
 			return queryProblem(ctx, err)
 		}
 		out.Spans = append(out.Spans, s)
@@ -1260,8 +1430,11 @@ func loadRun(ctx context.Context, rules QualityRules, run string, from, to int64
 	return out
 }
 
-// EvaluateQuality evaluates a validated request.
-func EvaluateQuality(ctx context.Context, req QualityRequest) QualityResult {
+// EvaluateQuality evaluates a validated request. Windows the request left out
+// are filled in from the runs' spans (req is updated, so a record keeps the
+// window that was evaluated).
+func EvaluateQuality(ctx context.Context, req *QualityRequest) QualityResult {
+	runProblem, baseProblem := resolveQualityWindows(ctx, req)
 	from, to, _ := parseWindow(req.TimeFrom, req.TimeTo, "")
 	// The run and the baseline are read at the same time: both are bounded by
 	// the one request deadline.
@@ -1272,12 +1445,20 @@ func EvaluateQuality(ctx context.Context, req QualityRequest) QualityResult {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if baseProblem != nil {
+				base = *baseProblem
+				return
+			}
 			base = loadRun(ctx, req.Rules, req.Baseline, bFrom, bTo)
 		}()
 	}
-	run = loadRun(ctx, req.Rules, req.Run, from, to)
+	if runProblem != nil {
+		run = *runProblem
+	} else {
+		run = loadRun(ctx, req.Rules, req.Run, from, to)
+	}
 	wg.Wait()
-	return buildQualityResult(req, run, base, clock.Now())
+	return buildQualityResult(*req, run, base, clock.Now())
 }
 
 // requireDurations: executions without a valid duration (their entry never

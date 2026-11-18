@@ -1,7 +1,9 @@
 # Quality gate (milestone 3)
 
 Check one **test run** against rules kept in your repository, and get the
-execution behind every failure. Contract `quality-gate-v1`. Acceptance scope:
+execution behind every failure. A pass means the limits were **not observed
+to be broken in this run**: it says nothing about what the tests didn't
+execute or what wasn't instrumented. Contract `quality-gate-v1`. Acceptance scope:
 `features/milestone_3/quality_gate.feature`; scenario-to-test map:
 `docs/milestone3-completion.md`.
 
@@ -79,7 +81,7 @@ lifecycle, load and outage experiments, and an enforced CI trust model (see
    ```
    go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@latest
    troubleshooting-check --url http://localhost:8095 --rules quality.yaml \
-       --run pr-42-1 --baseline main-118 --since 1h --json result.json
+       --run pr-42-1 --baseline main-118 --json result.json
    ```
 
    Exit code: **0** passed, **1** failed, **2** unresolved (not enough
@@ -91,9 +93,15 @@ lifecycle, load and outage experiments, and an enforced CI trust model (see
    `--url` is the UI origin (which serves `/api`) or the API itself; `--ui`
    sets the origin of evidence links if it differs (`none`: no links, for a
    Troubleshooting that is gone after the job; the evidence then names its
-   trace and its snapshot in report.html). `--from`/`--to` (RFC 3339)
-   replace `--since`; `--baseline-since`/`--baseline-from`/`--baseline-to` give
-   the baseline its own window (default: the run's). `--record` keeps the
+   trace and its snapshot in report.html). Without a window the API takes
+   **the run's own**: from its first to its last entry span within the last
+   24 h (and the baseline's own), so a re-run of the job evaluates, and
+   records, the same executions; the result says `window_from_run`.
+   `--since` (executions of the last duration) or `--from`/`--to` (RFC 3339)
+   set a window instead; `--baseline-since`/`--baseline-from`/`--baseline-to`
+   give the baseline its own (default: the run's window). Against an older
+   Troubleshooting that needs a window, the CLI says so and checks the last
+   `--since` (1 h). `--record` keeps the
    evaluation in Troubleshooting as the project's history and prints its link
    (see "Requirements and history"); an evaluation recorded before is shown
    as that record ("Already recorded"), and `--reevaluate` records a new one.
@@ -393,10 +401,17 @@ reported. Fewer than `min_executions` is *insufficient*; the value so far is
 still shown. Evidence: the slowest execution.
 
 **db_calls**: per execution, the CLIENT spans with `db.system` or
-`db.system.name` (the entry included). The value is the **maximum** over
+`db.system.name` (the entry included), except spans that report on a call
+rather than make one: go.nhat.io/otelsql's `sql:rows_close`, `sql:rows_next`,
+`sql:rows_affected`, `sql:last_insert_id` and `sql:reset_session` (they
+carry `db.system` too and would count a query twice; the details name them
+as "not counted"). The value is the **maximum** over
 executions, i.e. "at most N per execution" holds for every execution, not on
 average; the result also lists how many executions exceed the limit. Details
-name the operations of the worst execution with their counts. SQL text and
+list the calls of the worst execution with their counts, by `db.statement`
+(`db.query.text`, at most 160 characters, as recorded) or by span name when a
+call recorded no statement, so a drop from five calls to four shows which
+one is missing. SQL text and
 logs are never parsed. A run without any database call is `no_database_calls`
 (below). `min_per_execution` (optional, at most the limit) is an
 instrumentation guard: an execution with fewer recorded calls is missing its
@@ -518,6 +533,13 @@ pass). The usual query limits apply (`QUERY_TIMEOUT`, …).
 Instead of `rules`, `rules_yaml` carries the rules file as text (the UI sends
 it so); it is parsed as strictly as the CLI does it: unknown or duplicate keys,
 more than one document or more than 64 KiB are 400.
+
+`time_from`/`time_to` may both be left out: the window is then the run's
+own (its first to its last entry span within the last 24 h and raw
+retention; none found: those 24 h, so its checks report no executions), and
+the baseline without a window gets its own the same way. The result has
+`window_from_run` / `baseline_window_from_run` and the windows used, and a
+recorded evaluation keeps them.
 
 Invalid rules or windows are 400 with a message naming the check. Otherwise
 200 with `data.Evaluation`: `contract`, `method`, `run`, windows, `gate`,

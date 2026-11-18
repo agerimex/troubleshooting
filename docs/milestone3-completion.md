@@ -477,3 +477,38 @@ instrumentation and workload revisions), sync-only call rules and scoped
 allowlists, independent import and promotion of requirement revisions, load
 and outage verification. Next acceptance test: one real pull request in a
 second repository.
+
+# Stage 9: quick wins after the first external pilot
+
+The first integration of an outside Go application showed four things worth
+fixing at once (2026-11-18).
+
+## What changed
+
+- **The run's own window.** A request may leave out the window; the API
+  takes the run's (first to last entry span within 24 h) and the baseline's,
+  and says so (`window_from_run`). The CLI's default and the action's
+  `since` default are now that window: a window counted back from "now"
+  changed on every retry, so a recorded evaluation recorded again, and a
+  window that started late made a run unresolved. An older API that needs a
+  window gets the last `--since` from the CLI. This repository's own gate (`.github/quality.yaml`, at most 3 queries per `quality/evaluate`) failed the first version of this change: it looked up the run's and the baseline's window with a query each, 4 calls in all, and the new statement details named both lookups. They are one query now.
+- **Explainable database calls.** otelsql's rows spans carry `db.system`
+  and were counted as calls (a query counted twice); they aren't now, and the
+  details say so. The worst execution's calls are listed by statement.
+- **log-sender as an outside module.** CI builds an application that
+  imports log-sender with only log-sender replaced, so protos comes from the
+  version log-sender requires (the bug fixed in #24: it compiled only inside
+  this repository).
+- **Wording.** A guardrail is defined where it first appears in a result;
+  the docs say up front that a pass means "not observed in this run". The
+  README's integration guide (#25) starts from what an application must
+  never send.
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-WIN-001 | `TestQualityWindowFromRun`, `TestQualityRunRangeQuery`; CLI `TestWindowFromRun`, `TestWindowFromRunOldAPI`, `TestWindowFromRunReport`; fixture `qgWindowFromRun` | Go unit; CLI; fixture |
+| QG-EVD-006 | `TestQualityDBCallsStatements` | Go unit |
+| QG-DOC-001 | CLI tests of the guardrail line; docs | CLI; review |
+| (log-sender) | CI job `log-sender-outside` | CI |

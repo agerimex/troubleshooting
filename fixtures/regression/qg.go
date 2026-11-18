@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -309,10 +310,54 @@ func (c *checker) qgInvalid(ctx context.Context) error {
 	return nil
 }
 
+// QG-WIN-001: without a window the API takes each run's own, from its first
+// to its last entry span: the candidate gives the same answer as with its
+// exact window, and both windows lie inside the runs' half hour.
+func (c *checker) qgWindowFromRun(ctx context.Context) error {
+	body := map[string]any{"rules": c.qgRules(), "run": c.d.qgRun("candidate"), "baseline": c.d.qgRun("baseline")}
+	var data struct {
+		Evaluation struct {
+			qgEvaluation
+			TimeFrom        string `json:"time_from"`
+			TimeTo          string `json:"time_to"`
+			BaselineFrom    string `json:"baseline_time_from"`
+			BaselineTo      string `json:"baseline_time_to"`
+			WindowFromRun   bool   `json:"window_from_run"`
+			BaselineFromRun bool   `json:"baseline_window_from_run"`
+		} `json:"Evaluation"`
+	}
+	if err := c.api.post(ctx, "/api/v1/quality/evaluate", body, &data); err != nil {
+		return err
+	}
+	ev := data.Evaluation
+	if !ev.WindowFromRun || !ev.BaselineFromRun || ev.Gate != "failed" {
+		return fmt.Errorf("from run %v, baseline from run %v, gate %s", ev.WindowFromRun, ev.BaselineFromRun, ev.Gate)
+	}
+	lo, hi := c.d.m2Hour(6).UnixNano(), c.d.m2Hour(6).Add(30*time.Minute).UnixNano()
+	for _, w := range [][2]string{{ev.TimeFrom, ev.TimeTo}, {ev.BaselineFrom, ev.BaselineTo}} {
+		from, err1 := strconv.ParseInt(w[0], 10, 64)
+		to, err2 := strconv.ParseInt(w[1], 10, 64)
+		if err1 != nil || err2 != nil || from < lo || to > hi || to <= from {
+			return fmt.Errorf("window %s..%s is not inside the runs' half hour", w[0], w[1])
+		}
+	}
+	for _, e := range []error{
+		qgWant(ev.qgEvaluation, "startup-p95", "fail", "limit_exceeded", "910", "open", 200, 200, "pass 420"),
+		qgWant(ev.qgEvaluation, "db-calls", "fail", "limit_exceeded", "21", "open", 200, 200, "pass 2"),
+		qgWant(ev.qgEvaluation, "no-directory", "fail", "forbidden_call", "200", "", 200, 200, "pass 0"),
+	} {
+		if e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 func (c *checker) qgChecks() []namedCheck {
 	return []namedCheck{
 		{"QG-REF-001", "Quality gate: candidate fails latency, database calls and the forbidden call", c.qgCandidate},
 		{"QG-REF-002", "Quality gate: the fix passes, target still open", c.qgFixed},
+		{"QG-WIN-001", "Quality gate: without a window, each run's own is used", c.qgWindowFromRun},
 		{"QG-EVD-001", "Quality gate: too few or no executions is unresolved", c.qgInsufficient},
 		{"QG-VAL-001", "Quality gate: invalid rules are rejected", c.qgInvalid},
 		{"QG-HIST-001", "Quality gate: requirements and their recorded history", c.qgHistory},
