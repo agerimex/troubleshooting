@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -226,26 +227,50 @@ func jsonOf(v any) string {
 	return string(b)
 }
 
+// fakeQualityStore deduplicates inserts by id, as ClickHouse does with the
+// insert deduplication token: inserted has the rows it kept, dropped counts
+// the others.
 type fakeQualityStore struct {
+	mu       sync.Mutex
 	bodies   map[string]string
 	inserted [][]any
+	dropped  int
 	err      error
+	// missed, when set, is waited on by every lookup that finds nothing,
+	// after marking it done: the lookups of concurrent requests then all miss
+	// before any of them inserts (two API instances).
+	missed *sync.WaitGroup
 }
 
 func (f *fakeQualityStore) lookup(_ context.Context, project, id string) (string, bool, error) {
+	f.mu.Lock()
 	if f.err != nil {
+		f.mu.Unlock()
 		return "", false, f.err
 	}
 	b, ok := f.bodies[project+"/"+id]
+	wait := f.missed
+	f.mu.Unlock()
+	if !ok && wait != nil {
+		wait.Done()
+		wait.Wait()
+	}
 	return b, ok, nil
 }
 
-func (f *fakeQualityStore) insert(_ context.Context, row []any) error {
+func (f *fakeQualityStore) insert(_ context.Context, id string, row []any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.err != nil {
 		return f.err
 	}
+	key := row[1].(string) + "/" + id
+	if _, ok := f.bodies[key]; ok {
+		f.dropped++
+		return nil
+	}
 	f.inserted = append(f.inserted, row)
-	f.bodies[row[1].(string)+"/"+row[0].(string)] = row[10].(string)
+	f.bodies[key] = row[10].(string)
 	return nil
 }
 
@@ -258,14 +283,14 @@ func TestQualityRetryReturnsTheRecord(t *testing.T) {
 	at := time.Unix(0, qBase).UTC()
 
 	passed := buildQualityResult(req, runSpans{Spans: referenceRun("candidate", "fixed", 560)}, runSpans{}, at)
-	recordQuality(context.Background(), store, req, &passed, at)
+	recordQuality(context.Background(), store, &recordLocks{}, req, &passed, at)
 	if passed.ID == "" || passed.RecordError != "" || passed.RecordedBefore || len(store.inserted) != 1 {
 		t.Fatalf("first record: %+v", passed)
 	}
 
 	// The same inputs, but the data changed meanwhile (late spans).
 	failed := buildQualityResult(req, runSpans{Spans: referenceRun("candidate", "candidate", 910)}, runSpans{}, at.Add(time.Minute))
-	recordQuality(context.Background(), store, req, &failed, at.Add(time.Minute))
+	recordQuality(context.Background(), store, &recordLocks{}, req, &failed, at.Add(time.Minute))
 	if failed.ID != passed.ID || failed.Gate != GatePassed || !failed.RecordedBefore || failed.RecordedAt != passed.RecordedAt || len(store.inserted) != 1 {
 		t.Errorf("retry: id %s gate %s before %v at %s, %d inserts", failed.ID, failed.Gate, failed.RecordedBefore, failed.RecordedAt, len(store.inserted))
 	}
@@ -281,7 +306,7 @@ func TestQualityRetryReturnsTheRecord(t *testing.T) {
 	// A deliberate re-evaluation is a record of its own.
 	req.Reevaluate = true
 	again := buildQualityResult(req, runSpans{Spans: referenceRun("candidate", "candidate", 910)}, runSpans{}, at.Add(2*time.Minute))
-	recordQuality(context.Background(), store, req, &again, at.Add(2*time.Minute))
+	recordQuality(context.Background(), store, &recordLocks{}, req, &again, at.Add(2*time.Minute))
 	if again.ID == passed.ID || again.Gate != GateFailed || !again.Reevaluated || again.RecordedBefore || len(store.inserted) != 2 {
 		t.Errorf("reevaluation: %+v", again)
 	}
@@ -289,7 +314,7 @@ func TestQualityRetryReturnsTheRecord(t *testing.T) {
 	// A store error records nothing and keeps the result.
 	broken := &fakeQualityStore{bodies: map[string]string{}, err: errors.New("down")}
 	res := buildQualityResult(req, runSpans{Spans: referenceRun("candidate", "fixed", 560)}, runSpans{}, at)
-	recordQuality(context.Background(), broken, req, &res, at)
+	recordQuality(context.Background(), broken, &recordLocks{}, req, &res, at)
 	if res.ID != "" || res.RecordError != "the evaluation was not recorded: down" || res.Gate != GatePassed {
 		t.Errorf("store error: %+v", res)
 	}

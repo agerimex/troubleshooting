@@ -25,7 +25,8 @@ requirements:
     title: Reading an order stays one query per table
     owner: orders-team
     why: An N+1 read of prices makes large orders slow and loads the database.
-    checks: [orders-p95, orders-db-calls]
+    checks: [orders-db-calls]
+    guardrails: [orders-p95]   # supports it, decides the gate, not its status
   - id: REQ-NO-LEGACY
     title: Orders never call the legacy pricing service
     owner: orders-team

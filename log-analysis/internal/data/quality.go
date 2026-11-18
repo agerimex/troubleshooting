@@ -1070,6 +1070,7 @@ func buildQualityResult(req QualityRequest, run, baseline runSpans, now time.Tim
 	res.Assumptions = assumptionsOf(run)
 	res.Project = req.Rules.Project
 	res.Requirements = requirementResults(req.Rules.Requirements, res.Checks)
+	setRequirementCriteria(res.Requirements, req.Rules)
 	res.Source = req.Source
 	if req.Record {
 		addSnapshots(&res, run)

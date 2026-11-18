@@ -25,6 +25,7 @@ requirements:
     owner: recording-team
     why: Every call adds latency.
     checks: [db-calls]
+    guardrails: [no-directory]
   - id: REQ-OUTAGE
     title: Recording survives an analytics outage
 `
@@ -45,7 +46,8 @@ func recordedAnswer(t *testing.T, recordErr string) string {
 	ev.Project = "recording"
 	ev.Requirements = []RequirementResult{
 		{ID: "REQ-START", Title: "A session starts with few database calls", Owner: "recording-team", Why: "Every call adds latency.",
-			Checks: []string{"db-calls"}, Status: "violated", Summary: "failed: db-calls"},
+			Checks: []string{"db-calls"}, Status: "violated", Summary: "failed: db-calls",
+			Guardrails: []string{"no-directory"}, GuardrailSummary: "guardrail failed: no-directory (guardrails decide the gate, not this requirement)"},
 		{ID: "REQ-OUTAGE", Title: "Recording survives an analytics outage", Checks: []string{}, Status: "not_evaluated", Summary: "no check enforces it yet"},
 	}
 	if recordErr != "" {
@@ -93,7 +95,7 @@ func TestRequirementsAndRecord(t *testing.T) {
 	text := out.String()
 	for _, want := range []string{
 		"Requirements: 1 violated, 1 not evaluated",
-		"VIOLATED       REQ-START  A session starts with few database calls (owner recording-team)\n               failed: db-calls",
+		"VIOLATED       REQ-START  A session starts with few database calls (owner recording-team)\n               failed: db-calls\n               guardrail failed: no-directory (guardrails decide the gate, not this requirement)",
 		"NOT EVALUATED  REQ-OUTAGE  Recording survives an analytics outage\n               no check enforces it yet",
 		"Recorded as evaluation 0123456789abcdef01234567: http://ui.example/#/quality?evaluation=0123456789abcdef01234567",
 	} {
@@ -104,7 +106,7 @@ func TestRequirementsAndRecord(t *testing.T) {
 	md, _ := os.ReadFile(filepath.Join(dir, "s.md"))
 	for _, want := range []string{
 		"**Requirements:** 1 violated, 1 not evaluated",
-		"| ❌ | **REQ-START** A session starts with few database calls | recording-team | violated: failed: db-calls |",
+		"| ❌ | **REQ-START** A session starts with few database calls | recording-team | violated: failed: db-calls; guardrail failed: no-directory (guardrails decide the gate, not this requirement) |",
 		"| ➖ | **REQ-OUTAGE** Recording survives an analytics outage |  | not evaluated: no check enforces it yet |",
 	} {
 		if !strings.Contains(string(md), want) {
@@ -112,7 +114,7 @@ func TestRequirementsAndRecord(t *testing.T) {
 		}
 	}
 	h, _ := os.ReadFile(filepath.Join(dir, "r.html"))
-	for _, want := range []string{"<h2>Requirements: 1 violated, 1 not evaluated</h2>", `<td class="fail">violated</td>`, "Every call adds latency.", "<h2>Checks</h2>"} {
+	for _, want := range []string{"<h2>Requirements: 1 violated, 1 not evaluated</h2>", `<td class="fail">violated</td>`, "Every call adds latency.", "<h2>Checks</h2>", "Guardrails: no-directory"} {
 		if !strings.Contains(string(h), want) {
 			t.Errorf("html is missing %q", want)
 		}

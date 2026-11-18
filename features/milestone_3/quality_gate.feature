@@ -294,3 +294,27 @@ Feature: Check a test run against quality rules
     Given 220 spans in the evidence trace that start before the forbidden call
     Then the snapshot keeps the calling span, its ancestors and the callee, within 200 spans
     And a db_calls evidence keeps all its database calls
+
+  # Stage 7: the review of 0011a2d.
+
+  @QG-HIST-005
+  Scenario: Concurrent records of one evaluation are one record
+    Given two requests that record the same evaluation inputs at the same time, to one API or to two
+    When both look up the id before either has inserted
+    Then the history keeps one record of that id, and both answers are that record: the same verdict and recorded time
+    And an answer whose own result is not the stored record is replaced by it and has recorded_before
+
+  @QG-HIST-006
+  Scenario: A streak never spans different criteria
+    Given REQ-START met under a latency limit of 1200 ms, then met under 800 ms
+    Then the catalogue says "Met since" the first evaluation under 800 ms, "when its checks changed; met under the earlier checks"
+    But wording, targets, advisory flags, guardrails and other requirements' checks don't change its criteria
+    And for evaluations recorded before criteria existed, a change of the rules file ends the streak
+
+  @QG-REQ-003
+  Scenario: A guardrail supports a requirement without deciding its status
+    Given REQ-START assessed by startup-p95 with db-calls as its guardrail
+    When starts take 400 ms with 20 database calls each
+    Then REQ-START is met and says "guardrail failed: db-calls (guardrails decide the gate, not this requirement)"
+    And the gate still fails on db-calls
+    And a guardrail that isn't in the rules, is listed twice or is also one of the requirement's checks is a 400

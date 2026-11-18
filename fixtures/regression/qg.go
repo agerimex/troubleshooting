@@ -316,5 +316,6 @@ func (c *checker) qgChecks() []namedCheck {
 		{"QG-EVD-001", "Quality gate: too few or no executions is unresolved", c.qgInsufficient},
 		{"QG-VAL-001", "Quality gate: invalid rules are rejected", c.qgInvalid},
 		{"QG-HIST-001", "Quality gate: requirements and their recorded history", c.qgHistory},
+		{"QG-HIST-005", "Quality gate: concurrent records of one evaluation are one record", c.qgConcurrentRecord},
 	}
 }

@@ -252,12 +252,13 @@ the tab chosen last.
 - **Requirements** is a project's catalogue (pick the project, optionally a
   branch or tag): the latest recorded evaluation (gate, commit, time, "Open
   evaluation"), then every requirement of its rules with status, owner, reason,
-  its checks with their status, since when the status holds ("Violated since
-  commit 0123456789ab (2 evaluations); met before.") and its history as a row
+  its checks and guardrails with their status, since when the status holds
+  under the current criteria ("Violated since commit 0123456789ab (2
+  evaluations); met before.") and its history as a row
   of cells, oldest on the left, one per recorded evaluation (at most 30):
   green met, red violated, amber not enough data, grey not evaluated, dashed
-  when that evaluation's rules didn't have it, outlined when the rules changed
-  from the evaluation before. A cell opens that evaluation. Checks no
+  when that evaluation's rules didn't have it, outlined when the requirement's
+  criteria changed from the evaluation before. A cell opens that evaluation. Checks no
   requirement lists are named below.
 - **History** lists the recorded evaluations, newest first (time, gate,
   commit and branch, run, requirement counts), 50 at a time.
@@ -278,7 +279,11 @@ requirements:
     title: A recording session starts within 800 ms
     owner: recording-team
     why: Participants leave a session that takes more than a second to start.
-    checks: [startup-p95, db-calls]
+    checks: [startup-p95]
+    guardrails: [db-calls]    # supports it; decides the gate, not its status
+  - id: REQ-DIRECTORY
+    title: Starting a session must not call the directory
+    checks: [no-directory]
   - id: REQ-OUTAGE
     title: Recording continues during an analytics outage
     owner: recording-team
@@ -289,12 +294,28 @@ characters), owner (100) and why (1 000) are optional; every listed check must
 exist in the file, once. At most 50 requirements. A check may serve several
 requirements, or none.
 
+**Checks and guardrails.** `checks` are the checks that *assess* the
+requirement; `guardrails` are checks that support it without assessing it. A
+query budget protects a latency requirement, but a start with four database
+calls in 400 ms doesn't show that starting is slow, so the budget is REQ-START's
+guardrail. A guardrail is listed with the requirement (`guardrails`,
+`guardrail_summary`: "guardrail failed: db-calls (guardrails decide the gate,
+not this requirement)") and decides the gate like every check, but never the
+requirement's status. A guardrail must exist in the rules, once, and can't
+also be one of the same requirement's checks; a check listed only as a
+guardrail is not "without a requirement".
+
+Word a requirement as what its checks show. `forbidden_call` sees that a call
+was made, not whether the caller waited for it, so "Starting a session must not
+call the directory" is what it can assess; "never waits for the directory" is
+not.
+
 A requirement's **status** comes from its own checks in the same evaluation:
 `violated` if one of them failed (missing data of another is still named),
 else `insufficient` if one had not enough data, else `met`; a requirement
 without checks is `not_evaluated` ("no check enforces it yet"): written down,
 never met. Advisory checks count for their requirement too (advisory only
-means a check doesn't decide the gate). The gate itself is unchanged: it is
+means a check doesn't decide the gate). Guardrails never count for it. The gate itself is unchanged: it is
 decided by the checks. Every result has `project` and `requirements` (`[]`
 without requirements), and the CLI's text, Markdown and HTML reports list them
 above the checks.
@@ -318,7 +339,28 @@ it is answered with **that record, exactly as recorded** (`recorded_before:
 true`), never with the result just computed: one id has one verdict, even if
 late spans arrived meanwhile. A new CI attempt is a new CI run and a new
 record; `reevaluate: true` (CLI `--reevaluate`) records a deliberate
-re-evaluation of the same inputs under an id of its own (`reevaluated: true`). A failed write leaves the result valid and says so in
+re-evaluation of the same inputs under an id of its own (`reevaluated: true`).
+Concurrent requests with one id are one record too: an API instance records
+one id at a time, and the table drops a second insert of an id (the id is the
+insert's deduplication token; the receiver sets
+`non_replicated_deduplication_window` on `quality_evaluations`), so two
+instances recording at once keep one insert. Every request reads the record
+back after its insert and answers with what is stored, so all of them answer
+with one verdict; reads take the earliest row of an id, for rows recorded
+twice before this existed.
+
+**Streaks and criteria.** Each requirement of a recorded evaluation carries
+`criteria_sha256`: the sha256 of what decides its status, its checks'
+definitions without their ids, targets and advisory flag, and
+`run.executions`. A streak ("Met since …") is the newest run of evaluations
+with the same status *and* the same criteria: two passes against different
+limits are two streaks, and the catalogue says so ("Met since commit … (1
+evaluation), when its checks changed; met under the earlier checks.",
+`streak.criteria_changed`). Wording, owners, targets, guardrails and other
+requirements' checks don't change the criteria. For evaluations recorded
+before criteria existed, any change of the rules file's sha256 ends a streak.
+Not evaluated and "not in the rules" have no criteria; only their status
+counts. A failed write leaves the result valid and says so in
 `record_error` (the CLI prints a warning; the exit code still follows the
 gate).
 

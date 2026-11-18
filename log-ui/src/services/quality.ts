@@ -138,7 +138,9 @@ export function parseResult (text: string): [string | null, QualityEvaluation | 
   data.requirements = Array.isArray(data.requirements)
     ? data.requirements.filter((r: any) => r && typeof r.id === 'string' && typeof r.status === 'string').map((r: any) => ({
       ...r, title: typeof r.title === 'string' ? r.title : '', summary: typeof r.summary === 'string' ? r.summary : '',
-      checks: Array.isArray(r.checks) ? r.checks.filter((x: unknown) => typeof x === 'string') : []
+      checks: Array.isArray(r.checks) ? r.checks.filter((x: unknown) => typeof x === 'string') : [],
+      guardrails: Array.isArray(r.guardrails) ? r.guardrails.filter((x: unknown) => typeof x === 'string') : [],
+      guardrail_summary: typeof r.guardrail_summary === 'string' ? r.guardrail_summary : ''
     }))
     : []
   return [null, data as QualityEvaluation]
@@ -165,8 +167,11 @@ export function requirementCounts (statuses: { status: string }[]): string {
   return keys.map((k) => n.get(k) + ' ' + requirementLabel(k).toLowerCase()).join(', ')
 }
 
-// streakText says since when a requirement's status holds, e.g. "Violated
-// since commit 0123456789ab (2 evaluations); met before."
+// streakText says since when a requirement's status holds under its current
+// criteria, e.g. "Violated since commit 0123456789ab (2 evaluations); met
+// before." A streak that ended because the checks changed says so: "Met since
+// commit … (1 evaluation), when its checks changed; met under the earlier
+// checks."
 export function streakText (e: CatalogueEntry): string {
   const s = e.streak
   if (!s || !s.since || s.evaluations < 1) {
@@ -178,6 +183,10 @@ export function streakText (e: CatalogueEntry): string {
     return label + ' in all ' + (s.evaluations === 1 ? 'one recorded evaluation' : s.evaluations + ' recorded evaluations') + ' read.'
   }
   const at = s.since.commit ? 'commit ' + short(s.since.commit) : nsLabel(s.since.recorded_at)
+  if (s.criteria_changed) {
+    return label + ' since ' + at + ' (' + n + '), when its checks changed' +
+      (s.status_before ? '; ' + requirementLabel(s.status_before).toLowerCase() + ' under the earlier checks.' : '.')
+  }
   return label + ' since ' + at + ' (' + n + ')' + (s.status_before ? '; ' + requirementLabel(s.status_before).toLowerCase() + ' before.' : '.')
 }
 
@@ -196,9 +205,22 @@ export function historyCells (history: HistoryPoint[]): (HistoryPoint & { label:
   }))
 }
 
-// rulesChanged: the rules (sha256) differ from the next older evaluation's.
-export function rulesChanged (history: HistoryPoint[], i: number): boolean {
-  return i + 1 < history.length && !!history[i].rules_sha256 && !!history[i + 1].rules_sha256 && history[i].rules_sha256 !== history[i + 1].rules_sha256
+// criteriaChanged: the requirement's criteria differ from the next older
+// evaluation's (by criteria_sha256; for evaluations recorded before that
+// existed, by the rules file's sha256), as the API decides streaks.
+export function criteriaChanged (history: HistoryPoint[], i: number): boolean {
+  if (i + 1 >= history.length) {
+    return false
+  }
+  const [a, b] = [history[i], history[i + 1]]
+  const unassessed = (s: string) => s === 'absent' || s === 'not_evaluated'
+  if (unassessed(a.status) || unassessed(b.status)) {
+    return false
+  }
+  if (a.criteria_sha256 && b.criteria_sha256) {
+    return a.criteria_sha256 !== b.criteria_sha256
+  }
+  return !!a.rules_sha256 && !!b.rules_sha256 && a.rules_sha256 !== b.rules_sha256
 }
 
 const evaluationIdPattern = /^[0-9a-f]{24}$/
@@ -246,7 +268,7 @@ export function exportHtml (ev: QualityEvaluation): string {
   const reqs = ev.requirements ?? []
   const reqTable = reqs.length
     ? `\n<h2>Requirements: ${e(requirementCounts(reqs))}</h2>\n<table><thead><tr><th>Status</th><th>Requirement</th><th>Owner</th><th>Why</th><th>Checks</th></tr></thead><tbody>${
-      reqs.map((r) => `<tr><td>${e(requirementLabel(r.status))}</td><td><b>${e(r.id)}</b><br>${e(r.title)}</td><td>${e(r.owner ?? '')}</td><td>${e(r.why ?? '')}</td><td>${e(r.checks.join(', '))}<br>${e(r.summary)}</td></tr>`).join('')
+      reqs.map((r) => `<tr><td>${e(requirementLabel(r.status))}</td><td><b>${e(r.id)}</b><br>${e(r.title)}</td><td>${e(r.owner ?? '')}</td><td>${e(r.why ?? '')}</td><td>${e(r.checks.join(', '))}<br>${e(r.summary)}${r.guardrails?.length ? '<br>Guardrails: ' + e(r.guardrails.join(', ')) + '<br>' + e(r.guardrail_summary ?? '') : ''}</td></tr>`).join('')
     }</tbody></table>\n<h2>Checks</h2>`
     : ''
   const recorded = ev.id ? `\n<p>Recorded evaluation <code>${e(ev.id)}</code>${ev.project ? ` of project <code>${e(ev.project)}</code>` : ''}, ${e(recordedText(ev.recorded_at))}.</p>` : ''

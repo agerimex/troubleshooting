@@ -159,7 +159,12 @@ requirements:
     title: A recording session starts within 800 ms
     owner: recording-team
     why: Participants leave a session that takes more than a second to start.
-    checks: [startup-p95, db-calls]
+    checks: [startup-p95]
+    guardrails: [db-calls]    # supports it; decides the gate, not its status
+  - id: REQ-DIRECTORY
+    title: Starting a session must not call the directory
+    owner: recording-team
+    checks: [no-directory]
   - id: REQ-OUTAGE
     title: Recording continues during an analytics outage
     owner: platform-team      # no checks yet: listed, never met
@@ -174,11 +179,13 @@ A requirement's status comes from its own checks, in the same run:
 | Met | Every one of its checks passed |
 | Not evaluated | It has no checks yet: written down, never met |
 
+**Guardrails** support a requirement without assessing it. The query budget protects REQ-START, but a start with four database calls in 400 ms isn't slow, so `db-calls` is its guardrail: it is shown with the requirement and still fails the gate, but it never marks “starts within 800 ms” as violated. Word a requirement as what its checks can show: a forbidden call proves a call was made, not that the caller waited for it.
+
 The gate itself is still decided by the checks. The CLI, the job summary, the pull request comment and the HTML report list the requirements above the checks.
 
-**Record** an evaluation to give each requirement a history: `troubleshooting-check --record`, or the Action's `record` input, which is on for **push** events by default (so the history follows `main` and your tags, not every pull request push). Troubleshooting then keeps the result exactly as it was, the rules text it used with its sha256, the tested commit and CI run, and a snapshot of every evidence execution, so a failure from months ago still shows what happened after its spans expired. A retried step is answered with its first record, exactly as recorded (the CLI says “Already recorded”), so one evaluation id never has two verdicts; a new CI attempt, or `--reevaluate`, is a new record. Recording needs a Troubleshooting that outlives the job, not `quality-check/stack`.
+**Record** an evaluation to give each requirement a history: `troubleshooting-check --record`, or the Action's `record` input, which is on for **push** events by default (so the history follows `main` and your tags, not every pull request push). Troubleshooting then keeps the result exactly as it was, the rules text it used with its sha256, the tested commit and CI run, and a snapshot of every evidence execution, so a failure from months ago still shows what happened after its spans expired. A retried step is answered with its first record, exactly as recorded (the CLI says “Already recorded”), so one evaluation id never has two verdicts, even when two retries arrive at once; a new CI attempt, or `--reevaluate`, is a new record. Recording needs a Troubleshooting that outlives the job, not `quality-check/stack`.
 
-On the **Quality** page, **Requirements** shows a project's catalogue: every requirement of the latest recorded evaluation with its owner and reason, its checks, since when its status holds (“Violated since commit 9be31d07a4c2 (2 evaluations); met before.”) and its history, oldest on the left. A cell opens that evaluation; a cell is outlined where the rules changed. **History** lists every recorded evaluation, and **Copy link** on an opened one gives a link that reopens it.
+On the **Quality** page, **Requirements** shows a project's catalogue: every requirement of the latest recorded evaluation with its owner and reason, its checks, since when its status holds (“Violated since commit 9be31d07a4c2 (2 evaluations); met before.”) and its history, oldest on the left. A streak never spans different criteria: when a requirement's checks change, its status counts from there (“Met since … when its checks changed; violated under the earlier checks.”). A cell opens that evaluation; a cell is outlined where the requirement's checks changed. **History** lists every recorded evaluation, and **Copy link** on an opened one gives a link that reopens it.
 
 ![Requirements on the Quality page](/landing/quality-requirements.webp)
 *Six recorded evaluations of `main`: the regression violated both requirements, a run with too few executions couldn't decide REQ-START, the next commits passed their checks again. REQ-OUTAGE has no check yet.*

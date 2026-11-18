@@ -125,8 +125,12 @@ func markdownReport(ev Evaluation, htmlName string) string {
 	if len(ev.Requirements) > 0 {
 		fmt.Fprintf(&b, "**Requirements:** %s\n\n| | Requirement | Owner | Status |\n|---|---|---|---|\n", requirementCounts(ev.Requirements))
 		for _, r := range ev.Requirements {
-			fmt.Fprintf(&b, "| %s | **%s** %s | %s | %s: %s |\n", titleOf(requirementIcon, r.Status), mdText(r.ID), mdText(r.Title),
-				mdText(r.Owner), titleOf(requirementTitle, r.Status), mdText(r.Summary))
+			status := titleOf(requirementTitle, r.Status) + ": " + r.Summary
+			if r.GuardrailSummary != "" {
+				status += "; " + r.GuardrailSummary
+			}
+			fmt.Fprintf(&b, "| %s | **%s** %s | %s | %s |\n", titleOf(requirementIcon, r.Status), mdText(r.ID), mdText(r.Title),
+				mdText(r.Owner), mdText(status))
 		}
 		b.WriteString("\n")
 	}
@@ -208,8 +212,12 @@ func htmlReport(ev Evaluation) string {
 			e(requirementCounts(ev.Requirements)))
 		rcls := map[string]string{"met": "pass", "violated": "fail", "insufficient": "insufficient"}
 		for _, r := range ev.Requirements {
-			fmt.Fprintf(&b, `<tr><td class="%s">%s</td><td class="chk"><b>%s</b><br>%s</td><td>%s</td><td>%s</td><td>%s<br><span class="meta">%s</span></td></tr>`,
-				rcls[r.Status], e(titleOf(requirementTitle, r.Status)), e(r.ID), e(r.Title), e(r.Owner), e(r.Why), e(strings.Join(r.Checks, ", ")), e(r.Summary))
+			guard := ""
+			if len(r.Guardrails) > 0 {
+				guard = `<br>Guardrails: ` + e(strings.Join(r.Guardrails, ", ")) + `<br><span class="meta">` + e(r.GuardrailSummary) + `</span>`
+			}
+			fmt.Fprintf(&b, `<tr><td class="%s">%s</td><td class="chk"><b>%s</b><br>%s</td><td>%s</td><td>%s</td><td>%s<br><span class="meta">%s</span>%s</td></tr>`,
+				rcls[r.Status], e(titleOf(requirementTitle, r.Status)), e(r.ID), e(r.Title), e(r.Owner), e(r.Why), e(strings.Join(r.Checks, ", ")), e(r.Summary), guard)
 		}
 		b.WriteString(`</tbody></table><h2>Checks</h2>`)
 	}

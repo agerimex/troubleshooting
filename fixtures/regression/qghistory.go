@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,7 +17,9 @@ import (
 
 func (c *checker) qgProject() string { return "fx" + c.d.run + "-recording" }
 
-func (c *checker) qgRulesYAML() string {
+func (c *checker) qgRulesYAML() string { return c.qgRulesFor(c.qgProject()) }
+
+func (c *checker) qgRulesFor(project string) string {
 	return fmt.Sprintf(`version: 1
 project: %s
 entry: {service: %s, operation: start_session, span_kind: server}
@@ -29,13 +32,14 @@ requirements:
     title: A recording session starts within 800 ms
     owner: recording-team
     why: Participants leave a session that takes more than a second to start.
-    checks: [startup-p95, db-calls]
+    checks: [startup-p95]
+    guardrails: [db-calls]
   - id: REQ-DIRECTORY
-    title: Starting a session never waits for the directory
+    title: Starting a session must not call the directory
     checks: [no-directory]
   - id: REQ-OUTAGE
     title: Recording continues during an analytics outage
-`, c.qgProject(), c.d.service("qg-api"), c.d.service("qg-directory"))
+`, project, c.d.service("qg-api"), c.d.service("qg-directory"))
 }
 
 type qgRecorded struct {
@@ -45,9 +49,11 @@ type qgRecorded struct {
 	Gate         string `json:"gate"`
 	Project      string `json:"project"`
 	Requirements []struct {
-		ID      string `json:"id"`
-		Status  string `json:"status"`
-		Summary string `json:"summary"`
+		ID               string `json:"id"`
+		Status           string `json:"status"`
+		Summary          string `json:"summary"`
+		GuardrailSummary string `json:"guardrail_summary"`
+		Criteria         string `json:"criteria_sha256"`
 	} `json:"requirements"`
 	Checks []struct {
 		ID       string `json:"id"`
@@ -62,9 +68,13 @@ type qgRecorded struct {
 }
 
 func (c *checker) qgRecord(ctx context.Context, run, commit string) (qgRecorded, error) {
-	body := map[string]any{"rules_yaml": c.qgRulesYAML(), "run": run, "record": true,
+	return c.qgRecordAs(ctx, c.qgRulesYAML(), run, commit, "fixture "+c.d.run)
+}
+
+func (c *checker) qgRecordAs(ctx context.Context, rules, run, commit, ciRun string) (qgRecorded, error) {
+	body := map[string]any{"rules_yaml": rules, "run": run, "record": true,
 		"time_from": ns(c.d.m2Hour(6)), "time_to": ns(c.d.m2Hour(6).Add(30 * time.Minute)),
-		"source": map[string]any{"commit": commit, "ref": "main", "ci_run": "fixture " + c.d.run}}
+		"source": map[string]any{"commit": commit, "ref": "main", "ci_run": ciRun}}
 	var data struct {
 		Evaluation qgRecorded `json:"Evaluation"`
 	}
@@ -133,6 +143,13 @@ func (c *checker) qgHistory(ctx context.Context) error {
 		ids[i] = ev.ID
 		if i == 1 {
 			candidate = ev
+		}
+	}
+	// The query budget is REQ-START's guardrail: named with it, not its status.
+	for _, r := range candidate.Requirements {
+		if r.ID == "REQ-START" && (r.Summary != "failed: startup-p95" ||
+			r.GuardrailSummary != "guardrail failed: db-calls (guardrails decide the gate, not this requirement)" || len(r.Criteria) != 64) {
+			return fmt.Errorf("REQ-START of the candidate: %+v", r)
 		}
 	}
 	// The candidate's db-calls evidence keeps the whole execution: root,
@@ -217,4 +234,51 @@ func (c *checker) qgHistory(ctx context.Context) error {
 		return fmt.Errorf("unknown evaluation: %v, want HTTP 404", err)
 	}
 	return nil
+}
+
+// QG-HIST-005: concurrent requests recording one evaluation get one record
+// and one verdict: the API serializes them, and the table drops a second
+// insert of an id (docs/quality-gate.md, "Recording"). A project of its own,
+// so the history above keeps its three records.
+func (c *checker) qgConcurrentRecord(ctx context.Context) error {
+	project := c.qgProject() + "-concurrent"
+	rules := c.qgRulesFor(project)
+	const n = 8
+	got := make([]qgRecorded, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got[i], errs[i] = c.qgRecordAs(ctx, rules, c.d.qgRun("fixed"), "c1"+c.d.run, "fixture concurrent "+c.d.run)
+		}(i)
+	}
+	wg.Wait()
+	for i := range got {
+		if errs[i] != nil {
+			return errs[i]
+		}
+		if got[i].ID != got[0].ID || got[i].RecordedAt != got[0].RecordedAt || got[i].Gate != got[0].Gate {
+			return fmt.Errorf("request %d answered %s at %s (%s), request 0 %s at %s (%s)", i, got[i].ID, got[i].RecordedAt, got[i].Gate, got[0].ID, got[0].RecordedAt, got[0].Gate)
+		}
+	}
+	var projects struct {
+		Projects []struct {
+			Project     string `json:"project"`
+			Evaluations int    `json:"evaluations"`
+		} `json:"Projects"`
+	}
+	if err := c.api.get(ctx, "/api/v1/quality/projects", &projects); err != nil {
+		return err
+	}
+	for _, p := range projects.Projects {
+		if p.Project == project {
+			if p.Evaluations != 1 {
+				return fmt.Errorf("%d evaluations recorded, want 1", p.Evaluations)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("project %s not recorded", project)
 }

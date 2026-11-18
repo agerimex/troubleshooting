@@ -1,6 +1,9 @@
 package data
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -19,6 +22,11 @@ import (
 //
 // Advisory checks count for the requirement as well: advisory only means the
 // check doesn't decide the gate.
+//
+// Guardrails are checks that support a requirement without assessing it (a
+// query budget protects a latency requirement, but four database calls don't
+// show that a start was slow). They are listed with the requirement and still
+// decide the gate like every check, but never its status.
 
 // Requirement statuses.
 const (
@@ -43,6 +51,9 @@ type QualityRequirement struct {
 	Owner  string   `json:"owner,omitempty" yaml:"owner,omitempty"`
 	Why    string   `json:"why,omitempty" yaml:"why,omitempty"`
 	Checks []string `json:"checks,omitempty" yaml:"checks,omitempty"`
+	// Guardrails are checks that support the requirement without deciding
+	// its status.
+	Guardrails []string `json:"guardrails,omitempty" yaml:"guardrails,omitempty"`
 }
 
 // QualityRequirementResult is a requirement with its status in one evaluation.
@@ -54,6 +65,13 @@ type QualityRequirementResult struct {
 	Checks  []string `json:"checks"`
 	Status  string   `json:"status"`
 	Summary string   `json:"summary"`
+	// Guardrails and their summary (empty without guardrails).
+	Guardrails       []string `json:"guardrails,omitempty"`
+	GuardrailSummary string   `json:"guardrail_summary,omitempty"`
+	// Criteria is the sha256 of what decides the status (its checks'
+	// definitions without ids and targets, and run.executions): a history
+	// streak never spans different criteria.
+	Criteria string `json:"criteria_sha256,omitempty"`
 }
 
 func textField(name, v string, limit int, required bool) (string, error) {
@@ -113,6 +131,21 @@ func validateRequirements(r *QualityRules) error {
 			}
 			own[id] = true
 		}
+		guard := map[string]bool{}
+		for j, id := range q.Guardrails {
+			id = strings.TrimSpace(id)
+			q.Guardrails[j] = id
+			if !checks[id] {
+				return invalid("requirement %s: guardrail %q is not in the rules", q.ID, id)
+			}
+			if own[id] {
+				return invalid("requirement %s: check %s is both a check and a guardrail", q.ID, id)
+			}
+			if guard[id] {
+				return invalid("requirement %s: guardrail %s is listed twice", q.ID, id)
+			}
+			guard[id] = true
+		}
 	}
 	return nil
 }
@@ -146,6 +179,7 @@ func requirementResults(reqs []QualityRequirement, checks []QualityCheckResult) 
 	out := make([]QualityRequirementResult, 0, len(reqs))
 	for _, q := range reqs {
 		r := QualityRequirementResult{ID: q.ID, Title: q.Title, Owner: q.Owner, Why: q.Why, Checks: append([]string{}, q.Checks...)}
+		r.Guardrails, r.GuardrailSummary = guardrailSummary(q.Guardrails, byID)
 		var failed, noData []string
 		for _, id := range q.Checks {
 			switch byID[id].Status {
@@ -176,6 +210,74 @@ func requirementResults(reqs []QualityRequirement, checks []QualityCheckResult) 
 		out = append(out, r)
 	}
 	return out
+}
+
+// guardrailSummary: "guardrail failed: db-calls (it decides the gate, not
+// this requirement)", or which passed.
+func guardrailSummary(ids []string, byID map[string]QualityCheckResult) ([]string, string) {
+	if len(ids) == 0 {
+		return nil, ""
+	}
+	var failed, noData, passed []string
+	for _, id := range ids {
+		switch byID[id].Status {
+		case CheckFail:
+			failed = append(failed, id)
+		case CheckPass:
+			passed = append(passed, id)
+		default:
+			noData = append(noData, id)
+		}
+	}
+	var parts []string
+	if len(failed) > 0 {
+		parts = append(parts, "guardrail failed: "+strings.Join(failed, ", "))
+	}
+	if len(noData) > 0 {
+		parts = append(parts, "guardrail without enough data: "+strings.Join(noData, ", "))
+	}
+	if len(passed) > 0 {
+		parts = append(parts, "guardrail passed: "+strings.Join(passed, ", "))
+	}
+	s := strings.Join(parts, "; ")
+	if len(failed)+len(noData) > 0 {
+		s += " (guardrails decide the gate, not this requirement)"
+	}
+	return append([]string{}, ids...), s
+}
+
+// setRequirementCriteria fills in each requirement's criteria hash from the
+// validated rules: the definitions of its checks without their ids, targets
+// and advisory flag (none of them changes a status), in a fixed order, and
+// run.executions. Guardrails don't decide the status and aren't part of it.
+func setRequirementCriteria(res []QualityRequirementResult, rules QualityRules) {
+	byID := map[string]QualityCheck{}
+	for _, c := range rules.Checks {
+		byID[c.ID] = c
+	}
+	executions := 0
+	if rules.Run != nil {
+		executions = rules.Run.Executions
+	}
+	for i := range res {
+		if len(res[i].Checks) == 0 {
+			continue
+		}
+		defs := make([]string, 0, len(res[i].Checks))
+		for _, id := range res[i].Checks {
+			c := byID[id]
+			c.ID, c.TargetMs, c.TargetPer, c.Advisory = "", nil, nil, false
+			b, _ := json.Marshal(c)
+			defs = append(defs, string(b))
+		}
+		sort.Strings(defs)
+		b, _ := json.Marshal(struct {
+			Checks     []string `json:"checks"`
+			Executions int      `json:"executions"`
+		}{defs, executions})
+		sum := sha256.Sum256(b)
+		res[i].Criteria = hex.EncodeToString(sum[:])
+	}
 }
 
 // QualitySource says what was tested and where the rules came from (the CLI
