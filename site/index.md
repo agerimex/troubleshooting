@@ -1,8 +1,8 @@
 ---
 layout: page
-title: A quality gate for pull requests, with trace evidence
+title: Troubleshooting — check runtime requirements on every pull request and release
 titleTemplate: false
-description: Open-source, self-hosted quality gate for Go and OpenTelemetry services. Check every pull request’s test run against latency limits, database calls per execution and forbidden calls kept in your repository, with the execution behind every failure.
+description: Set limits on latency, database calls and service dependencies. Check traces from pull request and release test runs, then inspect the execution behind a failed check.
 ---
 
 <HomeLanding />
