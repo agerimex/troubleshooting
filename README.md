@@ -107,8 +107,7 @@ deploy or change shared config without asking me; ask before deleting anything.
      sender.Shutdown(ctx) on exit. Router middleware (otelchi with WithChiRoutes, or otelhttp)
      so span names are route patterns, not raw paths with ids. DB: otelsql with
      TraceQueryWithoutArgs, db.system set per driver, and no rows_close/rows_affected spans
-     (they double the gate's db_calls). Until log-sender's protos pin fix (PR #24) is on main,
-     also require github.com/agerimex/troubleshooting/protos@main explicitly.
+     (they double the gate's db_calls). Get log-sender with `go get ...log-sender@main`.
    - Other languages: the standard OpenTelemetry SDK, OTLP over gRPC to <receiver host>:4317
      (set the protocol explicitly: some SDKs default to HTTP, which is not supported).
    - Throttle export errors: otel.SetErrorHandler that logs the first failure, then at most one
@@ -172,7 +171,6 @@ Then verify against the stored spans, as in the prompt above: no row may contain
 
 ```
 go get github.com/agerimex/troubleshooting/log-sender@main
-go get github.com/agerimex/troubleshooting/protos@main   # until PR #24 is released: the published log-sender pins an older protos
 ```
 
 ```go
