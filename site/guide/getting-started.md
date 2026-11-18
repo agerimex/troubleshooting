@@ -50,5 +50,5 @@ The header has six pages, in this order:
 A page keeps its state when you switch away and back. Any page can open one execution. The browser address then names it (`#/executions?trace=…&from=…&to=…&span=…&view=…`), so you can copy the link and send it to a colleague. Links carry identifiers only, never log text.
 
 ::: info About the screenshots
-The screenshots in this handbook were taken on 2026-11-12 from the regression fixture data set. Its service names carry a run prefix, for example `fx7e3d4841-recording-worker`. Times show in the browser's local time (UTC+1).
+The screenshots in this handbook were taken on 2026-11-18 from the regression fixture data set (run `dc108d54`) on the current `main`. Its service names carry the run prefix, for example `fxdc108d54-recording-worker`. Times show in the browser's local time (UTC+1).
 :::

@@ -31,7 +31,7 @@ const tabs: Tab[] = [
       'Paste the rules from your repository, name the test run and a baseline. Every check shows its value, limit, advisory target and the baseline.',
       'A CI result.json opens with the same evidence links. When the live spans have expired, the snapshot saved in the result is shown instead.'
     ],
-    image: 'quality.webp', width: 2160, height: 2594, caption: 'Quality',
+    image: 'quality.webp', width: 2160, height: 2343, caption: 'Quality',
     alt: 'Quality page: rules, run and baseline, a failed gate with three failing checks and their evidence links.',
     handbook: '/guide/quality', scroll: true
   },
@@ -41,7 +41,7 @@ const tabs: Tab[] = [
       'The sequence view gives each recorded service a lane and draws arrows for calls between them. Open a call to inspect its spans and logs.',
       'A client call and the server span it reached are one arrow; both stay selectable.'
     ],
-    image: 'sequence.webp', width: 2160, height: 1452, caption: 'Sequence diagram',
+    image: 'sequence.webp', width: 2160, height: 2036, caption: 'Sequence diagram',
     alt: 'Sequence view with service lanes and arrows for recorded calls.',
     handbook: '/guide/timeline-sequence'
   },
@@ -61,7 +61,7 @@ const tabs: Tab[] = [
       'Group executions by their recorded caller–callee calls. Compare frequency, failures and latency for each shape.',
       'Open a representative execution to see its sequence.'
     ],
-    image: 'sequence-library.webp', width: 2160, height: 1452, caption: 'Execution shapes',
+    image: 'sequence-library.webp', width: 2160, height: 1350, caption: 'Execution shapes',
     alt: 'Sequence library listing distinct execution shapes with counts and percentiles.',
     handbook: '/articles/execution-shapes', scroll: true
   },
@@ -71,7 +71,7 @@ const tabs: Tab[] = [
       'Expand spans and read their own logs inline. Inspect attributes, exception events and links without losing the trace context.',
       'Jump from a row into the timeline or sequence of its execution.'
     ],
-    image: 'log-analysis.webp', width: 2160, height: 3552, caption: 'Log Analysis',
+    image: 'log-analysis.webp', width: 2160, height: 3149, caption: 'Log Analysis',
     alt: 'Log Analysis span table with expanded spans and inline log rows.',
     handbook: '/guide/log-analysis', scroll: true
   },
@@ -81,8 +81,8 @@ const tabs: Tab[] = [
       'Recurring errors, slow calls and release regressions for a service and time window.',
       'Each finding explains the rule, the observed counts and the coverage. Open an example execution to investigate.'
     ],
-    image: 'problems.webp', width: 2160, height: 1350, caption: 'Problems',
-    alt: 'Problems list with error groups, slow calls and regressions.',
+    image: 'problems.webp', width: 2160, height: 1836, caption: 'Problems',
+    alt: 'Problems list with slow calls and error groups, each with its counts.',
     handbook: '/guide/problems', scroll: true
   },
   {
@@ -91,7 +91,7 @@ const tabs: Tab[] = [
       'Compare calls, error fractions and p50, p95 and p99 latencies between a baseline and a candidate release.',
       'Versioned rules flag changes worth investigating. Retained example traces show what happened.'
     ],
-    image: 'releases.webp', width: 2160, height: 2951, caption: 'Release comparison',
+    image: 'releases.webp', width: 2160, height: 2709, caption: 'Release comparison',
     alt: 'Release comparison with baseline and candidate, latency and error deltas, and example traces.',
     handbook: '/guide/releases', scroll: true
   },
@@ -305,7 +305,7 @@ checks:
         </div>
         <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable evidence screenshot">
           <figcaption>Evidence of db-calls <span>Fixture data</span></figcaption>
-          <img :src="shot('quality-evidence.webp')" width="2160" height="2300" loading="lazy" alt="Timeline of the execution with the most database calls: start_session with twenty permission_lookup spans, opened from the quality check db-calls.">
+          <img :src="shot('quality-evidence.webp')" width="2160" height="2498" loading="lazy" alt="Timeline of the execution with the most database calls: start_session with twenty permission_lookup spans, opened from the quality check db-calls.">
         </figure>
       </div>
 
@@ -415,7 +415,7 @@ checks:
         </div>
         <figure class="screenshot-frame screenshot-scroll card-dark" tabindex="0" aria-label="Scrollable requirements screenshot">
           <figcaption>Requirements <span>Fixture data</span></figcaption>
-          <img :src="shot('quality-requirements.webp')" width="2072" height="1760" loading="lazy" alt="Quality page, Requirements: three requirements of the project recording with owner, reason, check statuses and a row of history cells, met, violated twice, not enough data, met twice.">
+          <img :src="shot('quality-requirements.webp')" width="2160" height="1448" loading="lazy" alt="Quality page, Requirements: three requirements of the project recording-app with owner, reason, check and guardrail statuses and a row of history cells, met, violated, not enough data, met, met, the last outlined where REQ-START's limit was tightened.">
         </figure>
       </div>
     </section>

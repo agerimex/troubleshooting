@@ -14,15 +14,15 @@ Log Analysis is the default page: one table of spans in which each span expands 
 - The header filters select spans by their own name, status (`ok` / `error` / `unset`) and service. They never search log text.
 - The chips above the table (`msg`, `service`) hide or show columns.
 
-![Log Analysis: root spans of pw-api](/screenshots/logs-table.png)
-*Root spans of `fx7e3d4841-pw-api` since 15:00. One failed and one successful `publish_recording`.*
+![Log Analysis: spans of the recording services](/screenshots/logs-table.png)
+*Spans of the `fxdc108d54-recording` services since 11:52. A service filter switches the scope to “Any depth”, so the worker's `upload_recording` is listed next to the two `start_recording` executions.*
 
 ## Expanding a span
 
 Click the arrow on a row. Its child spans appear, and between them the log records that recorded exactly this span, in time order. Each log row shows its severity, message and “recorded this span”. Logs that name no span, or a span not in this trace, form a separate group under the root span. An arrow appears only on spans that have child spans or logs of their own.
 
 ![Expanded execution with inline logs](/screenshots/logs-expanded.png)
-*The failed execution expanded: the worker's `upload_recording` and `storage.PutObject` spans with their INFO, WARN and ERROR logs inline.*
+*The failed execution expanded: `start_recording` with its INFO log, and the worker's `upload_recording` with its INFO, WARN and ERROR logs inline. Logs of the trace that name no span are grouped under “Trace-level / unmatched-span logs”.*
 
 ## Row actions
 
@@ -36,11 +36,11 @@ Every row, span or log, has the same actions. Open them with the `…` button, a
 | Record details / Events and links | Shows the record, or the span's events, exception and links |
 
 ![Row action menu](/screenshots/logs-actions.png)
-*The actions of an ERROR log row.*
+*The actions of the failed `upload_recording` span.*
 
 ## Finding failures
 
 Set the status filter to `error` to see only failed spans. Paging moves forward with Next. The total (“Rows 1–1 of 1”) is counted once per search; if the count fails, the rows stay and the page says “Total unavailable”.
 
 ![Status filter error](/screenshots/logs-errors.png)
-*Status filter `error` on `fx7e3d4841-pw-api`.*
+*Status filter `error` on the `fxdc108d54-recording` services: one failed span.*

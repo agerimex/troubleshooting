@@ -19,7 +19,7 @@ A shape is the entry operation plus the set of distinct caller → callee calls 
 The window defaults to the last 24 hours. Service, entry operation and “with failed executions” filter on the server. Ten rows per page. A notice says when buckets still come from provisional statistics.
 
 ![Sequence library with expanded calls](/screenshots/library-calls.png)
-*The library with the calls of `start_recording` expanded: two distinct calls, 3,000 executions, 2.3% failed.*
+*The library of `fxdc108d54-qg-api`, 10:00–11:00: three shapes of `start_session`. The first is expanded to its three distinct calls (219 executions, none failed); the third also calls the directory service.*
 
 ## Open one execution by trace id
 
@@ -48,14 +48,14 @@ Each span is a bar on a common time axis, indented under its parent, with status
 Click a span to select it. The right panel then shows only that span's logs: **Task lanes** place each log on a lane by its `task.id` (dot INFO, diamond WARN, cross ERROR), **Log list** lists them.
 
 ![Selected span with task lanes](/screenshots/exec-timeline-span.png)
-*`upload_recording` selected: task lanes `checksum` and `transfer`, ending in an ERROR.*
+*`upload_recording` selected: its logs on the task lanes `checksum` and `transfer`, with the ERROR “Storage returned 403 AccessDenied” in `transfer`.*
 
 ## Sequence
 
 The Sequence view draws services as lanes and calls as arrows. A CLIENT span with exactly one SERVER child in another service is one arrow; a client whose peer sends no spans points to “unknown peer”. Start, end and ERROR-log markers sit on each service's lane. Vertical spacing shows order, not elapsed time. A notice points out overlapping operations. At most 6 lanes and 80 marks fit on a page.
 
 ![Sequence view](/screenshots/exec-sequence.png)
-*The same execution as a sequence: the storage call goes to an uninstrumented peer.*
+*A failed `start_recording` as a sequence: the API and worker lanes, start and end markers, and the ERROR log flagged as recorded outside its span's interval.*
 
 ![Sequence with client/server arrows](/screenshots/exec-sequence-clientserver.png)
 *A trace with instrumented peers: `GenerateThumbnail` and `PutObject` arrows between three services.*
@@ -65,4 +65,4 @@ The Sequence view draws services as lanes and calls as arrows. A CLIENT span wit
 **Events and links** on a selected span opens its evidence: status message, exception type and message, stack trace, and links to other traces. If no events were recorded, it says so, without claiming no error happened.
 
 ![Span evidence dialog](/screenshots/exec-evidence.png)
-*The exception event of a failed `upload_recording`, with its stack trace.*
+*The evidence of a failed `upload_recording`: its status message and ids, no events recorded (which doesn't show that no error happened), and its link to another trace.*

@@ -139,7 +139,7 @@ Troubleshooting’s own CI is the first user: its integration job tags the API�
 The **Quality** page checks a run interactively: paste the rules, name the run and optionally a baseline, pick a window (last 15 minutes to 24 hours) and click **Check run**. The rules are sent as typed and parsed as strictly as the CLI does.
 
 ![Quality page](/landing/quality.webp)
-*The fixture’s candidate run against its baseline: all three checks fail.*
+*The fixture’s candidate run against its baseline: all three checks fail. REQ-START names its own failed check and, separately, its failed guardrail `db-calls`.*
 
 Every check shows its value, the limit with the advisory target, the baseline and the number of executions, then the details and the evidence. **Open timeline** and **Open sequence** open the evidence execution in Timeline & Sequence; **Back to Quality** returns to the result.
 
@@ -188,7 +188,7 @@ The gate itself is still decided by the checks. The CLI, the job summary, the pu
 On the **Quality** page, **Requirements** shows a project's catalogue: every requirement of the latest recorded evaluation with its owner and reason, its checks, since when its status holds (“Violated since commit 9be31d07a4c2 (2 evaluations); met before.”) and its history, oldest on the left. A streak never spans different criteria: when a requirement's checks change, its status counts from there (“Met since … when its checks changed; violated under the earlier checks.”). A cell opens that evaluation; a cell is outlined where the requirement's checks changed. **History** lists every recorded evaluation, and **Copy link** on an opened one gives a link that reopens it.
 
 ![Requirements on the Quality page](/landing/quality-requirements.webp)
-*Six recorded evaluations of `main`: the regression violated both requirements, a run with too few executions couldn't decide REQ-START, the next commits passed their checks again. REQ-OUTAGE has no check yet.*
+*Five recorded evaluations of `recording-app`: the baseline, the regression (both requirements violated), a run with too few executions, the fix, and the fix again after REQ-START was tightened to 700 ms. REQ-START's streak restarts there (“when its checks changed”); REQ-DIRECTORY's check didn't change, so its streak spans both passes. REQ-OUTAGE has no check yet.*
 
 ## How to read a result
 
@@ -202,7 +202,7 @@ On the **Quality** page, **Requirements** shows a project's catalogue: every req
 - **Targets** are *met* or *open* and never change a status. **Advisory** checks are shown and never decide.
 - **The baseline** is evaluated with the same rules and shown next to each value; it never changes a status. A pass is not “every number improved”.
 - A pass describes this run only. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged.
-- **A pass holds for the recorded spans.** It assumes every call is instrumented, not sampled out and exported before the check. Lost executions (`run.executions`), spans naming a parent that was never recorded and executions that run past the window are caught. A span that started more children than were recorded is caught only when the sender records child counts: `log-sender` does, plain OpenTelemetry (OTLP) doesn’t carry them, so there a child span lost without any trace of it can’t be seen. Every result lists these assumptions, adapted to its data.
+- **A pass holds for the recorded spans.** It assumes every call is instrumented, not sampled out and exported before the check. Lost executions (`run.executions`), spans naming a parent that was never recorded and executions that run past the window are caught. A span that started more children than were recorded is caught only when the sender records child counts: `log-sender` does, plain OpenTelemetry (OTLP) doesn’t carry them, so there a child span lost without any trace of it can’t be seen. Every result lists these assumptions and says in how many of its executions lost child spans can be seen; a run that mixes senders is covered only partly. Set `run: {child_counts: required}` to make such a pass unresolved.
 - Each span counts once, so retries and replays of the same spans never change a number.
 
 Limits: a window is at most 24 hours and within raw span retention; at most 50 checks and 200 000 spans per run (more is “not enough data”, never a partial pass).

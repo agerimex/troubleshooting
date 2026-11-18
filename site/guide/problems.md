@@ -19,7 +19,7 @@ Choose a **Service** (required), optionally an **Environment**, and the window (
 Errors whose records name no span are listed as “Call attribution unavailable” and never meet the threshold.
 
 ![Problem list](/screenshots/problems-list.png)
-*Eight problem groups of `fx7e3d4841-recording-worker`: three error groups of the same failure (exception, ERROR span, ERROR log), two release regressions, and smaller groups.*
+*Nine problem groups of `fxdc108d54-pw-worker`, 09:00–10:00: slow `render_preview` calls, error groups per source kind (ERROR logs, ERROR spans), and “Cache volume is full”, whose logs name no span, so its calls can't be attributed. No release regression is listed: no stored comparison of this service overlaps the window.*
 
 ## Problem detail
 
@@ -28,14 +28,14 @@ Errors whose records name no span are listed as “Call attribution unavailable�
 Under **Investigate**, pick one of the retained example calls (up to 20 are kept) and open it with **Open timeline** or **Open sequence**. The example opens as its own report with the occurrence's span and log selected. Examples without a trace can still be inspected.
 
 ![Problem detail with why flagged](/screenshots/problems-detail.png)
-*The error group “StorageError at storage.Upload”: 70 affected calls in versions 1.0.0, 1.1.0 and 1.1.1.*
+*The error group “Storage returned 403 AccessDenied”: 2 affected calls in 2 traces, with “Why was this flagged?” open: the rule, the observed counts, the threshold, the grouping and the coverage.*
 
 ![Problem example opened as timeline](/screenshots/problems-example.png)
-*Its first example opened as a timeline. “Back to Problems” returns to the detail.*
+*An example opened as a timeline, with `upload_recording` selected and its logs on the task lanes `checksum` and `transfer`. “Back to Problems” returns to the detail.*
 
 ## Release regressions and “Check fixed release”
 
 A regression's **Compare releases** tab shows the stored comparison it was detected from: baseline and candidate versions, every metric with its change and result. Choose another version under **Fixed release** and click **Check fixed release** to see whether a later release brought the latency back.
 
 ![Release regression with comparison](/screenshots/problems-regression.png)
-*“storage.PutObject became slower in version 1.1.0”: p95 90 ms → 150 ms, +66.7%.*
+*“upload_recording became slower in version 1.1.0” on `fxdc108d54-recording-worker`: p95 100 ms → 160 ms, +60%, from the stored comparison of 1.1.0 against 1.0.0.*

@@ -31,7 +31,7 @@ With any other OpenTelemetry SDK, set the same two resource attributes and expor
 
 ## 2. Define two populations, not two lines
 
-On **Releases → Compare releases**, a *population* is a service, a time window and optional dimensions: operation, span kind, environment, version, installation and workload segment. Each dimension is *any*, *is* a value, or *not recorded*. Fill a **Baseline** (version 1.0.0, 10:00–12:00) and a **Candidate** (version 1.1.0, 12:00–14:00).
+On **Releases → Compare releases**, a *population* is a service, a time window and optional dimensions: operation, span kind, environment, version, installation and workload segment. Each dimension is *any*, *is* a value, or *not recorded*. Fill a **Baseline** (version 1.0.0, 04:00–05:00) and a **Candidate** (version 1.1.0, 06:00–07:00).
 
 ![Comparison form](/screenshots/compare-form.png)
 
@@ -59,7 +59,7 @@ Under a metric, **Slow candidate examples** lists observed calls at or above the
 
 ![Slow candidate examples](/screenshots/compare-examples.png)
 
-This is the step most tools skip, and the one that tells you *why* `storage.PutObject` went from 90 ms to 150 ms.
+This is the step most tools skip, and the one that tells you *why* `upload_recording` went from 100 ms to 160 ms.
 
 ## 5. Check the fix
 
