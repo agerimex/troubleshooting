@@ -200,10 +200,13 @@ func recordQuality(ctx context.Context, store qualityStore, locks *recordLocks, 
 		answerWithRecord(res, id, body)
 		return
 	}
-	if res.Source == nil {
-		res.Source = &QualitySource{}
+	// A copy: res.Source is the request's, which recording must not change.
+	src := QualitySource{}
+	if res.Source != nil {
+		src = *res.Source
 	}
-	res.Source.RulesSHA256 = sha // of the text this server evaluated
+	src.RulesSHA256 = sha // of the text this server evaluated
+	res.Source = &src
 	res.ID, res.RecordedAt, res.Reevaluated = id, now.Format(time.RFC3339Nano), req.Reevaluate
 	raw, _ := json.Marshal(res)
 	summary, _ := json.Marshal(summaryOf(*res))
