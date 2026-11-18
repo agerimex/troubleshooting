@@ -55,6 +55,7 @@ func (app *application) routers() http.Handler {
 		r.Get("/api/v1/quality/evaluations", app.qualityEvaluations)
 		r.Get("/api/v1/quality/evaluations/{id}", app.qualityEvaluation)
 		r.Get("/api/v1/quality/requirements", app.qualityRequirements)
+		r.Post("/api/v1/privacy/scan", app.privacyScan)
 	})
 
 	mux.Group(func(r chi.Router) {

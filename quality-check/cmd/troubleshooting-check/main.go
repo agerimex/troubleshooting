@@ -254,6 +254,9 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
+	if len(args) > 0 && args[0] == "privacy" {
+		return runPrivacy(args[1:], stdout, stderr, now)
+	}
 	if len(args) > 0 && args[0] == "comment" {
 		return runComment(args[1:], stdout, stderr)
 	}

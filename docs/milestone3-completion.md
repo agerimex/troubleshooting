@@ -512,3 +512,36 @@ fixing at once (2026-11-18).
 | QG-EVD-006 | `TestQualityDBCallsStatements` | Go unit |
 | QG-DOC-001 | CLI tests of the guardrail line; docs | CLI; review |
 | (log-sender) | CI job `log-sender-outside` | CI |
+
+# Stage 10: privacy by default
+
+An outside application's integration leaked SQL arguments, a login token in
+WebSocket query strings and camera credentials in an attribute key; nothing
+in Troubleshooting stopped or found them (2026-11-18). Record: `docs/privacy.md`.
+
+## What changed
+
+- **log-sender redacts by default** (`redact.go`): SQL arguments, URL
+  credentials in keys and values, query strings of request URLs, keys named
+  by `WithRedactKeys`; `troubleshooting.redacted` says what was removed.
+  `WithSQLArgs` opts in, logs it once and marks the resource. The API's own
+  tracing opts in. This changes what earlier versions sent.
+- **The receiver applies the same rules** to every sender before storing
+  (`TROUBLESHOOTING_REDACT=off` to store as sent).
+- **`troubleshooting-check privacy`** and `POST /api/v1/privacy/scan`: kinds
+  of leak with counts and an example, never the value; exit 1 on findings.
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| PRV-001 | log-sender `TestRedactionByDefault`, `TestRedactionWithSQLArgs`, `TestRedactionOfLogRecords`, `TestRedactText`; end to end against the test stack (a span and a log record through log-sender: stored cleaned, scan exits 0) | Go unit; manual |
+| PRV-002 | receiver `TestReceiverRedaction` | Go unit |
+| PRV-003 | `TestPrivacyRequest`, `TestPrivacyPatterns`; CLI `TestPrivacyCommand`; against the test stack (probe rows with all five kinds: found, the opted-in span not) | Go unit; CLI; manual |
+
+## Not done
+
+- A purge command (plan item G): data stored before these layers needs
+  `ALTER TABLE … DELETE`.
+- The UI doesn't yet show `troubleshooting.redacted` specially (it appears
+  as an attribute).

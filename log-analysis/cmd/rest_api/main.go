@@ -50,7 +50,9 @@ func getenv(key, def string) string {
 // a test run of this API can be checked with the quality gate (this
 // repository's CI does: .github/quality.yaml).
 func initOpenTelemetry() {
-	opts := []sender.Option{sender.WithAddress(getenv("TRACE_RECEIVER_ADDR", "log-receiver-compose:50055"))}
+	// WithSQLArgs: this API's query parameters (run ids, trace ids, service
+	// names, never personal data) let the UI show its own queries readably.
+	opts := []sender.Option{sender.WithAddress(getenv("TRACE_RECEIVER_ADDR", "log-receiver-compose:50055")), sender.WithSQLArgs()}
 	if run := os.Getenv("TROUBLESHOOTING_RUN"); run != "" {
 		opts = append(opts, sender.WithResourceAttributes(map[string]string{data.AttrRun: run}))
 	}

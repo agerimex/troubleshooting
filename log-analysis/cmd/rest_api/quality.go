@@ -30,6 +30,22 @@ func (app *application) qualityEvaluate(w http.ResponseWriter, r *http.Request) 
 	app.writeJSON(r.Context(), w, http.StatusOK, jsonResponse{Message: "success", Data: envelope{"Evaluation": res}})
 }
 
+// privacyScan looks for secrets and personal data in the stored spans and logs
+// of a run or service (troubleshooting-check privacy). It names the kind of
+// finding, how many records have it and one example, never the value.
+func (app *application) privacyScan(w http.ResponseWriter, r *http.Request) {
+	var req data.PrivacyRequest
+	if !app.readValid(w, r, &req, func() error { return req.Validate() }) {
+		return
+	}
+	res, err := data.ScanPrivacy(r.Context(), req)
+	if err != nil {
+		app.queryError(w, r, err)
+		return
+	}
+	app.writeJSON(r.Context(), w, http.StatusOK, jsonResponse{Message: "success", Data: envelope{"Privacy": res}})
+}
+
 // qualityProjects lists the projects with recorded evaluations.
 func (app *application) qualityProjects(w http.ResponseWriter, r *http.Request) {
 	list, err := data.ListQualityProjects(r.Context())
