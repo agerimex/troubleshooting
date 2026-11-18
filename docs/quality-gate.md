@@ -362,7 +362,13 @@ before criteria existed, any change of the rules file's sha256 ends a streak.
 Not evaluated and "not in the rules" have no criteria; only their status
 counts. A failed write leaves the result valid and says so in
 `record_error` (the CLI prints a warning; the exit code still follows the
-gate).
+gate). When the insert went through but reading the stored record back
+failed, the answer keeps the `id`, has `record_unconfirmed: true` and is the
+local verdict: another instance may have recorded a different one under that
+id. The CLI then prints "Not confirmed: the evaluation was sent to the
+history as …" with the link, never "Recorded as evaluation", and the Quality
+page says the same for such a result file; open the id for the recorded
+verdict.
 
 The action records on **push** events by default (`record: auto`), so a
 project's history follows its branches and tags, not every pull request push;
@@ -432,13 +438,26 @@ only stands on data that can carry it:
   makes it visible: such an execution is incomplete (below). Otherwise
   `min_per_execution` catches executions without their database calls, but
   not a partial loss.
+- Whether an execution records its child counts is decided per execution: its
+  entry span reports a count, and so does every span with recorded children
+  of its own service (a recorded 0 and no count at all look the same, so an
+  execution whose spans start no children can't establish it). A run that
+  mixes senders is covered only partly. `run.child_counts: required` makes a
+  `db_calls` or `forbidden_call` pass with any execution without counts
+  `insufficient` with reason `unverified_child_counts` (evidence: the first
+  such execution); a failure stands. It is part of the requirements'
+  criteria.
 
 **Assumptions.** Every result lists in `assumptions` what its verdicts rest
 on: they hold for the recorded spans, with every call assumed to be
 instrumented, not sampled out and exported before the check; which losses are
-caught as not enough data; and whether lost child spans can be seen in this
-run's data (some span records a child count) or not. The CLI's reports, the PR
-comment and the Quality page show them.
+caught as not enough data; and in how many of the checked executions lost
+child spans can be seen: all ("Lost child spans are detected too"), some
+("Lost child spans are detected in 1 of 200 executions only: …") or none
+("Child spans lost without a trace can't be detected"). One span with a count
+never speaks for the whole run. `child_counts` has the numbers
+(`executions`, `counted`, `status` all/partial/none). The CLI's reports,
+the PR comment and the Quality page show the assumptions.
 
 **Incomplete executions.** An execution is incomplete when a span of its
 trace names a parent that was not recorded (lost, sampled out, not
@@ -510,9 +529,11 @@ can't be read is a 200 whose checks are `insufficient`, so the gate is
 unresolved, never passed. Without `record` nothing is stored, and the same
 request on the same data gives the same answer. With `record: true` (and
 `source`, optional) see "Requirements and history" above; the evaluation then
-also has `id`, `recorded_at` or `record_error`, `recorded_before` or
+also has `id`, `recorded_at` or `record_error` (with `record_unconfirmed`
+when the record couldn't be read back), `recorded_before` or
 `reevaluated`, and evidence `snapshot`s (`reevaluate: true` needs `record`).
-Every evaluation has `assumptions` (see "Assumptions" above).
+Every evaluation has `assumptions` and, when spans were read, `child_counts`
+(see "Assumptions" above).
 
 The history (GET, newest first):
 

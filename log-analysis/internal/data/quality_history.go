@@ -223,9 +223,11 @@ func recordQuality(ctx context.Context, store qualityStore, locks *recordLocks, 
 	kept, found, err := store.lookup(ctx, res.Project, id)
 	switch {
 	case err != nil:
-		res.RecordError = "the evaluation " + id + " was sent to the history, but reading it back failed (" + err.Error() + "): open it by its id for the recorded verdict"
+		res.RecordUnconfirmed = true
+		res.RecordError = "the evaluation " + id + " was sent to the history, but reading it back failed (" + err.Error() + "): this is the local verdict, and the recorded one may differ; open it by its id"
 	case !found:
-		res.RecordError = "the evaluation " + id + " was sent to the history, but it is not there"
+		res.RecordUnconfirmed = true
+		res.RecordError = "the evaluation " + id + " was sent to the history, but it is not there: this is the local verdict"
 	case kept != string(raw):
 		answerWithRecord(res, id, kept)
 	}

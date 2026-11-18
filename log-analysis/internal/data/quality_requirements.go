@@ -249,15 +249,15 @@ func guardrailSummary(ids []string, byID map[string]QualityCheckResult) ([]strin
 // setRequirementCriteria fills in each requirement's criteria hash from the
 // validated rules: the definitions of its checks without their ids, targets
 // and advisory flag (none of them changes a status), in a fixed order, and
-// run.executions. Guardrails don't decide the status and aren't part of it.
+// run.executions and run.child_counts. Guardrails don't decide the status and aren't part of it.
 func setRequirementCriteria(res []QualityRequirementResult, rules QualityRules) {
 	byID := map[string]QualityCheck{}
 	for _, c := range rules.Checks {
 		byID[c.ID] = c
 	}
-	executions := 0
+	executions, counts := 0, ""
 	if rules.Run != nil {
-		executions = rules.Run.Executions
+		executions, counts = rules.Run.Executions, rules.Run.ChildCounts
 	}
 	for i := range res {
 		if len(res[i].Checks) == 0 {
@@ -274,7 +274,9 @@ func setRequirementCriteria(res []QualityRequirementResult, rules QualityRules) 
 		b, _ := json.Marshal(struct {
 			Checks     []string `json:"checks"`
 			Executions int      `json:"executions"`
-		}{defs, executions})
+			// Left out when not set, so criteria recorded before it stay equal.
+			ChildCounts string `json:"child_counts,omitempty"`
+		}{defs, executions, counts})
 		sum := sha256.Sum256(b)
 		res[i].Criteria = hex.EncodeToString(sum[:])
 	}

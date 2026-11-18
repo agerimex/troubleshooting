@@ -318,3 +318,20 @@ Feature: Check a test run against quality rules
     Then REQ-START is met and says "guardrail failed: db-calls (guardrails decide the gate, not this requirement)"
     And the gate still fails on db-calls
     And a guardrail that isn't in the rules, is listed twice or is also one of the requirement's checks is a 400
+
+  # Stage 8: the review of b7c2e87.
+
+  @QG-SUF-007
+  Scenario: Child-span coverage is stated per execution
+    Given 200 executions, one complete with child counts and 199 without counts that lost 19 database calls and the directory branch each
+    When the run is checked
+    Then the gate passes on the recorded spans, and the assumptions say lost child spans are detected in 1 of 200 executions only
+    And child_counts is 200 executions, 1 counted, partial
+    But with run.child_counts: required, db-calls and no-directory are insufficient with reason unverified_child_counts, and a failure still stands
+
+  @QG-HIST-007
+  Scenario: An unconfirmed record is not reported as recorded
+    Given the evaluation was inserted but reading the stored record back failed
+    Then the answer keeps the id, has record_unconfirmed and says the recorded verdict may differ
+    And the CLI prints "Not confirmed: the evaluation was sent to the history as" with the link, never "Recorded as evaluation"
+    And the Quality page says the same for such a result file

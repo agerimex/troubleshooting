@@ -79,7 +79,7 @@ func TestQualityRecordReadBackFails(t *testing.T) {
 	store := &readBackFails{fakeQualityStore{bodies: map[string]string{}}, 0}
 	res := buildQualityResult(req, runSpans{Spans: referenceRun("candidate", "fixed", 560)}, runSpans{}, time.Unix(0, qBase))
 	recordQuality(context.Background(), store, &recordLocks{}, req, &res, time.Unix(0, qBase))
-	if res.ID == "" || !strings.Contains(res.RecordError, "reading it back failed") {
+	if res.ID == "" || !res.RecordUnconfirmed || !strings.Contains(res.RecordError, "reading it back failed") || !strings.Contains(res.RecordError, "the recorded one may differ") {
 		t.Errorf("read back failure: id %q, %q", res.ID, res.RecordError)
 	}
 }

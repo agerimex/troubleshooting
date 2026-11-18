@@ -73,6 +73,9 @@ type Check struct {
 // quality.yaml (docs/quality-gate.md).
 type RunDecl struct {
 	Executions int `yaml:"executions,omitempty" json:"executions,omitempty"`
+	// ChildCounts "required": db_calls and forbidden_call can't pass while an
+	// execution doesn't record its child counts.
+	ChildCounts string `yaml:"child_counts,omitempty" json:"child_counts,omitempty"`
 }
 
 // Requirement names an intent, its owner and reason, the checks that assess
@@ -172,12 +175,24 @@ type Evaluation struct {
 	// before (--reevaluate).
 	RecordedBefore bool `json:"recorded_before,omitempty"`
 	Reevaluated    bool `json:"reevaluated,omitempty"`
+	// RecordUnconfirmed: sent to the history under ID, but the API couldn't
+	// read the stored record back; the verdict shown is the local one.
+	RecordUnconfirmed bool `json:"record_unconfirmed,omitempty"`
 	// Assumptions say what the verdicts rest on (which lost spans can be seen).
 	Assumptions []string `json:"assumptions,omitempty"`
+	// ChildCounts: in how many checked executions lost child spans could be seen.
+	ChildCounts *ChildCoverage `json:"child_counts,omitempty"`
 	// Source is added by the CLI (the API doesn't know it): what was tested
 	// and which rules decided, so a result can't be mistaken for one of
 	// another commit or of other rules.
 	Source *Source `json:"source,omitempty"`
+}
+
+// ChildCoverage is the API's child_counts.
+type ChildCoverage struct {
+	Executions int    `json:"executions"`
+	Counted    int    `json:"counted"`
+	Status     string `json:"status"`
 }
 
 type RequirementResult struct {
@@ -296,7 +311,12 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	}
 	fmt.Fprint(stdout, report(ev))
 	if ev.ID != "" {
-		if ev.RecordedBefore {
+		// An id with a record error (an API before record_unconfirmed sends
+		// only the error) is not a confirmed record.
+		if ev.RecordUnconfirmed || ev.RecordError != "" {
+			fmt.Fprintf(stdout, "\nNot confirmed: the evaluation was sent to the history as %s, but the API couldn't verify what is stored; the verdict above is this run's, and the recorded one may differ%s\n",
+				ev.ID, recordLink(o.ui, ev.ID))
+		} else if ev.RecordedBefore {
 			fmt.Fprintf(stdout, "\nAlready recorded as evaluation %s (%s): this is that record, not a new evaluation; --reevaluate records a new one%s\n",
 				ev.ID, ev.RecordedAt, recordLink(o.ui, ev.ID))
 		} else {
