@@ -379,3 +379,14 @@ Feature: Check a test run against quality rules
     When troubleshooting-check privacy scans the service
     Then it reports each kind with its count and an example span, exits 1, and doesn't flag the opted-in span
     And a clean service exits 0 with "Nothing found"
+
+  # Stage 11: failed executions (a second outside application).
+
+  @QG-ERR-001
+  Scenario: Failed executions are counted, and kept out of a latency percentile on request
+    Given 200 executions of which 3 entry spans ended with status error
+    Then an errors check with max_failed 0 fails with value 3 and the first failed execution as evidence, and passes with max_failed 3
+    And lost executions make it insufficient, never a pass
+    And a latency check with exclude_failed leaves the failed executions out (its p95 rises when they ended early) and says how many
+    And with fewer than 20 successful executions that latency check is insufficient
+    And max_failed on another check type, exclude_failed on a non-latency check, or an errors check without max_failed are rejected

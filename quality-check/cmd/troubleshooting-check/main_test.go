@@ -180,7 +180,7 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // The shipped example must stay valid for the strict parser.
 func TestExampleRulesParse(t *testing.T) {
 	r, _, err := loadRules(filepath.Join("..", "..", "quality.example.yaml"))
-	if err != nil || r.Version != 1 || len(r.Checks) != 3 || r.Entry == nil || r.Checks[1].MaxPerExecution == nil {
+	if err != nil || r.Version != 1 || len(r.Checks) != 4 || r.Entry == nil || r.Checks[1].MaxPerExecution == nil || r.Checks[3].MaxFailed == nil {
 		t.Fatalf("example: %v %+v", err, r)
 	}
 }

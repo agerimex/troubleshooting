@@ -42,6 +42,9 @@ const (
 	CheckLatency   = "latency"
 	CheckDBCalls   = "db_calls"
 	CheckForbidden = "forbidden_call"
+	// CheckErrors counts failed executions: their entry span ended with
+	// status error.
+	CheckErrors = "errors"
 )
 
 // Check statuses, target statuses and the gate.
@@ -106,6 +109,11 @@ type QualityCheck struct {
 	TargetPer       *int   `json:"target_per_execution,omitempty" yaml:"target_per_execution,omitempty"`
 	From            string `json:"from,omitempty" yaml:"from,omitempty"`
 	To              string `json:"to,omitempty" yaml:"to,omitempty"`
+	// MaxFailed (errors): at most this many executions may fail.
+	MaxFailed *int `json:"max_failed,omitempty" yaml:"max_failed,omitempty"`
+	// ExcludeFailed (latency): failed executions are left out of the
+	// percentile (a failure that ends early would make it look faster).
+	ExcludeFailed bool `json:"exclude_failed,omitempty" yaml:"exclude_failed,omitempty"`
 	// declared is run.executions when it set MinExecutions (not in JSON):
 	// fewer executions then mean lost executions, not a small run.
 	declared int
@@ -346,10 +354,11 @@ func foreignFields(c *QualityCheck) error {
 	set := map[string]bool{
 		"percentile": c.Percentile != 0, "max_ms": c.MaxMs != nil, "target_ms": c.TargetMs != nil,
 		"max_per_execution": c.MaxPerExecution != nil, "target_per_execution": c.TargetPer != nil, "min_per_execution": c.MinPerExecution != nil,
-		"from": c.From != "", "to": c.To != "",
+		"from": c.From != "", "to": c.To != "", "max_failed": c.MaxFailed != nil, "exclude_failed": c.ExcludeFailed,
 	}
 	own := map[string][]string{
-		CheckLatency:   {"percentile", "max_ms", "target_ms"},
+		CheckLatency:   {"percentile", "max_ms", "target_ms", "exclude_failed"},
+		CheckErrors:    {"max_failed"},
 		CheckDBCalls:   {"max_per_execution", "target_per_execution", "min_per_execution"},
 		CheckForbidden: {"from", "to"},
 	}[c.Type]
@@ -432,8 +441,12 @@ func validateCheck(c *QualityCheck, entry *QualityEntry, declared int) error {
 		if c.From == c.To {
 			return fmt.Errorf("from and to must differ")
 		}
+	case CheckErrors:
+		if c.MaxFailed == nil || *c.MaxFailed < 0 {
+			return fmt.Errorf("max_failed must be a number >= 0")
+		}
 	default:
-		return fmt.Errorf("type must be %s, %s or %s", CheckLatency, CheckDBCalls, CheckForbidden)
+		return fmt.Errorf("type must be %s, %s, %s or %s", CheckLatency, CheckDBCalls, CheckForbidden, CheckErrors)
 	}
 	if c.MinExecutions == 0 && declared > 0 {
 		c.MinExecutions, c.declared = declared, declared
@@ -770,6 +783,8 @@ func measure(c QualityCheck, exs []execution, ix spanIndex) QualityCheckResult {
 	case CheckForbidden:
 		measureForbidden(c, exs, &r, ix)
 		requireComplete(exs, &r)
+	case CheckErrors:
+		measureErrors(c, exs, &r) // the entry's own status, like latency its own duration
 	}
 	if c.countsRequired && (c.Type == CheckDBCalls || c.Type == CheckForbidden) {
 		requireChildCounts(exs, &r)
@@ -877,7 +892,40 @@ func measureLatency(c QualityCheck, exs []execution, r *QualityCheckResult) {
 	r.Unit = "ms"
 	r.Limit, r.Target = fptr(*c.MaxMs), c.TargetMs
 	var ms []float64
-	invalidN := 0
+	invalidN, failedN := 0, 0
+	all := exs
+	if c.ExcludeFailed {
+		var ok []execution
+		for _, ex := range exs {
+			if ex.Entry.Status == statusError {
+				failedN++
+				continue
+			}
+			ok = append(ok, ex)
+		}
+		exs = ok
+		// Lost executions are told by all of them; the percentile needs
+		// enough successful ones.
+		if insufficientExecutions(c, r, len(all)) {
+			return
+		}
+		if failedN > 0 {
+			r.Details = append(r.Details, fmt.Sprintf("%d failed executions left out (exclude_failed)", failedN))
+		}
+		// All executions were counted against run.executions above; the
+		// successful ones need enough for a percentile: the check's own
+		// min_executions, or the default when it came from run.executions.
+		need := c.MinExecutions
+		if c.declared > 0 {
+			need = defaultMinLatency
+		}
+		if len(exs) < need && len(exs) < len(all) {
+			r.Status, r.Reason = CheckInsufficient, "too_few_executions"
+			r.Summary = fmt.Sprintf("%d successful executions of %d, at least %d needed for a percentile", len(exs), len(all), need)
+			return
+		}
+		c.MinExecutions, c.declared = need, 0
+	}
 	for _, ex := range exs {
 		if ex.Entry.Duration < 0 {
 			invalidN++
@@ -1459,6 +1507,39 @@ func EvaluateQuality(ctx context.Context, req *QualityRequest) QualityResult {
 	}
 	wg.Wait()
 	return buildQualityResult(*req, run, base, clock.Now())
+}
+
+// statusError is StatusCode for an error (the Go API's numbering).
+const statusError = 1
+
+// measureErrors: the executions whose entry span ended with status error.
+// The status is what the application recorded: a span that fails without
+// setting it is not seen as failed.
+func measureErrors(c QualityCheck, exs []execution, r *QualityCheckResult) {
+	r.Unit = "failed executions"
+	r.Limit = fptr(float64(*c.MaxFailed))
+	if insufficientExecutions(c, r, len(exs)) {
+		return
+	}
+	var first *execution
+	for i := range exs {
+		if exs[i].Entry.Status == statusError {
+			r.Violations++
+			if first == nil {
+				first = &exs[i]
+			}
+		}
+	}
+	r.Value = fptr(float64(r.Violations))
+	if r.Violations <= *c.MaxFailed {
+		r.Status, r.Reason = CheckPass, "within_limit"
+	} else {
+		r.Status, r.Reason = CheckFail, "limit_exceeded"
+	}
+	r.Summary = fmt.Sprintf("%d of %d executions failed, limit %d", r.Violations, len(exs), *c.MaxFailed)
+	if first != nil {
+		r.Evidence = append(r.Evidence, evidenceOf(*first, nil, "failed execution (its entry span has status error)"))
+	}
 }
 
 // requireDurations: executions without a valid duration (their entry never

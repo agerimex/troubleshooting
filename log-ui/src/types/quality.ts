@@ -54,7 +54,7 @@ export interface QualityBaseline {
 
 export interface QualityCheckResult {
   id: string
-  type: 'latency' | 'db_calls' | 'forbidden_call' | string
+  type: 'latency' | 'db_calls' | 'forbidden_call' | 'errors' | string
   entry: QualityEntry
   advisory: boolean
   status: CheckStatus

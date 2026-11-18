@@ -52,6 +52,7 @@ checks:
 | `latency` | The percentile of the entry spans’ own durations (exact nearest rank) | The value is at most `max_ms` (equal passes), over at least `min_executions` (default 20), and every execution ended (an execution without a valid duration makes a pass “not enough data”) |
 | `db_calls` | Client spans with `db.system` (or `db.system.name`) per execution | **Every** execution has at most `max_per_execution`, not on average; a run without any database call is “not enough data” unless the limit is 0; with `min_per_execution`, so is an execution with fewer calls (its database spans are missing) |
 | `forbidden_call` | A span of service `to` called from another service, or a client span naming it in `peer.service` / `server.address` | No execution calls it: “not observed in this run” |
+| `errors` | Executions whose entry span ended with status error | At most `max_failed` of them (`0`: none). On a latency check, `exclude_failed: true` leaves failed executions out of the percentile, since a failure that ends early makes a run look faster |
 
 A check can have its own `entry`, and `advisory: true` shows it without letting it decide. Unknown and duplicate keys are errors, and so is a field of another check type (`max_ms` on a `db_calls` check), so a misspelled or misplaced limit is never silently ignored. SQL text and logs are never parsed.
 

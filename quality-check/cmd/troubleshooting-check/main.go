@@ -63,6 +63,8 @@ type Check struct {
 	MaxMs           *float64 `yaml:"max_ms,omitempty" json:"max_ms,omitempty"`
 	TargetMs        *float64 `yaml:"target_ms,omitempty" json:"target_ms,omitempty"`
 	MaxPerExecution *int     `yaml:"max_per_execution,omitempty" json:"max_per_execution,omitempty"`
+	MaxFailed       *int     `yaml:"max_failed,omitempty" json:"max_failed,omitempty"`
+	ExcludeFailed   bool     `yaml:"exclude_failed,omitempty" json:"exclude_failed,omitempty"`
 	TargetPer       *int     `yaml:"target_per_execution,omitempty" json:"target_per_execution,omitempty"`
 	MinPerExecution *int     `yaml:"min_per_execution,omitempty" json:"min_per_execution,omitempty"`
 	From            string   `yaml:"from,omitempty" json:"from,omitempty"`
