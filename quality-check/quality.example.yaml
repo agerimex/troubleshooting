@@ -32,6 +32,11 @@ checks:
     type: forbidden_call
     to: directory-api
 
+  # No execution may fail (its entry span ended with status error).
+  - id: no-failures
+    type: errors
+    max_failed: 0
+
 # Optional: requirements say why the checks exist. Each names its owner and
 # the checks that assess it; its status comes from those checks (met,
 # violated, not enough data). Guardrails support a requirement without

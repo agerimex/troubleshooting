@@ -62,7 +62,7 @@ go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting
 troubleshooting-check --url http://localhost:8095 --rules quality.yaml --run pr-42-1 --baseline main-118
 ```
 
-Rules (`quality-check/quality.example.yaml`): a latency percentile limit for an entry operation, at most N recorded database calls per execution, and services an execution must not call. Each failure names the execution behind it with a link to its timeline or sequence. Exit code 0 passed, 1 failed, 2 not enough data, 3 error. Advisory targets and the baseline are shown but never decide the result; a missing measurement is never a pass. `--json`, `--html` and `--markdown` write the result, a report page and a summary for CI.
+Rules (`quality-check/quality.example.yaml`): a latency percentile limit for an entry operation (optionally without failed executions), at most N recorded database calls per execution, services an execution must not call, and at most N failed executions. Each failure names the execution behind it with a link to its timeline or sequence. Exit code 0 passed, 1 failed, 2 not enough data, 3 error. Advisory targets and the baseline are shown but never decide the result; a missing measurement is never a pass. `--json`, `--html` and `--markdown` write the result, a report page and a summary for CI.
 
 In GitHub Actions:
 
@@ -235,6 +235,119 @@ OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <token>"
 ```
 
 Only traces over gRPC are supported for now (not OTLP/HTTP on port 4318, not logs or metrics). Some SDKs, e.g. Node.js, default to HTTP, so set the protocol explicitly.
+
+### Example: a Windows .NET 8 desktop or CLI app
+
+A process that starts, does a few operations and exits has three traps a web service doesn't: spans that never leave the batch buffer, one long trace instead of one per operation, and no incoming request to tag. The steps below avoid all three. Commands are PowerShell.
+
+**Ports.** Send to `127.0.0.1`, not `localhost`: `localhost` may resolve to `::1` first, and the test stack publishes all its ports on IPv4 loopback only. The dev stack publishes only the API and ClickHouse on loopback; its receiver (4317, 50055) and UI (8095) listen on all interfaces, so on a shared network turn on the token (see [Security](#security)). The receiver speaks plaintext gRPC, so the endpoint URL starts with `http://` — that is OTLP over gRPC without TLS, not OTLP/HTTP, which the receiver does not support. Plaintext is for a local stack on the same machine only; never send it across a network. Use the three ports of one stack together:
+
+| Stack | OTLP/gRPC | API | UI |
+| --- | --- | --- | --- |
+| dev (`make up`) | `4317` | `8094` | `8095` |
+| isolated test stack (`docker-compose.test.yml`) | `24317` | `28094` | `28095` |
+
+**Instrument.** Create the project and add the packages:
+
+```powershell
+dotnet new console -n media-tool -f net8.0
+cd media-tool
+dotnet add package OpenTelemetry
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+Replace `Program.cs` with this (the whole file). Tracing stays off unless an environment variable names the receiver:
+
+```csharp
+using System.Diagnostics;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+
+// One fixed name. AddSource must name exactly this, or StartActivity returns null and nothing is sent.
+const string sourceName = "Contoso.MediaTool";
+using var source = new ActivitySource(sourceName);
+
+TracerProvider? tracing = null;
+var endpoint = Environment.GetEnvironmentVariable("TROUBLESHOOTING_OTLP"); // e.g. http://127.0.0.1:24317
+if (!string.IsNullOrEmpty(endpoint))
+{
+    var attrs = new List<KeyValuePair<string, object>> { new("deployment.environment.name", "test") };
+    var run = Environment.GetEnvironmentVariable("TROUBLESHOOTING_RUN");
+    if (!string.IsNullOrEmpty(run)) attrs.Add(new("troubleshooting.run", run)); // tags the test run
+    tracing = Sdk.CreateTracerProviderBuilder()
+        .SetResourceBuilder(ResourceBuilder.CreateDefault()
+            .AddService("media-tool", serviceVersion: "1.4.0")
+            .AddAttributes(attrs))
+        .AddSource(sourceName)
+        .AddOtlpExporter(o =>
+        {
+            o.Endpoint = new Uri(endpoint);       // http:// = plaintext gRPC
+            o.Protocol = OtlpExportProtocol.Grpc; // traces only; don't point log or metric exporters here
+        })
+        .Build();
+}
+try
+{
+    foreach (var file in args)
+    {
+        // One root per operation; work inside it are children.
+        using var root = source.StartActivity("convert-file");
+        root?.SetTag("media.size_bytes", new FileInfo(file).Length); // sizes and counts, never names or contents
+        using (source.StartActivity("decode")) { /* ... */ }
+        using (source.StartActivity("encode")) { /* ... */ }
+    }
+}
+finally
+{
+    // The batch processor exports every 5 s; a process that exits sooner loses its spans without this.
+    tracing?.ForceFlush(5000);
+    tracing?.Dispose();
+}
+```
+
+* **One root per operation.** Don't wrap the whole process (or a desktop app's main window) in one span: every operation would be a child of it, Log Analysis would show one trace, and the quality gate would count one execution. Each operation's root must be disposed before the next one starts; in a UI event handler that runs inside another activity, set `Activity.Current = null` before starting the root. For a detached async root (an operation started from a UI handler that keeps running after the handler returns), save `Activity.Current`, set it to `null`, start the root, and restore the saved value right after starting it, so the handler's own code and later operations don't end up under the detached root.
+* **Short process exit.** `ForceFlush` + `Dispose` in `finally` covers a normal return and exceptions; `Environment.Exit` skips `finally`, so flush before calling it. Ctrl+C: flush in `Console.CancelKeyPress`.
+* **Keep data out.** Never record file paths (they contain `C:\Users\<name>`), file names, file contents or recognized text, window titles, command-line arguments or anything typed by the user. Sizes, counts, durations and result codes are enough.
+
+**Run it** against the stack you check:
+
+```powershell
+$env:TROUBLESHOOTING_OTLP = "http://127.0.0.1:24317"
+$run = "local-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$env:TROUBLESHOOTING_RUN  = $run
+dotnet run -- .\samples\CANARY-7f3a.wav   # each argument is one convert-file; 20+ per operation for a latency check, see below
+Remove-Item Env:TROUBLESHOOTING_OTLP, Env:TROUBLESHOOTING_RUN
+```
+
+**Check it in the UI.** Open Log Analysis (`http://127.0.0.1:28095`), set the window, filter the service: "Root spans" shows one row per operation (`convert-file`), and expanding a row shows `decode` and `encode` under it. No rows usually means a mismatched `AddSource` name, a `localhost` endpoint, an OTLP/HTTP exporter (port 4318 or protocol `http/protobuf`), or a process that exited without flushing.
+
+**Check it through the API**, the same thing without the UI:
+
+```powershell
+$to   = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() * 1000000
+$from = $to - 3600L * 1000000000
+$body = @{ time_from = "$from"; time_to = "$to"; scope = "root"; service_name = "media-tool"; rows_per_page = 100 } | ConvertTo-Json
+(Invoke-RestMethod -Method Post -Uri http://127.0.0.1:28094/api/v1/view-spans -ContentType application/json -Body $body).data.Spans |
+  Select-Object name, duration, childSpanCount, traceId    # duration in µs; one row per operation, childSpanCount > 0
+```
+
+**Canary check.** Put a unique value (`CANARY-7f3a` above) where personal data would travel — a file name, a path, text the app processes — and check that it is stored nowhere, after checking that the run's spans did arrive (otherwise 0 proves nothing):
+
+```powershell
+troubleshooting-check privacy --url http://127.0.0.1:28094 --service media-tool   # must exit 0
+$q = "SELECT count() FROM otel_traces WHERE ServiceName='media-tool' AND positionCaseInsensitive(concat(SpanName,' ',StatusMessage,' ',toString(SpanAttributes),' ',toString(ResourceAttributes),' ',toString(``Events.Attributes``)), 'CANARY-7f3a') > 0"
+docker exec troubleshooting-test-clickhouse clickhouse-client --query $q            # must print 0 (dev stack: logs-clickhouse-server)
+```
+
+In a Windows desktop pilot built this way, one test session produced 15 session traces with 86 spans, located its 3 input failures by stage, and none of the structured file-name or transcript canaries was stored.
+
+**Quality gate.** In `quality.yaml` the entry is the root: `service: media-tool`, `operation: convert-file`. A latency check needs at least 20 executions (its default minimum), so run each checked operation at least 20 times and declare that number as `run.executions`. `troubleshooting-check --url http://127.0.0.1:28094 --rules quality.yaml --run $run --ui none` exits 0 passed, 1 failed (a limit was broken: fix the code or the limit), 2 unresolved and 3 error. Exit 2 is not a failure but missing evidence: fewer executions than declared (spans not flushed, the run tag missing, too few runs), no database call for a `db_calls` check, or executions without a valid duration. Read the reason in the output before changing limits.
+
+**Statistics off after the first start.** The API checks the schema once at startup, and the receiver creates it. Both compose files therefore start the API only once the receiver is healthy, which means it accepts connections on 50055; it opens that port only after it has created the schema. On an empty ClickHouse volume that can take a few minutes. With compose files from before this change, the API could start first, and its log showed `statistics are off: the statistics tables or raw retention are missing; start the receiver of this version first` right at startup. Spans, Log Analysis and the quality gate are not affected. The statistics refresher retries every `STATS_REFRESH_INTERVAL` (1 min), and `GET /api/v1/stats/status` shows its last error. If statistics stay off, restart only the API. That keeps the receiver and all data: `docker compose -p troubleshooting-test -f docker-compose.test.yml restart log-analysis` (dev stack: `docker compose restart log-analysis-compose`). Don't use `down -v` (it deletes the volume) or recreate the receiver to fix this.
+
+**Plain `404 page not found` from an endpoint this README describes** (e.g. `/api/v1/privacy/scan` or `/api/v1/quality/evaluate`) usually means the API container runs an old, cached `docker-log-analysis:1` image. The compose files only use local images and never rebuild them. Rebuild the images from your checkout with `make all`, then recreate the stack with `make up` (test stack: `make test-stack-up`). Compose replaces only the containers whose image changed, and the ClickHouse volume is kept. To check which image a container runs, compare `docker inspect --format '{{.Image}}' <container>` with `docker image inspect --format '{{.Id}}' docker-log-analysis:1`.
 
 Configuration
 ------

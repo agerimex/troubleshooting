@@ -426,6 +426,18 @@ forbidden service calling each other, and the entry itself, are not calls to
 it. A pass reads "not observed in this run": a trace cannot prove a call can
 never happen. Whether the call was synchronous is not judged.
 
+**errors**: the executions whose entry span ended with status error, at most
+`max_failed` (`0`: none may fail). The status is what the application
+recorded: an execution that failed without setting it is not seen as failed.
+Evidence: the first failed execution. Lost executions (`run.executions`) are
+insufficient, as for every check.
+
+**exclude_failed** (latency, optional): failed executions are left out of the
+percentile, because a failure that ends early makes a run look faster. All
+executions still count against `run.executions`; the percentile then needs
+at least 20 successful ones, and the details say how many failed ones were
+left out.
+
 **Statuses.** A check is `pass`, `fail` or `insufficient` (with a reason:
 `no_executions`, `too_few_executions`, `missing_executions`, `incomplete_executions`,
 `invalid_durations`, `no_database_calls`, `missing_database_calls`, `outside_retention`, `too_many_spans`,

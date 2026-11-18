@@ -545,3 +545,18 @@ in Troubleshooting stopped or found them (2026-11-18). Record: `docs/privacy.md`
   `ALTER TABLE … DELETE`.
 - The UI doesn't yet show `troubleshooting.redacted` specially (it appears
   as an attribute).
+
+# Stage 11: failed executions
+
+A second outside application (a desktop transcription app sending OTLP)
+needed "no session may fail" first, and the gate couldn't express it; its
+failing sessions, which end early, also pulled its latency percentile down.
+
+- `type: errors` with `max_failed`: executions whose entry span ended with
+  status error; the first failed one is the evidence.
+- `exclude_failed: true` on a latency check leaves failed executions out of
+  the percentile (all of them still count against `run.executions`).
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-ERR-001 | `TestQualityErrorsCheck`, `TestQualityLatencyExcludeFailed`, `TestQualityErrorsValidation`; CLI `TestErrorsCheckRules` | Go unit; CLI |
