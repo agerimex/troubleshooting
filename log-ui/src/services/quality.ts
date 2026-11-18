@@ -133,6 +133,7 @@ export function parseResult (text: string): [string | null, QualityEvaluation | 
     c.details = Array.isArray(c.details) ? c.details.filter((d: unknown) => typeof d === 'string') : []
     c.evidence = Array.isArray(c.evidence) ? c.evidence.filter((e: any) => e && typeof e.trace_id === 'string') : []
   }
+  data.assumptions = Array.isArray(data.assumptions) ? data.assumptions.filter((a: unknown) => typeof a === 'string') : []
   // Results from before requirements have none.
   data.requirements = Array.isArray(data.requirements)
     ? data.requirements.filter((r: any) => r && typeof r.id === 'string' && typeof r.status === 'string').map((r: any) => ({
@@ -252,7 +253,7 @@ export function exportHtml (ev: QualityEvaluation): string {
   const body = `<h1>Quality gate: ${e(gateLabel(ev.gate))}</h1>
 <p>Run <code>${e(ev.run)}</code>, ${e(nsToIso(ev.time_from))} to ${e(nsToIso(ev.time_to))}${hasBaseline ? `; baseline <code>${e(ev.baseline)}</code>, ${e(nsToIso(ev.baseline_time_from))} to ${e(nsToIso(ev.baseline_time_to))}` : ''}. ${e(ev.contract)}, evaluated ${e(ev.evaluated_at)}.</p>${sourceText(ev.source) ? `\n<p>${e(sourceText(ev.source))}</p>` : ''}${recorded}${reqTable}
 <table><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>${hasBaseline ? '<th>Baseline</th>' : ''}<th>Executions</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table>
-<p>${e(ev.method)}. Statuses describe this run only: a pass means "not observed in this run", not a guarantee; a missing measurement is never a pass.</p>`
+<p>${e(ev.method)}. Statuses describe this run only: a pass means "not observed in this run", not a guarantee; a missing measurement is never a pass.</p>${(ev.assumptions ?? []).length ? '\n<ul>' + (ev.assumptions ?? []).map((a) => `<li>${e(a)}</li>`).join('') + '</ul>' : ''}`
   return htmlPage('Quality gate: ' + gateLabel(ev.gate), body)
 }
 

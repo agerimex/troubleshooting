@@ -215,16 +215,25 @@ func TestQualityRecordSnapshots(t *testing.T) {
 func TestQualityEvaluationID(t *testing.T) {
 	req := requirementsRequest(t, requirementsYAML)
 	req.Source = &QualitySource{Commit: "abc", CIRun: "https://ci/1/attempts/1"}
-	a := qualityEvaluationID(req, "sha")
-	if !ValidQualityEvaluationID(a) || a != qualityEvaluationID(req, "sha") {
+	a := qualityEvaluationID(req, "sha", "")
+	if !ValidQualityEvaluationID(a) || a != qualityEvaluationID(req, "sha", "") {
 		t.Fatalf("id %q is not stable", a)
 	}
 	req.Source.CIRun = "https://ci/1/attempts/2"
-	if qualityEvaluationID(req, "sha") == a {
+	if qualityEvaluationID(req, "sha", "") == a {
 		t.Error("a new CI attempt must be a new record")
 	}
-	if qualityEvaluationID(req, "other") == qualityEvaluationID(req, "sha") {
+	if qualityEvaluationID(req, "other", "") == qualityEvaluationID(req, "sha", "") {
 		t.Error("other rules must be a new record")
+	}
+	// The id of a record never changes between versions, or a retry after an
+	// upgrade would record twice: this literal is the id stage 5 recorded.
+	pinned := QualityRequest{Rules: QualityRules{Project: "p"}, Run: "r", TimeFrom: "1", TimeTo: "2", Source: &QualitySource{Commit: "c"}}
+	if id := qualityEvaluationID(pinned, "s", ""); id != "b6c65631a52ed919c665fe66" {
+		t.Errorf("the id format changed: %s", id)
+	}
+	if qualityEvaluationID(pinned, "s", "123") == qualityEvaluationID(pinned, "s", "") {
+		t.Error("a re-evaluation must be a new record")
 	}
 }
 

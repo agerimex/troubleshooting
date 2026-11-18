@@ -247,7 +247,8 @@ func addSnapshots(res *QualityResult, run runSpans) {
 	for i := range res.Checks {
 		for j := range res.Checks[i].Evidence {
 			e := &res.Checks[i].Evidence[j]
-			if snap, ok := made[e.TraceID]; ok {
+			key := res.Checks[i].Type + ":" + e.TraceID + ":" + e.SpanID
+			if snap, ok := made[key]; ok {
 				e.Snapshot = snap
 				continue
 			}
@@ -261,11 +262,24 @@ func addSnapshots(res *QualityResult, run runSpans) {
 				}
 				return spans[a].SpanID < spans[b].SpanID
 			})
-			snap := &QualitySnapshot{Truncated: len(spans) > maxSnapshotSpans}
+			ids := make([]string, len(spans))
+			parents := make([]string, len(spans))
 			for k, s := range spans {
-				if k == maxSnapshotSpans {
-					break
+				ids[k], parents[k] = s.SpanID, s.Parent
+			}
+			// A db_calls counterexample is its database calls: they are kept first.
+			focus := []string{e.SpanID}
+			if res.Checks[i].Type == CheckDBCalls {
+				for _, s := range spans {
+					if s.DB && s.Kind == "client" {
+						focus = append(focus, s.SpanID)
+					}
 				}
+			}
+			keep, truncated := SnapshotSelection(ids, parents, focus, maxSnapshotSpans)
+			snap := &QualitySnapshot{Truncated: truncated}
+			for _, k := range keep {
+				s := spans[k]
 				sp := QualitySnapSpan{SpanID: s.SpanID, ParentID: s.Parent, Service: s.Service, Name: s.Name, Kind: s.Kind,
 					Start: num(s.Start), Duration: s.Duration, Status: snapStatus[s.Status]}
 				if s.Kind == "client" {
@@ -279,8 +293,82 @@ func addSnapshots(res *QualityResult, run runSpans) {
 				}
 				snap.Spans = append(snap.Spans, sp)
 			}
-			made[e.TraceID] = snap
+			made[key] = snap
 			e.Snapshot = snap
 		}
 	}
+}
+
+// SnapshotSelection picks at most limit spans of one trace for a snapshot,
+// so the counterexample survives in a large trace: first each focus span
+// (the evidence span, then the spans that make the counterexample, e.g. the
+// database calls of a db_calls check) with its ancestors, then the spans
+// below the first focus, then the rest; each group in the given order (start
+// order). It returns the chosen indexes in that order and whether spans were
+// left out. troubleshooting-check's snapshots use the same rule.
+func SnapshotSelection(ids, parents, focus []string, limit int) ([]int, bool) {
+	index := map[string]int{}
+	children := map[string][]int{}
+	for i, id := range ids {
+		if _, ok := index[id]; !ok {
+			index[id] = i
+		}
+		children[parents[i]] = append(children[parents[i]], i)
+	}
+	chosen := make([]bool, len(ids))
+	n := 0
+	take := func(i int) {
+		if !chosen[i] && n < limit {
+			chosen[i] = true
+			n++
+		}
+	}
+	for _, id := range focus {
+		f, ok := index[id]
+		if !ok {
+			continue
+		}
+		// The path from the focus up to the root, the focus first.
+		for i, seen := f, map[int]bool{}; !seen[i]; {
+			seen[i] = true
+			take(i)
+			p, ok := index[parents[i]]
+			if !ok {
+				break
+			}
+			i = p
+		}
+	}
+	if len(focus) > 0 {
+		if f, ok := index[focus[0]]; ok {
+			// Below the evidence span: its whole subtree, in start order.
+			below := make([]bool, len(ids))
+			stack := []int{f}
+			for len(stack) > 0 {
+				i := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				for _, c := range children[ids[i]] {
+					if !below[c] && c != f {
+						below[c] = true
+						stack = append(stack, c)
+					}
+				}
+			}
+			for i := range ids {
+				if below[i] {
+					take(i)
+				}
+			}
+		}
+	}
+	for i := range ids {
+		take(i)
+	}
+	out := make([]int, 0, n)
+	for i := range ids {
+		if chosen[i] {
+			out = append(out, i)
+		}
+	}
+	return out, len(ids) > limit
 }

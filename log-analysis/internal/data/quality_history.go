@@ -57,15 +57,21 @@ type QualityEvaluationSummary struct {
 
 // qualityEvaluationID is the same for the same evaluation inputs (run,
 // windows, rules, what was tested), so a retried request records once. A new
-// CI attempt names a new CI run, so it is a new record.
-func qualityEvaluationID(req QualityRequest, rulesSHA string) string {
+// CI attempt names a new CI run, so it is a new record; reevaluated (the
+// evaluation time of a deliberate re-evaluation, else "") makes one too.
+func qualityEvaluationID(req QualityRequest, rulesSHA, reevaluated string) string {
 	h := sha256.New()
 	src := QualitySource{}
 	if req.Source != nil {
 		src = *req.Source
 	}
-	for _, v := range []string{req.Rules.Project, req.Run, req.TimeFrom, req.TimeTo, req.Baseline, req.BaselineFrom, req.BaselineTo,
-		rulesSHA, src.Commit, src.PRHead, src.Ref, src.CIRun, src.RulesRef} {
+	parts := []string{req.Rules.Project, req.Run, req.TimeFrom, req.TimeTo, req.Baseline, req.BaselineFrom, req.BaselineTo,
+		rulesSHA, src.Commit, src.PRHead, src.Ref, src.CIRun, src.RulesRef}
+	if reevaluated != "" {
+		// Only then: ids recorded before re-evaluations existed stay the same.
+		parts = append(parts, reevaluated)
+	}
+	for _, v := range parts {
 		h.Write([]byte(v))
 		h.Write([]byte{0})
 	}
@@ -92,38 +98,75 @@ func summaryOf(res QualityResult) QualityEvaluationSummary {
 	return s
 }
 
+// qualityStore is where recorded evaluations live (replaceable in tests).
+type qualityStore interface {
+	// lookup returns the recorded body of an evaluation, found false if none.
+	lookup(ctx context.Context, project, id string) (body string, found bool, err error)
+	insert(ctx context.Context, row []any) error
+}
+
+type clickhouseQualityStore struct{}
+
+func (clickhouseQualityStore) lookup(ctx context.Context, project, id string) (string, bool, error) {
+	var body string
+	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body" FROM quality_evaluations WHERE "Project" = {project:String} AND "Id" = {id:String} ORDER BY "RecordedAt" LIMIT 1`,
+		clickhouse.Named("project", project), clickhouse.Named("id", id)).Scan(&body)
+	if errors.Is(err, errNoRows) {
+		return "", false, nil
+	}
+	return body, err == nil, err
+}
+
+func (clickhouseQualityStore) insert(ctx context.Context, row []any) error {
+	return insertQualityEvaluation(ctx, row)
+}
+
 // RecordQuality stores an evaluation of a validated request with record. A
 // failure is reported in res.RecordError: the result itself stays valid.
 func RecordQuality(ctx context.Context, req QualityRequest, res *QualityResult) {
+	recordQuality(ctx, clickhouseQualityStore{}, req, res, clock.Now().UTC())
+}
+
+// recordQuality: an evaluation already recorded under the same id (a retried
+// request) is answered with that record, exactly as recorded, never with the
+// result just computed: one id has one verdict. A deliberate re-evaluation
+// (reevaluate) gets an id of its own.
+func recordQuality(ctx context.Context, store qualityStore, req QualityRequest, res *QualityResult, now time.Time) {
 	sum := sha256.Sum256([]byte(req.rulesText))
 	sha := hex.EncodeToString(sum[:])
+	reevaluated := ""
+	if req.Reevaluate {
+		reevaluated = num(now.UnixNano())
+	}
+	id := qualityEvaluationID(req, sha, reevaluated)
+	body, found, err := store.lookup(ctx, res.Project, id)
+	if err != nil {
+		res.RecordError = "the evaluation was not recorded: " + err.Error()
+		return
+	}
+	if found {
+		var stored QualityResult
+		if err := json.Unmarshal([]byte(body), &stored); err != nil {
+			res.RecordError = "the evaluation " + id + " is recorded, but its record can't be read: " + err.Error()
+			return
+		}
+		*res = stored
+		res.RecordedBefore = true
+		return
+	}
 	if res.Source == nil {
 		res.Source = &QualitySource{}
 	}
 	res.Source.RulesSHA256 = sha // of the text this server evaluated
-	res.ID = qualityEvaluationID(req, sha)
-	now := clock.Now().UTC()
-	var existing int64
-	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "RecordedAt" FROM quality_evaluations WHERE "Project" = {project:String} AND "Id" = {id:String} LIMIT 1`,
-		clickhouse.Named("project", res.Project), clickhouse.Named("id", res.ID)).Scan(&existing)
-	switch {
-	case err == nil:
-		// Already recorded (a retried request): the first record is kept.
-		res.RecordedAt = time.Unix(0, existing).UTC().Format(time.RFC3339Nano)
-		return
-	case !errors.Is(err, errNoRows):
-		res.ID, res.RecordError = "", "the evaluation was not recorded: "+err.Error()
-		return
-	}
-	res.RecordedAt = now.Format(time.RFC3339Nano)
-	body, _ := json.Marshal(res)
+	res.ID, res.RecordedAt, res.Reevaluated = id, now.Format(time.RFC3339Nano), req.Reevaluate
+	raw, _ := json.Marshal(res)
 	summary, _ := json.Marshal(summaryOf(*res))
 	// A batch sends the values as native columns: the rules text has newlines,
 	// which a {name:String} query parameter can't carry.
-	err = insertQualityEvaluation(ctx, []any{res.ID, res.Project, now.UnixNano(), res.Run, res.Source.Ref, res.Source.Commit,
-		res.Gate, sha, req.rulesText, string(summary), string(body)})
+	err = store.insert(ctx, []any{res.ID, res.Project, now.UnixNano(), res.Run, res.Source.Ref, res.Source.Commit,
+		res.Gate, sha, req.rulesText, string(summary), string(raw)})
 	if err != nil {
-		res.ID, res.RecordedAt, res.RecordError = "", "", "the evaluation was not recorded: "+err.Error()
+		res.ID, res.RecordedAt, res.Reevaluated, res.RecordError = "", "", false, "the evaluation was not recorded: "+err.Error()
 	}
 }
 

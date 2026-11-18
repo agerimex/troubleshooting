@@ -358,7 +358,7 @@ func TestSnapshotAtQueryLimit(t *testing.T) {
 		io.WriteString(w, `{"data":{"Report":{"spans":{"status":"limit","error":"max_rows_to_read","records":[]}}}}`)
 	}))
 	defer s.Close()
-	snap := readSnapshot(options{url: s.URL, timeout: time.Second}, "abc", "1", "2")
+	snap := snapshotFor(readTrace(options{url: s.URL, timeout: time.Second}, "abc", "1", "2"), "", false)
 	if snap.Error != "query limit: max_rows_to_read" || len(snap.Spans) != 0 {
 		t.Errorf("snapshot at a query limit: %+v", snap)
 	}

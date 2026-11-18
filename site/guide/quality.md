@@ -25,7 +25,7 @@ Keep a `quality.yaml` next to the code:
 ```yaml
 version: 1
 run:                         # optional: what the test run declares
-  executions: 200            # each checked entry runs this often: fewer means lost spans
+  executions: 200            # each checked entry runs this often: fewer means lost executions
 entry:                       # the operation an execution starts with
   service: recording-api
   operation: start_session
@@ -40,6 +40,7 @@ checks:
     type: db_calls
     max_per_execution: 3
     target_per_execution: 2  # optional, advisory
+    min_per_execution: 2     # optional: fewer means its database spans are missing
   - id: no-directory
     type: forbidden_call
     to: directory-api
@@ -49,7 +50,7 @@ checks:
 | Check | Measures | Passes when |
 | --- | --- | --- |
 | `latency` | The percentile of the entry spans’ own durations (exact nearest rank) | The value is at most `max_ms` (equal passes), over at least `min_executions` (default 20), and every execution ended (an execution without a valid duration makes a pass “not enough data”) |
-| `db_calls` | Client spans with `db.system` (or `db.system.name`) per execution | **Every** execution has at most `max_per_execution`, not on average; a run without any database call is “not enough data” unless the limit is 0 |
+| `db_calls` | Client spans with `db.system` (or `db.system.name`) per execution | **Every** execution has at most `max_per_execution`, not on average; a run without any database call is “not enough data” unless the limit is 0; with `min_per_execution`, so is an execution with fewer calls (its database spans are missing) |
 | `forbidden_call` | A span of service `to` called from another service, or a client span naming it in `peer.service` / `server.address` | No execution calls it: “not observed in this run” |
 
 A check can have its own `entry`, and `advisory: true` shows it without letting it decide. Unknown and duplicate keys are errors, and so is a field of another check type (`max_ms` on a `db_calls` check), so a misspelled or misplaced limit is never silently ignored. SQL text and logs are never parsed.
@@ -175,12 +176,12 @@ A requirement's status comes from its own checks, in the same run:
 
 The gate itself is still decided by the checks. The CLI, the job summary, the pull request comment and the HTML report list the requirements above the checks.
 
-**Record** an evaluation to give each requirement a history: `troubleshooting-check --record`, or the Action's `record` input, which is on for **push** events by default (so the history follows `main` and your tags, not every pull request push). Troubleshooting then keeps the result exactly as it was, the rules text it used with its sha256, the tested commit and CI run, and a snapshot of every evidence execution, so a failure from months ago still shows what happened after its spans expired. A retried CI step records once; a new attempt is a new record. Recording needs a Troubleshooting that outlives the job, not `quality-check/stack`.
+**Record** an evaluation to give each requirement a history: `troubleshooting-check --record`, or the Action's `record` input, which is on for **push** events by default (so the history follows `main` and your tags, not every pull request push). Troubleshooting then keeps the result exactly as it was, the rules text it used with its sha256, the tested commit and CI run, and a snapshot of every evidence execution, so a failure from months ago still shows what happened after its spans expired. A retried step is answered with its first record, exactly as recorded (the CLI says “Already recorded”), so one evaluation id never has two verdicts; a new CI attempt, or `--reevaluate`, is a new record. Recording needs a Troubleshooting that outlives the job, not `quality-check/stack`.
 
 On the **Quality** page, **Requirements** shows a project's catalogue: every requirement of the latest recorded evaluation with its owner and reason, its checks, since when its status holds (“Violated since commit 9be31d07a4c2 (2 evaluations); met before.”) and its history, oldest on the left. A cell opens that evaluation; a cell is outlined where the rules changed. **History** lists every recorded evaluation, and **Copy link** on an opened one gives a link that reopens it.
 
 ![Requirements on the Quality page](/landing/quality-requirements.webp)
-*Six recorded evaluations of `main`: the regression violated both requirements, a run with too few executions couldn't decide REQ-START, the fix met them again. REQ-OUTAGE has no check yet.*
+*Six recorded evaluations of `main`: the regression violated both requirements, a run with too few executions couldn't decide REQ-START, the next commits passed their checks again. REQ-OUTAGE has no check yet.*
 
 ## How to read a result
 
@@ -188,12 +189,13 @@ On the **Quality** page, **Requirements** shows a project's catalogue: every req
 | --- | --- |
 | Pass | The run kept the limit |
 | Fail | The run broke the limit; the evidence names an execution that did |
-| Not enough data | No executions, fewer than needed or than `run.executions` declares, incomplete executions (a span below the entry names a parent that was not recorded, or the execution runs more than 5 minutes past the window), spans outside retention, or a query limit. Never a pass |
+| Not enough data | No executions, fewer than needed or than `run.executions` declares, incomplete executions (a span below the entry names a parent that was not recorded, a span started more child spans than were recorded, or the execution runs more than 5 minutes past the window), spans outside retention, or a query limit. Never a pass |
 
 - **Gate**: any failed blocking check → *failed*; otherwise any check without enough data → *unresolved*; otherwise *passed*.
 - **Targets** are *met* or *open* and never change a status. **Advisory** checks are shown and never decide.
 - **The baseline** is evaluated with the same rules and shown next to each value; it never changes a status. A pass is not “every number improved”.
 - A pass describes this run only. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged.
+- **A pass holds for the recorded spans.** It assumes every call is instrumented, not sampled out and exported before the check. Lost executions (`run.executions`), spans naming a parent that was never recorded and executions that run past the window are caught. A span that started more children than were recorded is caught only when the sender records child counts: `log-sender` does, plain OpenTelemetry (OTLP) doesn’t carry them, so there a child span lost without any trace of it can’t be seen. Every result lists these assumptions, adapted to its data.
 - Each span counts once, so retries and replays of the same spans never change a number.
 
 Limits: a window is at most 24 hours and within raw span retention; at most 50 checks and 200 000 spans per run (more is “not enough data”, never a partial pass).

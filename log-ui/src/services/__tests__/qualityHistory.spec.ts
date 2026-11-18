@@ -93,3 +93,13 @@ describe('requirements and history', () => {
     expect(exportHtml(candidate())).not.toContain('Requirements')
   })
 })
+
+describe('assumptions (stage 6)', () => {
+  it('keeps the assumptions of a result and exports them', () => {
+    const ev = { ...candidate(), assumptions: ['Verdicts hold for the recorded spans.', 7, 'Lost <child> spans can\'t be detected.'] }
+    const [, parsed] = parseResult(JSON.stringify(ev))
+    expect(parsed?.assumptions).toEqual(['Verdicts hold for the recorded spans.', 'Lost <child> spans can\'t be detected.'])
+    expect(exportHtml(parsed!)).toContain('<li>Lost &lt;child&gt; spans can&#39;t be detected.</li>')
+    expect(parseResult(JSON.stringify(candidate()))[1]?.assumptions).toEqual([])
+  })
+})

@@ -2,7 +2,7 @@
 version: 1
 
 # Optional: what the test run declares. The tests run each checked entry this
-# often; fewer recorded executions means lost spans (unresolved, not a pass).
+# often; fewer recorded executions means lost ones (unresolved, not a pass).
 run:
   executions: 200
 

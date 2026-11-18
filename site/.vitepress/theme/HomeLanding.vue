@@ -249,7 +249,7 @@ const issueUrl = repo + '/issues/new?title=' + encodeURIComponent('Quality check
         </div>
         <div class="qg-step">
           <h3><span>2</span> Keep the rules in the repository</h3>
-          <p>A strict <code>quality.yaml</code>: a misspelled limit is an error, never silently ignored. <code>run.executions</code> says how many executions the tests make, so lost spans can’t pass.</p>
+          <p>A strict <code>quality.yaml</code>: a misspelled limit is an error, never silently ignored. <code>run.executions</code> says how many executions the tests make, so lost executions can’t pass.</p>
           <div class="terminal card-dark"><pre class="pre-scroll" tabindex="0" aria-label="quality.yaml"><code>version: 1
 entry: {service: recording-api,
         operation: start_session}
@@ -289,10 +289,10 @@ checks:
           <h3>Not enough data is not a pass</h3>
           <ul class="next-list">
             <li><b>Lost executions</b> fewer executions than the rules declare: spans were not exported, not tagged or outside the window.</li>
-            <li><b>Incomplete executions</b> a span whose parent was never recorded, or an execution that runs past the spans read.</li>
+            <li><b>Incomplete executions</b> a span whose parent was never recorded, a span that started more children than were recorded (when the sender records child counts, as <code>log-sender</code> does), or an execution that runs past the spans read.</li>
             <li><b>Nothing to measure</b> no valid durations for a latency limit, no database call at all for a call budget, or spans already expired.</li>
           </ul>
-          <p class="qg-rules-note">Each of these leaves the gate unresolved, with the reason, and <code>fail-on: unresolved</code> fails the step.</p>
+          <p class="qg-rules-note">Each of these leaves the gate unresolved, with the reason, and <code>fail-on: unresolved</code> fails the step. A pass holds for the recorded spans: every result says which losses its data can show.</p>
         </div>
       </div>
 
@@ -407,7 +407,7 @@ checks:
           <p class="eyebrow"><span class="status-dot"></span> NEW · REQUIREMENTS &amp; HISTORY</p>
           <h2 id="req-title">Requirements,<br><em>and their history.</em></h2>
           <p>Name what must stay true, with an owner and a reason, next to the checks that enforce it in <code>quality.yaml</code>. A requirement is met only when its own checks pass; one without a check is listed and never met.</p>
-          <p>Record each run on <code>main</code> and every requirement gets a history: when it started failing, which commit fixed it, and the evidence of every failure, kept after its spans expire.</p>
+          <p>Record each run on <code>main</code> and every requirement gets a history: when it started failing, which commit first passed its checks again, and the evidence of every failure, kept after its spans expire.</p>
           <div class="start-links">
             <a class="text-link" :href="link('/guide/quality#requirements-and-their-history')">Requirements in the handbook <span aria-hidden="true">→</span></a>
             <a class="text-link next-cta" :href="issueUrl">Bring a real regression <span class="external-arrow" aria-hidden="true"></span></a>
@@ -447,7 +447,7 @@ checks:
       <h2 id="faq-title">Before you start</h2>
       <div>
         <details><summary>What does the quality gate need?</summary><p>Spans of your test run tagged with the attribute <code>troubleshooting.run</code> (one environment variable for an OpenTelemetry SDK), a <code>quality.yaml</code> in your repository, and a Troubleshooting the CI job can reach: your own, or one started inside the job with <code>quality-check/stack</code>. Database calls are counted from client spans with <code>db.system</code>; SQL text and logs are never parsed. <a :href="link('/guide/quality')">The handbook page</a> has the details.</p></details>
-        <details><summary>Is a pass a guarantee?</summary><p>No. A pass describes the executions of this run: a forbidden call that was not observed is reported as “not observed in this run”. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged.</p></details>
+        <details><summary>Is a pass a guarantee?</summary><p>No. A pass describes the executions of this run: a forbidden call that was not observed is reported as “not observed in this run”. What the tests didn’t execute, or what wasn’t instrumented, can’t be judged. A verdict assumes the spans were not sampled out and were exported before the check: lost executions, spans naming a missing parent and, with child counts from <code>log-sender</code>, lost child spans are caught as not enough data; a child span lost without any trace of it can’t be seen in plain OpenTelemetry data, and the result says so.</p></details>
         <details><summary>Where does my telemetry go?</summary><p>The stack runs on your infrastructure. You operate the receiver and its ClickHouse storage. Review receiver authentication and retention before using it outside a development environment.</p></details>
         <details><summary>What instrumentation do I need?</summary><p>OpenTelemetry spans from any SDK or Collector over OTLP/gRPC, or the small Go library <code>log-sender</code> for spans plus logs that carry their trace and span. <a :href="link('/guide/getting-started')">Getting started</a> shows both.</p></details>
         <details><summary>Does the sequence view show my entire architecture?</summary><p>It shows recorded service interactions for observed executions. Missing instrumentation, sampling and unexecuted paths limit what can be inferred. Execution shapes group what was observed; they are not a complete static dependency graph.</p></details>

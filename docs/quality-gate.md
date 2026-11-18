@@ -95,7 +95,9 @@ lifecycle, load and outage experiments, and an enforced CI trust model (see
    replace `--since`; `--baseline-since`/`--baseline-from`/`--baseline-to` give
    the baseline its own window (default: the run's). `--record` keeps the
    evaluation in Troubleshooting as the project's history and prints its link
-   (see "Requirements and history"). With Caddy basic auth set
+   (see "Requirements and history"); an evaluation recorded before is shown
+   as that record ("Already recorded"), and `--reevaluate` records a new one.
+   The text report ends with the result's assumptions. With Caddy basic auth set
    `TROUBLESHOOTING_BASIC_AUTH=user:password`.
 
 Output (the reference fixture's candidate):
@@ -311,9 +313,12 @@ the API stores the evaluation as it answered it, under the rules' project, in
 
 The answer then has `id` (24 hex digits) and `recorded_at`. A recorded
 evaluation is never changed. The id is derived from the inputs (project, run,
-windows, rules, commit, ref, CI run), so a retried request records once and
-answers with the first record's id and time; a new CI attempt is a new CI run
-and a new record. A failed write leaves the result valid and says so in
+windows, rules, commit, ref, CI run), so a retried request records once, and
+it is answered with **that record, exactly as recorded** (`recorded_before:
+true`), never with the result just computed: one id has one verdict, even if
+late spans arrived meanwhile. A new CI attempt is a new CI run and a new
+record; `reevaluate: true` (CLI `--reevaluate`) records a deliberate
+re-evaluation of the same inputs under an id of its own (`reevaluated: true`). A failed write leaves the result valid and says so in
 `record_error` (the CLI prints a warning; the exit code still follows the
 gate).
 
@@ -344,8 +349,11 @@ still shown. Evidence: the slowest execution.
 executions, i.e. "at most N per execution" holds for every execution, not on
 average; the result also lists how many executions exceed the limit. Details
 name the operations of the worst execution with their counts. SQL text and
-logs are never parsed. If no database call was recorded at all, the check
-passes with a note to verify the instrumentation.
+logs are never parsed. A run without any database call is `no_database_calls`
+(below). `min_per_execution` (optional, at most the limit) is an
+instrumentation guard: an execution with fewer recorded calls is missing its
+database spans, so a pass is `missing_database_calls` (evidence: the
+execution with the fewest); a failure stands.
 
 **forbidden_call**: an execution calls `to` when a span of service `to` has a
 parent of another service, or a CLIENT span names `to` in `peer.service` (else
@@ -357,7 +365,7 @@ never happen. Whether the call was synchronous is not judged.
 
 **Statuses.** A check is `pass`, `fail` or `insufficient` (with a reason:
 `no_executions`, `too_few_executions`, `missing_executions`, `incomplete_executions`,
-`invalid_durations`, `no_database_calls`, `outside_retention`, `too_many_spans`,
+`invalid_durations`, `no_database_calls`, `missing_database_calls`, `outside_retention`, `too_many_spans`,
 `query_limit`, `query_unavailable`, `query_error`). Targets are `met` or
 `open` and never change a status.
 
@@ -376,10 +384,19 @@ only stands on data that can carry it:
 - Executions without a valid duration (the entry never ended, or ended before
   it started) are often the slowest ones, so a latency pass with any of them
   is `invalid_durations`; a failure measured on the others stands.
-- A branch that was never recorded at all (no span names its missing parent)
-  can't be detected from the spans. Declaring `run.executions` and keeping the
-  instrumentation of database calls and service calls in the tests catches the
-  common cases; the result never claims more than "not observed in this run".
+- A child span lost without any trace of it (no recorded span names it as
+  parent) can't be seen in plain OpenTelemetry data. A sender that records how
+  many children a span started (`log-sender` does; OTLP doesn't carry it)
+  makes it visible: such an execution is incomplete (below). Otherwise
+  `min_per_execution` catches executions without their database calls, but
+  not a partial loss.
+
+**Assumptions.** Every result lists in `assumptions` what its verdicts rest
+on: they hold for the recorded spans, with every call assumed to be
+instrumented, not sampled out and exported before the check; which losses are
+caught as not enough data; and whether lost child spans can be seen in this
+run's data (some span records a child count) or not. The CLI's reports, the PR
+comment and the Quality page show them.
 
 **Incomplete executions.** An execution is incomplete when a span of its
 trace names a parent that was not recorded (lost, sampled out, not
@@ -389,7 +406,11 @@ missing parent (e.g. an uninstrumented gateway above it) doesn't count: it
 hides nothing below the entry, and neither do the entry's siblings under that
 same missing parent (the gateway's other calls). An execution is also
 incomplete when it runs past the spans read (the window's end plus 5
-minutes): calls at its end were not read; end the window later.
+minutes): calls at its end were not read; end the window later. And an
+execution is incomplete when one of its spans recorded that it started more
+child spans in its own process than were recorded below it with the same
+service (the sender's child count, e.g. `log-sender`'s; a remote child in
+another service isn't counted by it); evidence: that span.
 `db_calls` and `forbidden_call` can't pass with incomplete executions: they are `insufficient` with reason
 `incomplete_executions`, the first incomplete execution as evidence (its
 orphaned span selected, or the entry for one that runs past the spans read)
@@ -398,8 +419,12 @@ the calls it counted were recorded. Latency is the entry's own duration and
 is unaffected.
 
 **Evidence snapshots.** With `--json` or `--html` the CLI reads each evidence
-trace once (`trace-report`, at most 200 spans) and keeps it as `snapshot` in
-the result; `report.html` shows it as a static timeline (start offset,
+trace once (`trace-report`, up to 1 000 spans) and keeps at most 200 of them as
+`snapshot` in the result (a recorded evaluation gets the API's, from the spans
+it read). The counterexample is kept first: the evidence span with its
+ancestors, for a `db_calls` check the execution's database calls, then the
+spans below the evidence span, then the rest in start order
+(`SnapshotSelection`), so a large trace can't push the offending span out; `report.html` shows it as a static timeline (start offset,
 duration bar, nesting, the evidence span highlighted). Raw spans expire, so a
 link in an old pull request stops working; the snapshot still shows what the
 execution did. A failed read (including a query limit, which returns no
@@ -443,7 +468,9 @@ can't be read is a 200 whose checks are `insufficient`, so the gate is
 unresolved, never passed. Without `record` nothing is stored, and the same
 request on the same data gives the same answer. With `record: true` (and
 `source`, optional) see "Requirements and history" above; the evaluation then
-also has `id`, `recorded_at` or `record_error`, and evidence `snapshot`s.
+also has `id`, `recorded_at` or `record_error`, `recorded_before` or
+`reevaluated`, and evidence `snapshot`s (`reevaluate: true` needs `record`).
+Every evaluation has `assumptions` (see "Assumptions" above).
 
 The history (GET, newest first):
 

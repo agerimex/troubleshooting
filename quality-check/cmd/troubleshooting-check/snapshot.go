@@ -52,12 +52,26 @@ type reportSpan struct {
 // snapshotReaders bounds the trace reports read at the same time.
 const snapshotReaders = 4
 
+// readSpanLimit is how many spans of an evidence trace are read to choose
+// the snapshot's maxSnapshotSpans from (the trace report's maximum).
+const readSpanLimit = 1000
+
+// traceRead is the spans of one evidence trace and window as read, in start
+// order; db marks the database calls (CLIENT spans with db.system).
+type traceRead struct {
+	spans     []SnapSpan
+	db        []bool
+	truncated bool
+	err       string
+}
+
 // addSnapshots reads the spans of every evidence that has no snapshot yet (a
 // recorded evaluation comes with the API's): one request per distinct trace
-// and window, up to snapshotReaders at a time.
+// and window, up to snapshotReaders at a time. Each evidence then keeps its
+// counterexample first (snapshotFor).
 func addSnapshots(o options, ev *Evaluation) {
 	type window struct{ trace, from, to string }
-	snaps := map[window]*Snapshot{}
+	reads := map[window]*traceRead{}
 	var order []window
 	for _, c := range ev.Checks {
 		for _, e := range c.Evidence {
@@ -65,13 +79,13 @@ func addSnapshots(o options, ev *Evaluation) {
 				continue
 			}
 			w := window{e.TraceID, e.TimeFrom, e.TimeTo}
-			if _, ok := snaps[w]; !ok {
-				snaps[w] = nil
+			if _, ok := reads[w]; !ok {
+				reads[w] = nil
 				order = append(order, w)
 			}
 		}
 	}
-	results := make([]*Snapshot, len(order))
+	results := make([]traceRead, len(order))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, snapshotReaders)
 	for i, w := range order {
@@ -80,28 +94,123 @@ func addSnapshots(o options, ev *Evaluation) {
 		go func(i int, w window) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i] = readSnapshot(o, w.trace, w.from, w.to)
+			results[i] = readTrace(o, w.trace, w.from, w.to)
 		}(i, w)
 	}
 	wg.Wait()
 	for i, w := range order {
-		snaps[w] = results[i]
+		reads[w] = &results[i]
 	}
 	for i := range ev.Checks {
 		for j := range ev.Checks[i].Evidence {
 			e := &ev.Checks[i].Evidence[j]
 			if e.Snapshot == nil {
-				e.Snapshot = snaps[window{e.TraceID, e.TimeFrom, e.TimeTo}]
+				if t := reads[window{e.TraceID, e.TimeFrom, e.TimeTo}]; t != nil {
+					e.Snapshot = snapshotFor(*t, e.SpanID, ev.Checks[i].Type == "db_calls")
+				}
 			}
 		}
 	}
 }
 
-func readSnapshot(o options, trace, from, to string) *Snapshot {
+// snapshotFor keeps at most maxSnapshotSpans of a read trace: the evidence
+// span with its ancestors, for a db_calls check its database calls, then the
+// spans below the evidence span, then the rest (the API's rule,
+// SnapshotSelection in log-analysis).
+func snapshotFor(t traceRead, focusSpan string, dbCheck bool) *Snapshot {
+	if t.err != "" {
+		return &Snapshot{Error: t.err}
+	}
+	ids := make([]string, len(t.spans))
+	parents := make([]string, len(t.spans))
+	focus := []string{focusSpan}
+	for i, s := range t.spans {
+		ids[i], parents[i] = s.SpanID, s.ParentID
+		if dbCheck && t.db[i] {
+			focus = append(focus, s.SpanID)
+		}
+	}
+	keep, cut := snapshotSelection(ids, parents, focus, maxSnapshotSpans)
+	s := &Snapshot{Truncated: t.truncated || cut}
+	for _, i := range keep {
+		s.Spans = append(s.Spans, t.spans[i])
+	}
+	return s
+}
+
+// snapshotSelection is log-analysis's SnapshotSelection (this module doesn't
+// depend on it): the chosen indexes in start order, and whether spans were
+// left out.
+func snapshotSelection(ids, parents, focus []string, limit int) ([]int, bool) {
+	index := map[string]int{}
+	children := map[string][]int{}
+	for i, id := range ids {
+		if _, ok := index[id]; !ok {
+			index[id] = i
+		}
+		children[parents[i]] = append(children[parents[i]], i)
+	}
+	chosen := make([]bool, len(ids))
+	n := 0
+	take := func(i int) {
+		if !chosen[i] && n < limit {
+			chosen[i] = true
+			n++
+		}
+	}
+	for _, id := range focus {
+		f, ok := index[id]
+		if !ok {
+			continue
+		}
+		for i, seen := f, map[int]bool{}; !seen[i]; {
+			seen[i] = true
+			take(i)
+			p, ok := index[parents[i]]
+			if !ok {
+				break
+			}
+			i = p
+		}
+	}
+	if len(focus) > 0 {
+		if f, ok := index[focus[0]]; ok {
+			below := make([]bool, len(ids))
+			stack := []int{f}
+			for len(stack) > 0 {
+				i := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				for _, c := range children[ids[i]] {
+					if !below[c] && c != f {
+						below[c] = true
+						stack = append(stack, c)
+					}
+				}
+			}
+			for i := range ids {
+				if below[i] {
+					take(i)
+				}
+			}
+		}
+	}
+	for i := range ids {
+		take(i)
+	}
+	out := make([]int, 0, n)
+	for i := range ids {
+		if chosen[i] {
+			out = append(out, i)
+		}
+	}
+	return out, len(ids) > limit
+}
+
+func readTrace(o options, trace, from, to string) traceRead {
 	status, raw, err := postJSON(o, "/api/v1/trace-report", map[string]any{"trace_id": trace, "time_from": from, "time_to": to,
-		"span_limit": maxSnapshotSpans, "sections": []string{"spans"}}, 16<<20)
+		"span_limit": readSpanLimit, "sections": []string{"spans"}}, 32<<20)
 	if err != nil {
-		return &Snapshot{Error: err.Error()}
+		return traceRead{err: err.Error()}
 	}
 	var out struct {
 		Error   bool   `json:"error"`
@@ -118,7 +227,7 @@ func readSnapshot(o options, trace, from, to string) *Snapshot {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || status != http.StatusOK || out.Error {
-		return &Snapshot{Error: fmt.Sprintf("HTTP %d %s", status, out.Message)}
+		return traceRead{err: fmt.Sprintf("HTTP %d %s", status, out.Message)}
 	}
 	// Only "ok" has records: "limit" means a query limit or the deadline was
 	// hit and nothing was returned (report contract), which must not read as
@@ -132,24 +241,25 @@ func readSnapshot(o options, trace, from, to string) *Snapshot {
 		if sec != nil && sec.Error != "" {
 			msg += ": " + sec.Error
 		}
-		return &Snapshot{Error: msg}
+		return traceRead{err: msg}
 	}
-	s := &Snapshot{Truncated: sec.Truncated || len(sec.Records) > maxSnapshotSpans}
-	for i, r := range sec.Records {
-		if i == maxSnapshotSpans {
-			break
-		}
+	t := traceRead{truncated: sec.Truncated}
+	for _, r := range sec.Records {
 		sp := SnapSpan{SpanID: r.SpanID, ParentID: r.Parent, Service: r.Service, Name: r.Name, Kind: r.Kind,
 			Start: r.Timestamp, Duration: r.Duration, Status: r.Status}
-		for _, t := range r.Tags {
-			if t["key"] == "peer.service" || t["key"] == "db.system" || t["key"] == "db.system.name" {
-				sp.Peer = t["value"]
-				break
+		db := false
+		for _, tag := range r.Tags {
+			if tag["key"] == "peer.service" || tag["key"] == "db.system" || tag["key"] == "db.system.name" {
+				if sp.Peer == "" {
+					sp.Peer = tag["value"]
+				}
+				db = db || tag["key"] != "peer.service"
 			}
 		}
-		s.Spans = append(s.Spans, sp)
+		t.spans = append(t.spans, sp)
+		t.db = append(t.db, db && r.Kind == "client")
 	}
-	return s
+	return t
 }
 
 // snapshotRows orders the spans as a tree (children under their parent, by

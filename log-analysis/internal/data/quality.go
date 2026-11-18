@@ -100,9 +100,12 @@ type QualityCheck struct {
 	MaxMs           *float64      `json:"max_ms,omitempty" yaml:"max_ms,omitempty"`
 	TargetMs        *float64      `json:"target_ms,omitempty" yaml:"target_ms,omitempty"`
 	MaxPerExecution *int          `json:"max_per_execution,omitempty" yaml:"max_per_execution,omitempty"`
-	TargetPer       *int          `json:"target_per_execution,omitempty" yaml:"target_per_execution,omitempty"`
-	From            string        `json:"from,omitempty" yaml:"from,omitempty"`
-	To              string        `json:"to,omitempty" yaml:"to,omitempty"`
+	// MinPerExecution (db_calls, optional) is an instrumentation guard: an
+	// execution with fewer recorded database calls is missing spans.
+	MinPerExecution *int   `json:"min_per_execution,omitempty" yaml:"min_per_execution,omitempty"`
+	TargetPer       *int   `json:"target_per_execution,omitempty" yaml:"target_per_execution,omitempty"`
+	From            string `json:"from,omitempty" yaml:"from,omitempty"`
+	To              string `json:"to,omitempty" yaml:"to,omitempty"`
 	// declared is run.executions when it set MinExecutions (not in JSON):
 	// fewer executions then mean lost executions, not a small run.
 	declared int
@@ -148,8 +151,11 @@ type QualityRequest struct {
 	BaselineTo   string `json:"baseline_time_to,omitempty"`
 	// Record stores the evaluation as the project's history (it needs
 	// rules_yaml, so the exact rules are kept); Source says what was tested.
-	Record bool           `json:"record,omitempty"`
-	Source *QualitySource `json:"source,omitempty"`
+	Record bool `json:"record,omitempty"`
+	// Reevaluate records a new evaluation even when the same inputs were
+	// recorded before (otherwise that record is the answer).
+	Reevaluate bool           `json:"reevaluate,omitempty"`
+	Source     *QualitySource `json:"source,omitempty"`
 	// rulesText is rules_yaml as sent, kept for the record.
 	rulesText string
 }
@@ -220,6 +226,9 @@ func (q *QualityRequest) Validate() error {
 			return err
 		}
 		q.Rules, q.rulesText, q.RulesYAML = rules, q.RulesYAML, ""
+	}
+	if q.Reevaluate && !q.Record {
+		return invalid("reevaluate needs record")
 	}
 	if q.Record && q.rulesText == "" {
 		return invalid("record needs rules_yaml: the exact rules are kept with the evaluation")
@@ -307,12 +316,12 @@ func normalizeEntry(e *QualityEntry) error {
 func foreignFields(c *QualityCheck) error {
 	set := map[string]bool{
 		"percentile": c.Percentile != 0, "max_ms": c.MaxMs != nil, "target_ms": c.TargetMs != nil,
-		"max_per_execution": c.MaxPerExecution != nil, "target_per_execution": c.TargetPer != nil,
+		"max_per_execution": c.MaxPerExecution != nil, "target_per_execution": c.TargetPer != nil, "min_per_execution": c.MinPerExecution != nil,
 		"from": c.From != "", "to": c.To != "",
 	}
 	own := map[string][]string{
 		CheckLatency:   {"percentile", "max_ms", "target_ms"},
-		CheckDBCalls:   {"max_per_execution", "target_per_execution"},
+		CheckDBCalls:   {"max_per_execution", "target_per_execution", "min_per_execution"},
 		CheckForbidden: {"from", "to"},
 	}[c.Type]
 	if own == nil {
@@ -382,6 +391,9 @@ func validateCheck(c *QualityCheck, entry *QualityEntry, declared int) error {
 		}
 		if c.TargetPer != nil && (*c.TargetPer < 0 || *c.TargetPer > *c.MaxPerExecution) {
 			return fmt.Errorf("target_per_execution must be between 0 and max_per_execution")
+		}
+		if c.MinPerExecution != nil && (*c.MinPerExecution < 0 || *c.MinPerExecution > *c.MaxPerExecution) {
+			return fmt.Errorf("min_per_execution must be between 0 and max_per_execution")
 		}
 	case CheckForbidden:
 		c.From, c.To = strings.TrimSpace(c.From), strings.TrimSpace(c.To)
@@ -461,6 +473,9 @@ type QualityResult struct {
 	EvaluatedAt  string               `json:"evaluated_at"`
 	// Project and Requirements: the requirements of the rules with a status
 	// from their checks (quality_requirements.go).
+	// Assumptions say what a verdict rests on: what the recorded spans can
+	// and can't show about lost spans.
+	Assumptions  []string                   `json:"assumptions"`
 	Project      string                     `json:"project"`
 	Requirements []QualityRequirementResult `json:"requirements"`
 	Source       *QualitySource             `json:"source,omitempty"`
@@ -469,6 +484,11 @@ type QualityResult struct {
 	ID          string `json:"id,omitempty"`
 	RecordedAt  string `json:"recorded_at,omitempty"`
 	RecordError string `json:"record_error,omitempty"`
+	// RecordedBefore: the same evaluation was recorded before (a retry), and
+	// this is that record, exactly as recorded. Reevaluated: recorded as a
+	// deliberate re-evaluation of inputs recorded before.
+	RecordedBefore bool `json:"recorded_before,omitempty"`
+	Reevaluated    bool `json:"reevaluated,omitempty"`
 }
 
 // qSpan is the part of a canonical span the evaluator needs.
@@ -482,6 +502,10 @@ type qSpan struct {
 	Run                     string
 	Status                  int8   // 0 unset, 1 error, 2 ok
 	PeerService, DBSystem   string // for snapshots
+	// Children is the number of child spans the span started in its own
+	// process, as recorded by the sender (log-sender); 0 when unknown (OTLP
+	// doesn't carry it).
+	Children int32
 }
 
 // runSpans is what was loaded for one run. Problem (a reason code) makes
@@ -504,6 +528,34 @@ type execution struct {
 	// window end plus qualityLookahead), so spans at its end were not read
 	// and the execution is incomplete.
 	PastRead bool
+	// Unrecorded is a span of the execution that started more child spans in
+	// its own process than were recorded (only known when the sender records
+	// child counts): children were lost. nil if there is none.
+	Unrecorded *qSpan
+}
+
+// unrecordedChildren returns the first span (in start order) of the
+// execution whose recorded child count is larger than the number of its
+// children of the same service that were recorded. A sender's child count
+// covers the children started in its own process, i.e. of the same service;
+// children in other services (remote calls) are not counted by it.
+func (ix spanIndex) unrecordedChildren(ex execution) *qSpan {
+	var first *qSpan
+	for _, s := range append([]*qSpan{ex.Entry}, ex.Subtree...) {
+		if s.Children <= 0 {
+			continue
+		}
+		local := int32(0)
+		for _, c := range ix.children[s.TraceID+":"+s.SpanID] {
+			if c.Service == s.Service {
+				local++
+			}
+		}
+		if local < s.Children && (first == nil || s.Start < first.Start) {
+			first = s
+		}
+	}
+	return first
 }
 
 type spanIndex struct {
@@ -585,6 +637,7 @@ func (ix spanIndex) executions(spans []qSpan, e QualityEntry, run string, from, 
 			}
 			return ex.Subtree[i].SpanID < ex.Subtree[j].SpanID
 		})
+		ex.Unrecorded = ix.unrecordedChildren(ex)
 		out = append(out, ex)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -644,27 +697,32 @@ func measure(c QualityCheck, exs []execution, ix spanIndex) QualityCheckResult {
 // missing part could hold calls. A failure stands, since the calls it counted
 // were recorded.
 func requireComplete(exs []execution, r *QualityCheckResult) {
-	missing, pastRead := 0, 0
+	missing, unrecorded, pastRead := 0, 0, 0
 	var first *execution
 	for i := range exs {
-		if exs[i].Missing == nil && !exs[i].PastRead {
-			continue
-		}
-		if exs[i].Missing != nil {
+		switch {
+		case exs[i].Missing != nil:
 			missing++
-		} else {
+		case exs[i].Unrecorded != nil:
+			unrecorded++
+		case exs[i].PastRead:
 			pastRead++
+		default:
+			continue
 		}
 		if first == nil {
 			first = &exs[i]
 		}
 	}
-	incomplete := missing + pastRead
+	incomplete := missing + unrecorded + pastRead
 	if incomplete == 0 {
 		return
 	}
 	if missing > 0 {
 		r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are incomplete: a span below the entry names a parent that was not recorded (lost, sampled out or not instrumented), so calls below it may be missing", missing, len(exs)))
+	}
+	if unrecorded > 0 {
+		r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are incomplete: a span started more child spans than were recorded (lost or not exported), so calls may be missing", unrecorded, len(exs)))
 	}
 	if pastRead > 0 {
 		r.Details = append(r.Details, fmt.Sprintf("%d of %d executions are incomplete: they run past the spans read (%s after the window's end), so calls at their end were not checked; end the window later", pastRead, len(exs), qualityLookahead))
@@ -674,11 +732,15 @@ func requireComplete(exs []execution, r *QualityCheckResult) {
 	}
 	r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "incomplete_executions", ""
 	r.Summary = fmt.Sprintf("%d of %d executions are incomplete, so the limit can't be shown to hold (%s)", incomplete, len(exs), r.Summary)
-	note := "incomplete execution: it runs past the spans read"
-	if first.Missing != nil {
+	span, note := first.Missing, "incomplete execution: it runs past the spans read"
+	switch {
+	case first.Missing != nil:
 		note = fmt.Sprintf("incomplete execution: %s names parent %s, which was not recorded", first.Missing.Name, first.Missing.Parent)
+	case first.Unrecorded != nil:
+		span = first.Unrecorded
+		note = fmt.Sprintf("incomplete execution: %s started %d child spans in its service, fewer were recorded", first.Unrecorded.Name, first.Unrecorded.Children)
 	}
-	r.Evidence = append([]QualityEvidence{evidenceOf(*first, first.Missing, note)}, r.Evidence...)
+	r.Evidence = append([]QualityEvidence{evidenceOf(*first, span, note)}, r.Evidence...)
 }
 
 func insufficientExecutions(c QualityCheck, r *QualityCheckResult, n int) bool {
@@ -847,6 +909,36 @@ func measureDBCalls(c QualityCheck, exs []execution, r *QualityCheckResult) {
 		r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "no_database_calls", ""
 		r.Summary = fmt.Sprintf("no database calls were recorded in %d executions: are they instrumented (CLIENT spans with db.system)? If %s really makes none, set max_per_execution: 0", len(exs), c.Entry.String())
 	}
+	requireMinCalls(c, exs, r)
+}
+
+// requireMinCalls: with min_per_execution, an execution with fewer recorded
+// database calls is missing spans, so a pass can't stand on it; a failure
+// stands, since the calls it counted were recorded.
+func requireMinCalls(c QualityCheck, exs []execution, r *QualityCheckResult) {
+	if c.MinPerExecution == nil || *c.MinPerExecution == 0 {
+		return
+	}
+	below, fewest, fewestN := 0, -1, 0
+	for i, ex := range exs {
+		n := len(dbCalls(ex))
+		if n < *c.MinPerExecution {
+			below++
+			if fewest < 0 || n < fewestN {
+				fewest, fewestN = i, n
+			}
+		}
+	}
+	if below == 0 {
+		return
+	}
+	r.Details = append(r.Details, fmt.Sprintf("%d of %d executions recorded fewer than %d database calls (min_per_execution): their database spans are missing", below, len(exs), *c.MinPerExecution))
+	if r.Status != CheckPass {
+		return
+	}
+	r.Status, r.Reason, r.TargetStatus = CheckInsufficient, "missing_database_calls", ""
+	r.Summary = fmt.Sprintf("%d of %d executions recorded fewer than %d database calls, so their calls can't be counted (%s)", below, len(exs), *c.MinPerExecution, r.Summary)
+	r.Evidence = append([]QualityEvidence{evidenceOf(exs[fewest], nil, fmt.Sprintf("execution with the fewest database calls: %d", fewestN))}, r.Evidence...)
 }
 
 // forbiddenCall finds the first call (in start order) from the execution to
@@ -975,6 +1067,7 @@ func buildQualityResult(req QualityRequest, run, baseline runSpans, now time.Tim
 		}
 	}
 	res.Gate = gateOf(res.Checks)
+	res.Assumptions = assumptionsOf(run)
 	res.Project = req.Rules.Project
 	res.Requirements = requirementResults(req.Rules.Requirements, res.Checks)
 	res.Source = req.Source
@@ -1004,7 +1097,7 @@ func qualityQuery(entries []QualityEntry, from, to int64) string {
 		if("SpanAttributes"['peer.service'] != '', "SpanAttributes"['peer.service'], "SpanAttributes"['server.address']) AS "Peer",
 		` + runAttr + ` AS "Run", "StatusCode",
 		"SpanAttributes"['peer.service'] AS "PeerService",
-		if("SpanAttributes"['db.system'] != '', "SpanAttributes"['db.system'], "SpanAttributes"['db.system.name']) AS "DBSystem"
+		if("SpanAttributes"['db.system'] != '', "SpanAttributes"['db.system'], "SpanAttributes"['db.system.name']) AS "DBSystem", "ChildSpanCount"
 	FROM otel_traces
 	WHERE "UnixTime" >= ` + num(from) + ` AND "UnixTime" < ` + num(to+int64(qualityLookahead)) + `
 	AND "TraceId" IN (SELECT DISTINCT "TraceId" FROM otel_traces
@@ -1044,7 +1137,7 @@ func loadRun(ctx context.Context, rules QualityRules, run string, from, to int64
 	var out runSpans
 	for rows.Next() {
 		var s qSpan
-		if err = rows.Scan(&s.TraceID, &s.SpanID, &s.Parent, &s.Service, &s.Name, &s.Kind, &s.Start, &s.Duration, &s.DB, &s.Peer, &s.Run, &s.Status, &s.PeerService, &s.DBSystem); err != nil {
+		if err = rows.Scan(&s.TraceID, &s.SpanID, &s.Parent, &s.Service, &s.Name, &s.Kind, &s.Start, &s.Duration, &s.DB, &s.Peer, &s.Run, &s.Status, &s.PeerService, &s.DBSystem, &s.Children); err != nil {
 			return queryProblem(ctx, err)
 		}
 		out.Spans = append(out.Spans, s)
@@ -1099,4 +1192,27 @@ func requireDurations(exs []execution, invalidN int, label string, r *QualityChe
 			break
 		}
 	}
+}
+
+// Assumptions of every verdict (quality-gate-v1).
+const (
+	AssumptionRecorded = "Verdicts hold for the recorded spans: every call is assumed to be instrumented, not sampled out and exported before the check."
+	AssumptionCaught   = "Caught as not enough data: fewer executions than run.executions, a span naming a parent that was not recorded, executions past the spans read, and fewer database calls than min_per_execution."
+	AssumptionChildren = "Lost child spans are detected too: these spans record how many children they started."
+	AssumptionNoCounts = "Child spans lost without a trace can't be detected: these spans don't record how many children they started (log-sender records it; OTLP doesn't carry it)."
+)
+
+// assumptionsOf: whether lost child spans can be detected depends on the
+// sender recording child counts.
+func assumptionsOf(run runSpans) []string {
+	out := []string{AssumptionRecorded, AssumptionCaught}
+	if run.Problem != "" {
+		return out
+	}
+	for _, s := range run.Spans {
+		if s.Children > 0 {
+			return append(out, AssumptionChildren)
+		}
+	}
+	return append(out, AssumptionNoCounts)
 }

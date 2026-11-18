@@ -329,3 +329,46 @@ linked to checks, with an owner and a reason, and a saved history of results.
 - Requirement revisions with digests and a diff between them, kinds and
   support relations, catalogue filters, deleting records from the UI.
 - Validation on one external application (the web agent's step 4).
+
+# Stage 6: verdicts the data can carry
+
+Implementation: branch `feat/quality-stage-6` after `ede9d2e`, uncommitted at
+the time of writing (2026-11-17). It answers the web agent's review of
+`ede9d2e`: lost child spans could still turn a failure into a pass, a retry
+could answer a new verdict under a recorded id, and a snapshot could drop the
+offending span.
+
+## What changed
+
+- **Lost child spans.** The quality query reads `ChildSpanCount` (recorded by
+  log-sender; 0 for OTLP). A span that started more children in its own
+  process than were recorded below it (same service) makes its execution
+  incomplete, so `db_calls` and `forbidden_call` can't pass on it.
+- **`min_per_execution`** on `db_calls`: an execution with fewer calls is
+  `missing_database_calls`, not a pass.
+- **Assumptions.** Every result has `assumptions`: verdicts hold for the
+  recorded spans (instrumented, not sampled, exported), which losses are
+  caught, and whether this data can show lost child spans. Shown in the CLI's
+  text, Markdown and HTML reports and on the Quality page; the website and
+  handbook say "lost executions can't pass", not "lost spans", and "which
+  commit first passed its checks again", not "which commit fixed it".
+- **One id, one verdict.** A retried record answers the stored evaluation
+  (`recorded_before`), not the fresh result; `reevaluate` (CLI
+  `--reevaluate`) records a re-evaluation under a new id (`reevaluated`).
+  Recording goes through a small store interface, so this is unit-tested.
+- **Snapshots keep the counterexample.** `SnapshotSelection` (API) and its
+  copy in the CLI keep the evidence span and its ancestors, a `db_calls`
+  check's database calls, then the spans below the evidence span, then the
+  rest, at most 200; the CLI reads up to 1 000 spans to choose from.
+- Docs: a stale sentence said a run without database calls passes; it has been
+  `no_database_calls` since stage 4.
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-SUF-004 | `TestQualityLostChildSpans` (the review's reproduction; remote children; without child counts) | Go unit |
+| QG-SUF-005 | `TestQualityMinPerExecution` | Go unit |
+| QG-SUF-006 | `TestQualityLostChildSpans` (assumptions), `TestRecordedBeforeAndAssumptions`, `qualityHistory.spec.ts`, `e2e/qualityHistory.e2e.ts` QG-UI-006 | Go unit; CLI; Vitest; Playwright |
+| QG-HIST-004 | `TestQualityRetryReturnsTheRecord` (the review's reproduction), `TestRecordedBeforeAndAssumptions`; fixture QG-HIST-001 (retry) | Go unit; CLI; fixture |
+| QG-EVD-002 | `TestQualitySnapshotKeepsCounterexample`, `TestSnapshotSelection`, CLI `TestSnapshotKeepsCounterexample` | Go unit; CLI |
