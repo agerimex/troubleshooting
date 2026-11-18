@@ -15,7 +15,7 @@ A population is a service, a window and optional dimensions: operation, span kin
 - **Saved comparisons** reopens any comparison stored earlier, exactly as it was generated.
 
 ![Comparison form](/screenshots/compare-form.png)
-*Baseline: `recording-worker` version 1.0.0, 10:00–12:00. Candidate: version 1.1.0, 12:00–14:00.*
+*Baseline: `fxdc108d54-recording-worker`, operation `upload_recording`, version 1.0.0, 04:00–05:00. Candidate: version 1.1.0, 06:00–07:00.*
 
 ## The comparison
 
@@ -34,14 +34,14 @@ The result is a stored analysis with its own revision id and rule versions (`com
 Signals are heuristics that point to what to investigate, not proof that a deployment caused the change. **Regenerate (new revision)** builds the analysis again; **Export HTML** and **Export JSON** save exactly the shown revision.
 
 ![Comparison result](/screenshots/compare-result.png)
-*Version 1.1.0 against 1.0.0: `storage.PutObject` p95 +66.7%, `upload_recording` error fraction 1% → 5%.*
+*Version 1.1.0 against 1.0.0: `upload_recording` error fraction 1% → 5% and p50/p95/p99 100 ms → 160 ms (+60%) are regression signals; call volume is descriptive only. The three error groups recur in both scopes.*
 
 ## Examples behind a number
 
 **Slow candidate examples** under a metric table lists observed calls at or above the candidate's p95, slowest first (10 shown). **Candidate examples** and **Baseline examples** do the same for an error group. **Open report** opens one example as an execution report, which keeps a note of the comparison it came from.
 
 ![Slow candidate examples](/screenshots/compare-examples.png)
-*Slow candidate calls of `storage.PutObject` at or above 150 ms.*
+*Slow candidate calls of `upload_recording` at or above 160 ms, 10 of 1,000 shown.*
 
 In an opened example, **Include in comparison export** adds its report to the comparison's HTML/JSON export. **Back to Releases** returns to the comparison.
 
@@ -53,4 +53,4 @@ In an opened example, **Include in comparison export** adds its report to the co
 The second tab shows one population without a comparison: one row per operation and span kind (or per version with **one row per version**), with calls, rate, ERROR/OK/UNSET counts, error fraction, percentiles and valid durations. Below it are calls per hour (UTC) and the population's error groups, each with examples. Percentiles need at least 20 (p50), 200 (p95) and 1000 (p99) valid durations.
 
 ![Operation statistics](/screenshots/stats.png)
-*Statistics of `recording-worker`, 10:00–16:00, with hourly buckets and error groups.*
+*Statistics of `fxdc108d54-recording-worker`, 04:00–10:00, one row per version, with hourly buckets and error groups.*
