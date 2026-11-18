@@ -132,6 +132,9 @@ func markdownReport(ev Evaluation, htmlName string) string {
 			fmt.Fprintf(&b, "| %s | **%s** %s | %s | %s |\n", titleOf(requirementIcon, r.Status), mdText(r.ID), mdText(r.Title),
 				mdText(r.Owner), mdText(status))
 		}
+		if hasGuardrails(ev.Requirements) {
+			b.WriteString("\n" + mdText(guardrailDefinition) + "\n")
+		}
 		b.WriteString("\n")
 	}
 	if hasBaseline {
@@ -195,9 +198,9 @@ func htmlReport(ev Evaluation) string {
 	fmt.Fprintf(&b, "<title>Quality gate: %s</title><style>%s</style></head><body>", e(titleOf(gateTitle, ev.Gate)), htmlStyle)
 	cls := map[string]string{"passed": "pass", "failed": "fail", "unresolved": "insufficient"}[ev.Gate]
 	fmt.Fprintf(&b, `<h1 class="%s">Quality gate: %s</h1>`, cls, e(titleOf(gateTitle, ev.Gate)))
-	fmt.Fprintf(&b, `<p class="meta">Run <code>%s</code>, %s`, e(ev.Run), e(windowText(ev.TimeFrom, ev.TimeTo)))
+	fmt.Fprintf(&b, `<p class="meta">Run <code>%s</code>, %s%s`, e(ev.Run), e(windowText(ev.TimeFrom, ev.TimeTo)), fromRun(ev.WindowFromRun))
 	if ev.Baseline != "" {
-		fmt.Fprintf(&b, ` · baseline <code>%s</code>, %s`, e(ev.Baseline), e(windowText(ev.BaselineFrom, ev.BaselineTo)))
+		fmt.Fprintf(&b, ` · baseline <code>%s</code>, %s%s`, e(ev.Baseline), e(windowText(ev.BaselineFrom, ev.BaselineTo)), fromRun(ev.BaselineFromRun))
 	}
 	fmt.Fprintf(&b, ` · %s · evaluated %s`, e(ev.Contract), e(ev.EvaluatedAt))
 	if s := sourceText(ev.Source); s != "" {
@@ -219,7 +222,11 @@ func htmlReport(ev Evaluation) string {
 			fmt.Fprintf(&b, `<tr><td class="%s">%s</td><td class="chk"><b>%s</b><br>%s</td><td>%s</td><td>%s</td><td>%s<br><span class="meta">%s</span>%s</td></tr>`,
 				rcls[r.Status], e(titleOf(requirementTitle, r.Status)), e(r.ID), e(r.Title), e(r.Owner), e(r.Why), e(strings.Join(r.Checks, ", ")), e(r.Summary), guard)
 		}
-		b.WriteString(`</tbody></table><h2>Checks</h2>`)
+		b.WriteString(`</tbody></table>`)
+		if hasGuardrails(ev.Requirements) {
+			fmt.Fprintf(&b, `<p class="meta">%s</p>`, e(guardrailDefinition))
+		}
+		b.WriteString(`<h2>Checks</h2>`)
 	}
 	b.WriteString(`<table class="res"><thead><tr><th>Status</th><th>Check</th><th>Value</th><th>Limit</th>`)
 	if ev.Baseline != "" {
@@ -310,6 +317,14 @@ func short(s string) string {
 // windowText shows a [from, to) window of Unix nanoseconds in UTC, e.g.
 // "2026-11-17 12:05:05 to 12:08:25 UTC"; values that aren't nanoseconds are
 // shown as they are.
+// fromRun marks a window found from the run's own spans.
+func fromRun(yes bool) string {
+	if yes {
+		return " (the run's window)"
+	}
+	return ""
+}
+
 func windowText(from, to string) string {
 	f, err1 := strconv.ParseInt(from, 10, 64)
 	t, err2 := strconv.ParseInt(to, 10, 64)

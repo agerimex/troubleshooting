@@ -31,6 +31,59 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+  # An application imports log-sender from GitHub: the replace => ../protos in
+  # log-sender/go.mod doesn't apply to it, so the protos version log-sender
+  # requires is the one it builds against. This module replaces log-sender
+  # only, as a dependent sees it; protos comes from the module proxy. (Change
+  # protos and log-sender in separate PRs: protos first, then log-sender
+  # requires the published version.)
+  log-sender-outside:
+    name: log-sender as an outside module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Build an application that imports log-sender
+        env:
+          GOWORK: "off"
+          GOFLAGS: -mod=mod
+        run: |
+          dir=$(mktemp -d)
+          cd "$dir"
+          cat > go.mod <<EOF
+          module outside
+
+          go 1.21.5
+
+          require github.com/agerimex/troubleshooting/log-sender v0.0.0
+
+          replace github.com/agerimex/troubleshooting/log-sender => $GITHUB_WORKSPACE/log-sender
+          EOF
+          cat > main.go <<'EOF'
+          package main
+
+          import (
+          	"context"
+
+          	sender "github.com/agerimex/troubleshooting/log-sender"
+          )
+
+          func main() {
+          	ctx := context.Background()
+          	_, _ = sender.NewTracer("outside", sender.WithAddress("127.0.0.1:1"))
+          	if e, err := sender.NewLogExporter("outside", sender.WithAddress("127.0.0.1:1")); err == nil {
+          		_ = e.Send(ctx, []sender.LogRecord{sender.NewLogRecord(ctx, "INFO", "built outside")})
+          		_ = e.Close()
+          	}
+          	_ = sender.Shutdown(ctx)
+          }
+          EOF
+          go build ./...
+          grep troubleshooting/protos go.mod
+
   ui:
     name: UI type-check, unit and browser tests
     runs-on: ubuntu-latest

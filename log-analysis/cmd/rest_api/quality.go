@@ -20,7 +20,7 @@ func (app *application) qualityEvaluate(w http.ResponseWriter, r *http.Request) 
 	if !app.readValid(w, r, &req, func() error { return req.Validate() }) {
 		return
 	}
-	res := data.EvaluateQuality(r.Context(), req)
+	res := data.EvaluateQuality(r.Context(), &req)
 	if req.Record {
 		data.RecordQuality(r.Context(), req, &res)
 		if res.RecordError != "" {

@@ -178,6 +178,10 @@ type Evaluation struct {
 	// RecordUnconfirmed: sent to the history under ID, but the API couldn't
 	// read the stored record back; the verdict shown is the local one.
 	RecordUnconfirmed bool `json:"record_unconfirmed,omitempty"`
+	// WindowFromRun: the window is the run's own, found from its spans (the
+	// request left it out); BaselineFromRun the same for the baseline.
+	WindowFromRun   bool `json:"window_from_run,omitempty"`
+	BaselineFromRun bool `json:"baseline_window_from_run,omitempty"`
 	// Assumptions say what the verdicts rest on (which lost spans can be seen).
 	Assumptions []string `json:"assumptions,omitempty"`
 	// ChildCounts: in how many checked executions lost child spans could be seen.
@@ -193,6 +197,19 @@ type ChildCoverage struct {
 	Executions int    `json:"executions"`
 	Counted    int    `json:"counted"`
 	Status     string `json:"status"`
+}
+
+// guardrailDefinition is printed once wherever guardrails appear: readers
+// meet the word first in a result.
+const guardrailDefinition = "(A guardrail is a check listed with a requirement: it decides the gate like every check, but never the requirement's status.)"
+
+func hasGuardrails(reqs []RequirementResult) bool {
+	for _, r := range reqs {
+		if len(r.Guardrails) > 0 || r.GuardrailSummary != "" {
+			return true
+		}
+	}
+	return false
 }
 
 type RequirementResult struct {
@@ -227,6 +244,9 @@ type options struct {
 	basicAuth                                                 string
 	commit, prHead, ref, ciRun, rulesRef                      string
 	noSnapshot, record, reevaluate                            bool
+	// windowSet: --from, --to or --since was given. Without them the API
+	// takes the run's own window (its first to its last entry span).
+	windowSet bool
 }
 
 func main() {
@@ -245,8 +265,8 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs.StringVar(&o.rules, "rules", "quality.yaml", "rules file (YAML or JSON)")
 	fs.StringVar(&o.run, "run", "", "run to check: the value of troubleshooting.run on its spans (required)")
 	fs.StringVar(&o.baseline, "baseline", "", "run to compare with (shown next to each value; never changes the result)")
-	fs.DurationVar(&o.since, "since", time.Hour, "window: executions that started this long before now")
-	fs.StringVar(&o.from, "from", "", "window start, RFC 3339 (instead of --since)")
+	fs.DurationVar(&o.since, "since", time.Hour, "window: executions that started this long before now (default: the run's own window, found from its spans)")
+	fs.StringVar(&o.from, "from", "", "window start, RFC 3339 (default: the run's own window)")
 	fs.StringVar(&o.to, "to", "", "window end, RFC 3339 (default now)")
 	fs.DurationVar(&o.baselineSince, "baseline-since", 0, "baseline window (default: the run's window)")
 	fs.StringVar(&o.baselineFrom, "baseline-from", "", "baseline window start, RFC 3339")
@@ -267,6 +287,12 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "from", "to", "since":
+			o.windowSet = true
+		}
+	})
 	if o.ui == "" {
 		o.ui = o.url
 	}
@@ -276,6 +302,15 @@ func run(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 		return exitError
 	}
 	ev, err := evaluate(o, req)
+	if err != nil && !o.windowSet && strings.Contains(err.Error(), "time_from must be") {
+		// A Troubleshooting from before windows from the run needs one: the
+		// old default, the last --since.
+		fmt.Fprintf(stderr, "note: this Troubleshooting needs a window; checking executions of the last %s (--since)\n", o.since)
+		o.windowSet = true
+		if req, err = buildRequest(o, now()); err == nil {
+			ev, err = evaluate(o, req)
+		}
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return exitError
@@ -411,6 +446,20 @@ func buildRequest(o options, now time.Time) (request, error) {
 	}
 	req := request{RulesYAML: text, Record: o.record, Reevaluate: o.reevaluate && o.record, Run: o.run, Baseline: o.baseline,
 		Source: &Source{Commit: o.commit, PRHead: prHead(o.commit, o.prHead), Ref: o.ref, CIRun: o.ciRun, Rules: o.rules, RulesRef: o.rulesRef, RulesSHA256: digest}}
+	if !o.windowSet {
+		// The API takes the run's own window, and the baseline's own unless
+		// --baseline-* says otherwise.
+		if o.baseline != "" && (o.baselineSince != 0 || o.baselineFrom != "" || o.baselineTo != "") {
+			since := o.baselineSince
+			if since == 0 {
+				since = o.since
+			}
+			if req.BaselineFrom, req.BaselineTo, err = window(o.baselineFrom, o.baselineTo, since, now); err != nil {
+				return request{}, fmt.Errorf("baseline %w", err)
+			}
+		}
+		return req, nil
+	}
 	if req.TimeFrom, req.TimeTo, err = window(o.from, o.to, o.since, now); err != nil {
 		return request{}, err
 	}
@@ -539,6 +588,9 @@ func report(ev Evaluation) string {
 			if r.GuardrailSummary != "" {
 				fmt.Fprintf(&b, "%-14s %s\n", "", r.GuardrailSummary)
 			}
+		}
+		if hasGuardrails(ev.Requirements) {
+			fmt.Fprintf(&b, "%-14s %s\n", "", guardrailDefinition)
 		}
 	}
 	for _, c := range ev.Checks {
