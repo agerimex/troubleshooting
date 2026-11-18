@@ -491,7 +491,7 @@ fixing at once (2026-11-18).
   `since` default are now that window: a window counted back from "now"
   changed on every retry, so a recorded evaluation recorded again, and a
   window that started late made a run unresolved. An older API that needs a
-  window gets the last `--since` from the CLI.
+  window gets the last `--since` from the CLI. This repository's own gate (`.github/quality.yaml`, at most 3 queries per `quality/evaluate`) failed the first version of this change: it looked up the run's and the baseline's window with a query each, 4 calls in all, and the new statement details named both lookups. They are one query now.
 - **Explainable database calls.** otelsql's rows spans carry `db.system`
   and were counted as calls (a query counted twice); they aren't now, and the
   details say so. The worst execution's calls are listed by statement.

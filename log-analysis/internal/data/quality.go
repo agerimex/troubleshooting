@@ -1298,14 +1298,17 @@ func ruleEntries(rules QualityRules) []QualityEntry {
 	return entries
 }
 
-// qualityRunRangeQuery finds the start times of a run's first and last entry
-// span in [lo, hi).
+// qualityRunRangeQuery finds the start times of the first and last entry
+// span of each run in [lo, hi): one query for the run and the baseline
+// ({qualityRun:String} and {qualityBaseline:String}, the same run when only
+// one is looked up), one row per run that has entry spans.
 func qualityRunRangeQuery(entries []QualityEntry, lo, hi int64) string {
 	runAttr := spanAttr(AttrRun)
-	return `SELECT count(), min("UnixTime"), max("UnixTime") FROM otel_traces
+	return `SELECT ` + runAttr + ` AS "Run", count(), min("UnixTime"), max("UnixTime") FROM otel_traces
 	WHERE "UnixTime" >= ` + num(lo) + ` AND "UnixTime" < ` + num(hi) + `
-	AND ` + runAttr + ` = {qualityRun:String}
-	AND ("ServiceName", "SpanName") IN ` + pairsLiteral(entryPairs(entries))
+	AND ` + runAttr + ` IN ({qualityRun:String}, {qualityBaseline:String})
+	AND ("ServiceName", "SpanName") IN ` + pairsLiteral(entryPairs(entries)) + `
+	GROUP BY "Run"`
 }
 
 // runWindowBounds is where a window from the run is looked for: the last
@@ -1329,34 +1332,62 @@ func runWindow(n uint64, first, last, lo, hi int64) (int64, int64) {
 	return first, last + 1
 }
 
-// resolveRunWindow finds the window of a run whose request left it out.
-func resolveRunWindow(ctx context.Context, rules QualityRules, run string) (string, string, *runSpans) {
-	now := clock.Now()
-	lo, hi := runWindowBounds(now, policyFor(ctx).TracesSeconds)
+// runRanges reads the first and last entry start of each run in [lo, hi)
+// with one query: [count, first, last] per run that has entry spans.
+func runRanges(ctx context.Context, rules QualityRules, run, baseline string, lo, hi int64) (map[string][3]int64, error) {
 	query := qualityRunRangeQuery(ruleEntries(rules), lo, hi)
-	params := []any{clickhouse.Named("qualityRun", run)}
-	ctx, span := startQuerySpan(ctx, "SELECT quality run window", query, params)
-	var n uint64
-	var first, last int64
-	err := clickhouseDB.QueryRow(withLimits(ctx), query, params...).Scan(&n, &first, &last)
-	endQuerySpan(span, err)
+	params := []any{clickhouse.Named("qualityRun", run), clickhouse.Named("qualityBaseline", baseline)}
+	ctx, span := startQuerySpan(ctx, "SELECT quality run windows", query, params)
+	var err error
+	defer func() { endQuerySpan(span, err) }()
+	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
 	if err != nil {
-		p := queryProblem(ctx, err)
-		return num(lo), num(hi), &p
+		return nil, err
 	}
-	from, to := runWindow(n, first, last, lo, hi)
-	return num(from), num(to), nil
+	defer rows.Close()
+	out := map[string][3]int64{}
+	for rows.Next() {
+		var name string
+		var n uint64
+		var first, last int64
+		if err = rows.Scan(&name, &n, &first, &last); err != nil {
+			return nil, err
+		}
+		out[name] = [3]int64{int64(n), first, last}
+	}
+	err = rows.Err()
+	return out, err
 }
 
 // resolveQualityWindows fills the windows a request left out from the runs'
-// spans. A failed lookup leaves the whole search range and is returned as
-// the problem of that run, so its checks are insufficient, never passed.
+// spans, with one query for both runs (a request's database calls are
+// checked by this repository's own gate). A failed lookup leaves the whole
+// search range and is returned as the problem of each run it was for, so
+// their checks are insufficient, never passed.
 func resolveQualityWindows(ctx context.Context, req *QualityRequest) (runProblem, baseProblem *runSpans) {
+	if !req.windowFromRun && !req.baselineFromRun {
+		return nil, nil
+	}
+	lo, hi := runWindowBounds(clock.Now(), policyFor(ctx).TracesSeconds)
+	base := req.Run
+	if req.baselineFromRun {
+		base = req.Baseline
+	}
+	found, err := runRanges(ctx, req.Rules, req.Run, base, lo, hi)
+	window := func(run string) (string, string, *runSpans) {
+		if err != nil {
+			p := queryProblem(ctx, err)
+			return num(lo), num(hi), &p
+		}
+		r := found[run]
+		from, to := runWindow(uint64(r[0]), r[1], r[2], lo, hi)
+		return num(from), num(to), nil
+	}
 	if req.windowFromRun {
-		req.TimeFrom, req.TimeTo, runProblem = resolveRunWindow(ctx, req.Rules, req.Run)
+		req.TimeFrom, req.TimeTo, runProblem = window(req.Run)
 	}
 	if req.baselineFromRun {
-		req.BaselineFrom, req.BaselineTo, baseProblem = resolveRunWindow(ctx, req.Rules, req.Baseline)
+		req.BaselineFrom, req.BaselineTo, baseProblem = window(req.Baseline)
 	}
 	return runProblem, baseProblem
 }

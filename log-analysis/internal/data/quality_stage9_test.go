@@ -70,7 +70,7 @@ func TestQualityWindowFromRun(t *testing.T) {
 func TestQualityRunRangeQuery(t *testing.T) {
 	query := qualityRunRangeQuery(ruleEntries(validRequest(t, referenceRules(), "x", "").Rules), 1, 2)
 	bound := map[string]bool{}
-	for _, p := range []any{clickhouse.Named("qualityRun", "x")} {
+	for _, p := range []any{clickhouse.Named("qualityRun", "x"), clickhouse.Named("qualityBaseline", "y")} {
 		bound[p.(driver.NamedValue).Name] = true
 	}
 	for _, m := range namedPlaceholder.FindAllStringSubmatch(query, -1) {
@@ -78,7 +78,7 @@ func TestQualityRunRangeQuery(t *testing.T) {
 			t.Errorf("placeholder %q is used but not bound", m[1])
 		}
 	}
-	for _, want := range []string{`"UnixTime" >= 1 AND "UnixTime" < 2`, `{qualityRun:String}`, `('recording-api','start_session')`} {
+	for _, want := range []string{`"UnixTime" >= 1 AND "UnixTime" < 2`, `{qualityRun:String}, {qualityBaseline:String}`, `GROUP BY "Run"`, `('recording-api','start_session')`} {
 		if !strings.Contains(query, want) {
 			t.Errorf("query is missing %q:\n%s", want, query)
 		}
