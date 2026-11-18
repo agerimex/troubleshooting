@@ -79,64 +79,131 @@ The step writes the summary to the job page and as one pull request comment (upd
 
 Requirements name what must stay true, with an owner and a reason, next to the checks that enforce them (`requirements:` in `quality.yaml`); a requirement is met only when its own checks pass. With `--record` (the action records push events by default) Troubleshooting keeps each evaluation with its rules and evidence snapshots, and the Quality page shows every requirement with its history: when it started failing and which commit first passed its checks again.
 
-How to intergate to your golang project
+Integrating your application
 ------
+The usual way to integrate is to give the prompt below to your coding agent (Claude Code, Codex or another) in your project's repository. It reads the project first and reports before changing anything. The application sends nothing unless an environment variable names the receiver. The agent keeps personal data and secrets out of the spans, verifies that against the stored spans, and finishes with a quality gate run that you can repeat in CI. The steps behind it are under [Integrating by hand](#integrating-by-hand).
+
+### Prompt for your coding agent
+
+Copy everything in the block, replace the `<…>` placeholders (or leave them, and the agent asks), and paste it into your agent:
+
+````text
+Integrate Troubleshooting (https://github.com/agerimex/troubleshooting, self-hosted OpenTelemetry
+trace viewer + quality gate) into this project. Rules: work on a new branch; never commit, push,
+deploy or change shared config without asking me; ask before deleting anything.
+
+1. READ FIRST, CHANGE NOTHING. Find out and report to me: language and version; HTTP router; DB
+   layer (driver, ORM); any existing OpenTelemetry, tracing or logging setup (and config keys
+   for it that shipped configs already set); whether request contexts reach the DB calls; how it
+   is built, tested and deployed (Docker? offline/on-premise installs? updates possible?); which
+   accounts or test data exist. Name 1-3 important operations to measure. Wait for my OK.
+
+2. INSTRUMENT. Off unless the env var TROUBLESHOOTING_ADDR=<receiver host:port> is set. Never
+   fatal, never blocking at startup; a dead receiver must not slow requests. Do NOT reuse an
+   existing config key, even if its name fits: it may already be set at installs.
+   - Go: github.com/agerimex/troubleshooting/log-sender: sender.NewTracer("<service>",
+     sender.WithAddress(addr), sender.WithResourceAttributes({service.version,
+     deployment.environment.name, troubleshooting.run=$TROUBLESHOOTING_RUN if set})), and
+     sender.Shutdown(ctx) on exit. Router middleware (otelchi with WithChiRoutes, or otelhttp)
+     so span names are route patterns, not raw paths with ids. DB: otelsql with
+     TraceQueryWithoutArgs, db.system set per driver, and no rows_close/rows_affected spans
+     (they double the gate's db_calls). Until log-sender's protos pin fix (PR #24) is on main,
+     also require github.com/agerimex/troubleshooting/protos@main explicitly.
+   - Other languages: the standard OpenTelemetry SDK, OTLP over gRPC to <receiver host>:4317
+     (set the protocol explicitly: some SDKs default to HTTP, which is not supported).
+   - Throttle export errors: otel.SetErrorHandler that logs the first failure, then at most one
+     line a minute with a count. Otherwise a down receiver writes a line every 5 s, forever.
+
+3. NEVER SEND (audit every span, attribute KEY and value, including spans the project already
+   creates itself): SQL arguments; query strings (tokens travel as ?token=; otelchi puts the raw
+   RequestURI into http.target, so hand it the path only); user:password in URLs (RTSP/DB/stream
+   URLs, also when used as an attribute key); Authorization and cookie headers; request/response
+   bodies; names, emails or ids of people in span names or attributes. Redact in the app, before
+   export.
+
+4. VERIFY END TO END. Start Troubleshooting locally:
+     git clone https://github.com/agerimex/troubleshooting.git && cd troubleshooting
+     make all && make up    # UI http://localhost:8095, API 127.0.0.1:8094, gRPC 50055, OTLP 4317
+   Run the app from a scratch copy with its own fresh test database (logins may invalidate other
+   sessions' tokens), with TROUBLESHOOTING_ADDR=127.0.0.1:50055 TROUBLESHOOTING_RUN=<run id>.
+   Send requests that carry a password you choose, a ?token=SECRET123, and anything with URL
+   credentials. Wait 6 s, then each of these must print 0
+   (Q="docker exec logs-clickhouse-server clickhouse-client --query"):
+     $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND arrayExists(k -> k LIKE 'db.sql.args%' OR k LIKE 'db.query.parameter%', mapKeys(SpanAttributes))"
+     $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND positionCaseInsensitive(concat(SpanName,' ',StatusMessage,' ',toString(SpanAttributes),' ',toString(ResourceAttributes),' ',toString(\`Events.Attributes\`),' ',toString(\`Links.Attributes\`)), '<needle>') > 0"
+       (run once each for SECRET123, the password, a returned token, a real credential)
+     $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND match(concat(toString(mapKeys(SpanAttributes)),' ',toString(mapValues(SpanAttributes)),' ',toString(ResourceAttributes),' ',toString(\`Events.Attributes\`)), '[a-z][a-z0-9+.-]*://[^/@ ]+@')"
+     $Q "SELECT count() FROM otel_traces WHERE ServiceName='<service>' AND match(toString(SpanAttributes), '[?&](token|access_token|key|password|secret)=')"
+   Then kill the receiver mid-run and check that the app keeps answering at normal speed.
+
+5. QUALITY GATE. Write a workload script (N requests per operation, default 50; one account
+   nobody else uses; prints the UTC --from/--to window, starting before the first request).
+   Measure first, then write quality.yaml
+   (https://github.com/agerimex/troubleshooting/blob/main/docs/quality-gate.md): run.executions = N,
+   latency p95 and db_calls per operation, limits with headroom for slower CI. Use a dataset big
+   enough to expose N+1 queries (a list with 1 row hides them). Run:
+     go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@main
+     troubleshooting-check --url http://127.0.0.1:8094 --rules quality.yaml --run <run id> \
+       --from <UTC> --to <UTC> --markdown summary.md --ui none   # 0 pass,1 fail,2 unresolved,3 error
+
+6. GOTCHAS. Don't `go mod tidy` or upgrade deps into a newer Go version than the build images
+   use. If Go says a package is missing that go.mod lists, run `go mod verify`: "dir has been
+   modified" is a broken module cache entry; move that dir aside, don't change go.mod. Report
+   anything you can't verify as unverified.
+
+7. REPORT TO ME: files changed and why; what you verified, with the numbers (query results, gate
+   output, outage behaviour); what's open; and the exact commands to reproduce. Don't commit
+   until I say so.
+````
+
+### Integrating by hand
+
+**1. What your application must never send.** A span leaves your application as soon as it is exported, and the receiver stores what it gets. Check every span before you switch tracing on: those of the libraries and those your own code creates (a startup span with a camera URL as attribute key is as much a leak as a recorded SQL argument):
+
+* SQL arguments. Database instrumentation often records them (`db.sql.args.*`), and they are login names, password hashes and personal data. Record statements with placeholders only (for `go.nhat.io/otelsql`: `TraceQueryWithoutArgs()`, not `TraceQueryWithArgs()`).
+* Query strings. Router middleware records the request URI (`http.target`), and WebSocket URLs often carry `?token=…`. Strip the query before the middleware sees it, or record the path only.
+* User and password in URLs (`rtsp://user:pass@camera/…`, database DSNs), in attribute **values and keys**.
+* `Authorization` headers and other headers, cookies, request and response bodies.
+* Names or ids of people in span names. Use route patterns (`/api/v1/users/{id}`), not raw paths.
+
+Then verify against the stored spans, as in the prompt above: no row may contain a password, a token you just used or `://user:pass@`.
+
+**2. Send spans, off by default.** Go applications use log-sender (spans with child counts, plus logs that carry their span):
+
 ```
-go get github.com/agerimex/troubleshooting/log-sender
-go get github.com/riandyrn/otelchi
-go get github.com/uptrace/opentelemetry-go-extra/otelsql
-go get go.opentelemetry.io/otel/semconv/v1.20.0
+go get github.com/agerimex/troubleshooting/log-sender@main
+go get github.com/agerimex/troubleshooting/protos@main   # until PR #24 is released: the published log-sender pins an older protos
 ```
 
-* example for go-chi
-
-```
-package main
-...
-import (
-...
-    sender "github.com/agerimex/troubleshooting/log-sender"
-...
-)
-...
-func initOpenTelemetry() {
-	_, err := sender.NewTracer("Test",
-		sender.WithAddress("localhost:50055"),
-		// sender.WithToken("..."), // or TROUBLESHOOTING_TOKEN env, if the receiver requires a token
-	)
-	if err != nil {
-		fmt.Println("Where is receiver of traces")
+```go
+// Off unless TROUBLESHOOTING_ADDR names a receiver; never fatal.
+func initTroubleshooting() {
+	addr := os.Getenv("TROUBLESHOOTING_ADDR") // e.g. 127.0.0.1:50055
+	if addr == "" {
+		return
+	}
+	attrs := map[string]string{
+		sender.AttrServiceVersion: version,
+		sender.AttrEnvironment:    "development",
+		sender.AttrSamplingPolicy: "unsampled",
+	}
+	if run := os.Getenv("TROUBLESHOOTING_RUN"); run != "" {
+		attrs["troubleshooting.run"] = run // tags a test run for the quality gate
+	}
+	if _, err := sender.NewTracer("orders-api", sender.WithAddress(addr), sender.WithResourceAttributes(attrs)); err != nil {
+		log.Printf("troubleshooting: traces are not sent: %v", err)
 	}
 }
-...
-func main() {
-...
-    initOpenTelemetry()
-    defer sender.Shutdown(context.Background()) // flushes spans still in the buffer
-... 
-}
+// main: initTroubleshooting() before the database is opened; sender.Shutdown(ctx) on exit flushes the buffer.
 ```
 
-If the receiver is unavailable, spans are dropped and the error is logged through OpenTelemetry; your application keeps running. (`flag.Set("addrTrace", ...)` from older versions still works.)
+Add router middleware (`otelchi.Middleware("orders-api", otelchi.WithChiRoutes(mux))` for chi, `otelhttp` for `net/http`) and database instrumentation (`otelsql`, without `TraceRowsClose` and `TraceRowsAffected`: their spans would count as extra database calls in the quality gate). Pass the request's context down to the database calls, or they don't belong to the request. The token for a receiver that requires one comes from `TROUBLESHOOTING_TOKEN`. Use a new environment variable for the switch rather than an existing config key that shipped configs already set. Don't let `go mod tidy` raise your `go` version above the one your build images use.
 
-* routing
-```
-func (app *application) routers() http.Handler {
-	mux := chi.NewRouter()
-	mux.Use(middleware.Recoverer)
-	mux.Use(otelchi.Middleware("LOG", otelchi.WithChiRoutes(mux)))
-	mux.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://*", "http://*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+If the receiver is unreachable, the application keeps running and spans are dropped. Stop the receiver once while the application serves requests and check that it keeps answering at normal speed: that is the proof that tracing never blocks it. Each failed export is reported through OpenTelemetry's error handler, by default one log line every 5 s; install a throttled handler (`otel.SetErrorHandler`) for installations where the receiver can be away for long.
 
-	return mux
-}
-```
+Other languages send OTLP/gRPC to port 4317 (see below). OTLP carries no child counts, so their `quality.yaml` must not set `run.child_counts: required`, or every database-call check stays unresolved.
+
+**3. Check a test run.** Write `quality.yaml` for one to three operations that matter. Run them first with generous limits and set the real limits from what you measured (see [Checking a test run](#checking-a-test-run-quality-gate)). The test data must be able to show the problem: a list with one entry hides a query per entry. Start the application with `TROUBLESHOOTING_ADDR` and `TROUBLESHOOTING_RUN`, make a fixed number of requests (as many as `run.executions` declares), wait about 6 s for the last batch, and run `troubleshooting-check` with a window that starts before the first request. An unresolved result (exit 2) usually means the window or the number of requests doesn't match `run.executions`: the gate counts what it can't see as missing data, never as a pass.
 
 Sending logs
 ------
