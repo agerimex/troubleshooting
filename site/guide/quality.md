@@ -93,11 +93,16 @@ FAIL    db-calls  fx…-qg-api / start_session (server)
     run: ci-${{ github.run_id }}-${{ github.run_attempt }}
     rules: quality.yaml
     baseline: main-118                  # optional: the id of a run you tagged earlier
-    since: 1h
     rules-from: base                    # the rules of the pull request's base branch
     fail-on: unresolved                 # or "failed", or "never" (report only)
     record: auto                        # keep the result as history on push events
 ```
+
+Without `since`, the window is the run's own, found from its spans, so a re-run of the job checks the same executions.
+
+![The quality gate's comment on a pull request of this repository](/screenshots/quality-pr-comment.png)
+
+*Troubleshooting gates its own pull requests: this is the comment on one of them, checking how many ClickHouse queries each API request runs and how fast the trace report answers. The last line says lost child spans could be detected in 350 of 355 executions: the other 5 started no child span, and a span that records 0 children looks the same as one that records nothing, so those 5 can't show that nothing was lost.*
 
 The action builds the CLI, checks the run, writes the Markdown summary to the job page and as a pull request comment, uploads `result.json`, `report.html` and `summary.md` as an artifact, and then applies the gate. With `fail-on: unresolved` (the default) the step fails when the gate failed or had not enough data; an error always fails it. Outputs: `gate` and `exit-code`.
 
