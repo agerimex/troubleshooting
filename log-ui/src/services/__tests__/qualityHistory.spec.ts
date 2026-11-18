@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  evaluationHash, exportHtml, historyCells, parseRecord, parseResult, recordedText, requirementCounts, requirementLabel, rulesChanged, streakText,
+  evaluationHash, exportHtml, historyCells, parseRecord, parseResult, recordedText, requirementCounts, requirementLabel, criteriaChanged, streakText,
   validEvaluationId
 } from '@/services/quality'
 import { parseRoute } from '@/services/navigation'
@@ -44,6 +44,20 @@ describe('requirements and history', () => {
     const noCommit = { ...h[0], commit: '' }
     expect(streakText(entry('violated', [noCommit, h[2]], { since: noCommit, evaluations: 1, status_before: 'met' })))
       .toBe('Violated since 2026-11-17 12:03:00 UTC (this evaluation only); met before.')
+    // Two passes under different checks are two streaks.
+    expect(streakText(entry('met', h, { since: h[0], evaluations: 1, status_before: 'met', criteria_changed: true })))
+      .toBe('Met since commit c33333333333 (this evaluation only), when its checks changed; met under the earlier checks.')
+  })
+
+  it('marks changed criteria, not every edit of the rules', () => {
+    const p = (id: string, status: string, criteria: string, sha: string): HistoryPoint => ({ ...point(id, status, 'c', sha), criteria_sha256: criteria })
+    // Another requirement's edit: the rules changed, these criteria didn't.
+    expect(criteriaChanged([p('e2', 'met', 'k', 's2'), p('e1', 'met', 'k', 's1')], 0)).toBe(false)
+    expect(criteriaChanged([p('e2', 'met', 'k2', 's2'), p('e1', 'met', 'k1', 's2')], 0)).toBe(true)
+    // Records from before criteria: the rules sha256 decides.
+    expect(criteriaChanged([p('e2', 'met', 'k', 's2'), p('e1', 'met', '', 's1')], 0)).toBe(true)
+    // Not evaluated and absent have no criteria.
+    expect(criteriaChanged([p('e2', 'not_evaluated', '', 's2'), p('e1', 'not_evaluated', '', 's1')], 0)).toBe(false)
   })
 
   it('draws the history oldest first and marks changed rules', () => {
@@ -51,9 +65,9 @@ describe('requirements and history', () => {
     const cells = historyCells(h)
     expect(cells.map((c) => c.evaluation_id)).toEqual(['e1', 'e2', 'e3'])
     expect(cells[2].label).toBe('Met · commit c3 (main) · 2026-11-17 12:03:00 UTC')
-    expect(rulesChanged(h, 0)).toBe(true)
-    expect(rulesChanged(h, 1)).toBe(false)
-    expect(rulesChanged(h, 2)).toBe(false)
+    expect(criteriaChanged(h, 0)).toBe(true)
+    expect(criteriaChanged(h, 1)).toBe(false)
+    expect(criteriaChanged(h, 2)).toBe(false)
     expect(recordedText('2026-11-17T12:05:05Z')).toBe('2026-11-17 12:05:05 UTC')
   })
 
@@ -71,6 +85,10 @@ describe('requirements and history', () => {
     expect(rec?.rules).toBe('version: 1\n')
     expect(rec?.evaluation.requirements).toEqual([])
     expect(parseRecord(null)[0]).toBe('The recorded evaluation is missing.')
+    const guarded = { ...ev, requirements: [{ id: 'R', title: 't', checks: ['a'], guardrails: ['b', 7], guardrail_summary: 'guardrail failed: b', status: 'met', summary: '' }] }
+    const g = parseRecord({ evaluation: guarded, rules: '' })[1]?.evaluation.requirements?.[0]
+    expect(g?.guardrails).toEqual(['b'])
+    expect(exportHtml({ ...guarded, requirements: [g!] } as QualityEvaluation)).toContain('Guardrails: b<br>guardrail failed: b')
     expect(parseRecord({ evaluation: { contract: 'other' } })[0]).toContain('not a quality-gate-v1 evaluation')
   })
 

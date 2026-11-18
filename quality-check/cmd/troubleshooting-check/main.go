@@ -75,14 +75,16 @@ type RunDecl struct {
 	Executions int `yaml:"executions,omitempty" json:"executions,omitempty"`
 }
 
-// Requirement names an intent, its owner and reason, and the checks that
-// enforce it (docs/quality-gate.md, "Requirements").
+// Requirement names an intent, its owner and reason, the checks that assess
+// it and the guardrails that support it without deciding its status
+// (docs/quality-gate.md, "Requirements").
 type Requirement struct {
-	ID     string   `yaml:"id" json:"id"`
-	Title  string   `yaml:"title" json:"title"`
-	Owner  string   `yaml:"owner,omitempty" json:"owner,omitempty"`
-	Why    string   `yaml:"why,omitempty" json:"why,omitempty"`
-	Checks []string `yaml:"checks,omitempty" json:"checks,omitempty"`
+	ID         string   `yaml:"id" json:"id"`
+	Title      string   `yaml:"title" json:"title"`
+	Owner      string   `yaml:"owner,omitempty" json:"owner,omitempty"`
+	Why        string   `yaml:"why,omitempty" json:"why,omitempty"`
+	Checks     []string `yaml:"checks,omitempty" json:"checks,omitempty"`
+	Guardrails []string `yaml:"guardrails,omitempty" json:"guardrails,omitempty"`
 }
 
 type Rules struct {
@@ -186,6 +188,10 @@ type RequirementResult struct {
 	Checks  []string `json:"checks"`
 	Status  string   `json:"status"`
 	Summary string   `json:"summary"`
+	// Guardrails support the requirement; they decide the gate, never its status.
+	Guardrails       []string `json:"guardrails,omitempty"`
+	GuardrailSummary string   `json:"guardrail_summary,omitempty"`
+	Criteria         string   `json:"criteria_sha256,omitempty"`
 }
 
 type Source struct {
@@ -510,6 +516,9 @@ func report(ev Evaluation) string {
 				owner = " (owner " + r.Owner + ")"
 			}
 			fmt.Fprintf(&b, "%-14s %s  %s%s\n%-14s %s\n", titleOf(requirementWord, r.Status), r.ID, r.Title, owner, "", r.Summary)
+			if r.GuardrailSummary != "" {
+				fmt.Fprintf(&b, "%-14s %s\n", "", r.GuardrailSummary)
+			}
 		}
 	}
 	for _, c := range ev.Checks {

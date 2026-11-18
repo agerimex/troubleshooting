@@ -33,6 +33,7 @@
           <b>{{ r.id }}</b> {{ r.title }}
           <span v-if="r.owner" class="text-xs opacity-80"> · owner {{ r.owner }}</span>
           <div class="text-xs opacity-80">{{ r.summary }}<template v-if="r.status === 'met' && r.checks.length">: {{ r.checks.join(', ') }}</template></div>
+          <div v-if="r.guardrail_summary" class="text-xs opacity-80" :data-testid="'quality-req-guardrails-' + r.id">{{ r.guardrail_summary }}</div>
         </li>
       </ul>
     </section>

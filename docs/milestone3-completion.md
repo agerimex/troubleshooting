@@ -372,3 +372,67 @@ offending span.
 | QG-SUF-006 | `TestQualityLostChildSpans` (assumptions), `TestRecordedBeforeAndAssumptions`, `qualityHistory.spec.ts`, `e2e/qualityHistory.e2e.ts` QG-UI-006 | Go unit; CLI; Vitest; Playwright |
 | QG-HIST-004 | `TestQualityRetryReturnsTheRecord` (the review's reproduction), `TestRecordedBeforeAndAssumptions`; fixture QG-HIST-001 (retry) | Go unit; CLI; fixture |
 | QG-EVD-002 | `TestQualitySnapshotKeepsCounterexample`, `TestSnapshotSelection`, CLI `TestSnapshotKeepsCounterexample` | Go unit; CLI |
+
+# Stage 7: one record per id, honest streaks, guardrails
+
+Implementation: uncommitted after `0011a2d` at the time of writing
+(2026-11-18). It answers the web agent's review of `0011a2d`, four source
+findings, none reproduced by the reviewer against a running instance.
+
+## What changed
+
+- **Concurrent records.** `recordQuality` looked up an id and then inserted,
+  so two simultaneous requests could both miss and store two verdicts under
+  one id (the table has no uniqueness). Now an API instance records one id at
+  a time (`recordLocks`), the insert carries the id as
+  `insert_deduplication_token`, and the receiver sets
+  `non_replicated_deduplication_window = 10000` on `quality_evaluations`
+  (also on existing tables), so ClickHouse drops a second insert of an id
+  from another instance. Each request reads the record back after its insert
+  and answers with what is stored. Reads (`lookup`, `LoadQualityEvaluation`,
+  the history list) take the earliest row of an id, for duplicates recorded
+  before.
+- **Streaks and criteria.** Each requirement result has `criteria_sha256`
+  (its checks' definitions without ids, targets and the advisory flag, plus
+  `run.executions`), carried in the history summaries. A streak ends where the
+  criteria change (`criteria_changed`), so two passes against different
+  limits are two streaks; older records without criteria fall back to the
+  rules file's sha256. The UI says "Met since …, when its checks changed; met
+  under the earlier checks." and outlines cells where the criteria changed,
+  not on every edit of the rules file.
+- **Guardrails.** `guardrails:` on a requirement lists checks that support it
+  without assessing it. They decide the gate as before, are listed with the
+  requirement (`guardrail_summary`), and never change its status. The example
+  rules, the fixture and the docs make `db-calls` REQ-START's guardrail: 400 ms
+  starts with four database calls no longer mark "starts within 800 ms" as
+  violated. The example application's REQ-ORDER-READ ("one query per table")
+  is now assessed by its db-calls check, with the latency check as guardrail.
+- **Wording.** REQ-DIRECTORY is "Starting a session must not call the
+  directory": `forbidden_call` sees a call, not whether the caller waited.
+
+## Verification
+
+- Go unit tests (log-analysis, log-receiver, quality-check), Vitest (104),
+  Playwright quality pages (8).
+- Two API instances against the test ClickHouse, 16 simultaneous record
+  requests split between them, eight rounds: one row and one answer every
+  time. The same race against two instances of `0011a2d`: 8, 15 and 10 rows
+  for 16 requests, each with its own recorded time.
+- Fixture on a reused test volume: 69 of 70 checks pass, QG-HIST-001 (with
+  the guardrail and criteria) and QG-HIST-005 included; M2-CAL-008 fails
+  because the volume's hours were already final (known for reused volumes).
+
+## Scenario map
+
+| Scenario | Test | Layer |
+|---|---|---|
+| QG-HIST-005 | `TestQualityConcurrentRecordsAreOneRecord` (one instance and two), `TestQualityRecordReadBackFails`; fixture QG-HIST-005 | Go unit; fixture; manual two-instance race |
+| QG-HIST-006 | `TestQualityStreakEndsWhenCriteriaChange`; `qualityHistory.spec.ts`; `e2e/qualityHistory.e2e.ts` QG-UI-006 | Go unit; Vitest; Playwright |
+| QG-REQ-003 | `TestQualityGuardrails`; CLI `TestRequirementsAndRecord`; fixture QG-HIST-001 (candidate's REQ-START) | Go unit; CLI; fixture |
+
+## Still open
+
+- Requirement-support relations beyond guardrails, controlled workload and
+  environment provenance, comparable load experiments and outage verification
+  (the reviewer's larger vision); a pilot with one external application is the
+  next step the review recommends.

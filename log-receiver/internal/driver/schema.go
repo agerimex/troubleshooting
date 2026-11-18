@@ -287,7 +287,14 @@ const qualityEvaluationsSQL = `
 		"Body" String CODEC(ZSTD(3))
 	)
 	ENGINE = MergeTree
-	ORDER BY ("Project", "RecordedAt", "Id")`
+	ORDER BY ("Project", "RecordedAt", "Id")
+	SETTINGS non_replicated_deduplication_window = ` + qualityDedupWindow
+
+// qualityDedupWindow is how many of its latest inserts quality_evaluations
+// remembers: log-analysis inserts an evaluation with its id as deduplication
+// token, so a second insert of one id (two API instances recording the same
+// retried request at once) is dropped.
+const qualityDedupWindow = "10000"
 
 type table struct {
 	name   string
@@ -336,6 +343,10 @@ func EnsureSchema(ctx context.Context, conn driver.Conn, r Retention) error {
 	}
 	if err := conn.Exec(ctx, qualityEvaluationsSQL); err != nil {
 		return fmt.Errorf("create quality_evaluations: %w", err)
+	}
+	// Tables created before the window existed get it (a metadata change).
+	if err := conn.Exec(ctx, `ALTER TABLE quality_evaluations MODIFY SETTING non_replicated_deduplication_window = `+qualityDedupWindow); err != nil {
+		return fmt.Errorf("set deduplication of quality_evaluations: %w", err)
 	}
 	for _, name := range []string{"otel_traces", "log_records"} {
 		err := conn.Exec(ctx, `ALTER TABLE `+name+` ADD COLUMN IF NOT EXISTS "ReceivedTime" Int64 DEFAULT 0 CODEC(Delta(8), ZSTD(1))`)

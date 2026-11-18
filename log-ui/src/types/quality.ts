@@ -110,6 +110,11 @@ export interface RequirementResult {
   checks: string[]
   status: RequirementStatus | string
   summary: string
+  // Guardrails support the requirement: they decide the gate, never its status.
+  guardrails?: string[]
+  guardrail_summary?: string
+  // What decides the status (its checks' definitions): a streak never spans two.
+  criteria_sha256?: string
 }
 
 // A recorded evaluation in the history list.
@@ -121,7 +126,7 @@ export interface EvaluationSummary {
   gate: Gate | string
   source: QualitySource
   checks: { id: string, status: string }[]
-  requirements: { id: string, status: string }[]
+  requirements: { id: string, status: string, criteria?: string }[]
 }
 
 export interface QualityProject {
@@ -139,6 +144,7 @@ export interface HistoryPoint {
   commit?: string
   ref?: string
   rules_sha256?: string
+  criteria_sha256?: string
   status: string
 }
 
@@ -147,6 +153,8 @@ export interface Streak {
   evaluations: number
   at_least?: boolean
   status_before?: string
+  // The streak ended because the requirement's criteria changed.
+  criteria_changed?: boolean
 }
 
 export interface CatalogueEntry extends RequirementResult {

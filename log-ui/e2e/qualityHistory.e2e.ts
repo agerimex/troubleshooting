@@ -19,10 +19,11 @@ function catalogue () {
     ],
     requirements: [
       {
-        id: 'REQ-START', title: 'A session starts within 800 ms', owner: 'recording-team', why: 'Participants leave slow sessions.', checks: ['startup-p95', 'db-calls'],
-        status: 'met', summary: 'all 2 of its checks passed',
+        // The latest rules made the query budget a guardrail: the criteria changed.
+        id: 'REQ-START', title: 'A session starts within 800 ms', owner: 'recording-team', why: 'Participants leave slow sessions.', checks: ['startup-p95'],
+        guardrails: ['db-calls'], guardrail_summary: 'guardrail passed: db-calls', status: 'met', summary: 'its check passed',
         history: [point(2, 'met', 's2'), point(1, 'violated'), point(0, 'met')],
-        streak: { since: point(2, 'met', 's2'), evaluations: 1, status_before: 'violated' }
+        streak: { since: point(2, 'met', 's2'), evaluations: 1, status_before: 'violated', criteria_changed: true }
       },
       {
         id: 'REQ-OUTAGE', title: 'Recording continues during an analytics outage', checks: [], status: 'not_evaluated', summary: 'no check enforces it yet',
@@ -86,7 +87,8 @@ test('QG-UI-006: the requirements catalogue shows each requirement with its hist
   await expect(page.getByTestId('quality-catalogue-counts')).toHaveText('2 requirements: 1 met, 1 not evaluated')
   await expect(page.getByTestId('quality-catalogue-status-REQ-START')).toHaveText('Met')
   await expect(page.getByTestId('quality-catalogue-req-REQ-START')).toContainText('Owner: recording-team · Participants leave slow sessions.')
-  await expect(page.getByTestId('quality-catalogue-streak-REQ-START')).toHaveText('Met since commit c30000000000 (this evaluation only); violated before.')
+  await expect(page.getByTestId('quality-catalogue-streak-REQ-START')).toHaveText('Met since commit c30000000000 (this evaluation only), when its checks changed; violated under the earlier checks.')
+  await expect(page.getByTestId('quality-catalogue-guardrails-REQ-START')).toContainText('db-calls: Pass')
   await expect(page.getByTestId('quality-catalogue-status-REQ-OUTAGE')).toHaveText('Not evaluated')
   await expect(page.getByTestId('quality-catalogue-unlinked')).toContainText('spare-check')
   const cells = page.getByTestId('quality-catalogue-req-REQ-START').getByRole('button')

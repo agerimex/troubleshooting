@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -38,6 +39,9 @@ const (
 type QualityStatusRef struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
+	// Criteria is a requirement's criteria_sha256 (empty for checks and in
+	// summaries recorded before criteria existed).
+	Criteria string `json:"criteria,omitempty"`
 }
 
 // QualityEvaluationSummary is one row of the history: what was tested, the
@@ -90,10 +94,10 @@ func summaryOf(res QualityResult) QualityEvaluationSummary {
 		s.Source = *res.Source
 	}
 	for _, c := range res.Checks {
-		s.Checks = append(s.Checks, QualityStatusRef{c.ID, c.Status})
+		s.Checks = append(s.Checks, QualityStatusRef{ID: c.ID, Status: c.Status})
 	}
 	for _, r := range res.Requirements {
-		s.Requirements = append(s.Requirements, QualityStatusRef{r.ID, r.Status})
+		s.Requirements = append(s.Requirements, QualityStatusRef{r.ID, r.Status, r.Criteria})
 	}
 	return s
 }
@@ -101,15 +105,19 @@ func summaryOf(res QualityResult) QualityEvaluationSummary {
 // qualityStore is where recorded evaluations live (replaceable in tests).
 type qualityStore interface {
 	// lookup returns the recorded body of an evaluation, found false if none.
+	// With several rows under one id (recorded before inserts were
+	// deduplicated) it is the earliest recorded one, as every read takes.
 	lookup(ctx context.Context, project, id string) (body string, found bool, err error)
-	insert(ctx context.Context, row []any) error
+	// insert stores a row at most once per id: a second insert of the same id
+	// is dropped by the store, also when two arrive at once.
+	insert(ctx context.Context, id string, row []any) error
 }
 
 type clickhouseQualityStore struct{}
 
 func (clickhouseQualityStore) lookup(ctx context.Context, project, id string) (string, bool, error) {
 	var body string
-	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body" FROM quality_evaluations WHERE "Project" = {project:String} AND "Id" = {id:String} ORDER BY "RecordedAt" LIMIT 1`,
+	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body" FROM quality_evaluations WHERE "Project" = {project:String} AND "Id" = {id:String} ORDER BY "RecordedAt", cityHash64("Body") LIMIT 1`,
 		clickhouse.Named("project", project), clickhouse.Named("id", id)).Scan(&body)
 	if errors.Is(err, errNoRows) {
 		return "", false, nil
@@ -117,21 +125,64 @@ func (clickhouseQualityStore) lookup(ctx context.Context, project, id string) (s
 	return body, err == nil, err
 }
 
-func (clickhouseQualityStore) insert(ctx context.Context, row []any) error {
-	return insertQualityEvaluation(ctx, row)
+func (clickhouseQualityStore) insert(ctx context.Context, id string, row []any) error {
+	return insertQualityEvaluation(ctx, id, row)
 }
+
+// recordLocks serializes the recording of one evaluation id in this process,
+// so concurrent retries to one API instance insert once. Across instances
+// the store's deduplication by id is the boundary (insertQualityEvaluation).
+type recordLocks struct {
+	mu    sync.Mutex
+	locks map[string]*recordLock
+}
+
+type recordLock struct {
+	sync.Mutex
+	users int
+}
+
+func (l *recordLocks) lock(id string) (unlock func()) {
+	l.mu.Lock()
+	if l.locks == nil {
+		l.locks = map[string]*recordLock{}
+	}
+	k := l.locks[id]
+	if k == nil {
+		k = &recordLock{}
+		l.locks[id] = k
+	}
+	k.users++
+	l.mu.Unlock()
+	k.Lock()
+	return func() {
+		k.Unlock()
+		l.mu.Lock()
+		if k.users--; k.users == 0 {
+			delete(l.locks, id)
+		}
+		l.mu.Unlock()
+	}
+}
+
+var qualityRecordLocks recordLocks
 
 // RecordQuality stores an evaluation of a validated request with record. A
 // failure is reported in res.RecordError: the result itself stays valid.
 func RecordQuality(ctx context.Context, req QualityRequest, res *QualityResult) {
-	recordQuality(ctx, clickhouseQualityStore{}, req, res, clock.Now().UTC())
+	recordQuality(ctx, clickhouseQualityStore{}, &qualityRecordLocks, req, res, clock.Now().UTC())
 }
 
 // recordQuality: an evaluation already recorded under the same id (a retried
 // request) is answered with that record, exactly as recorded, never with the
 // result just computed: one id has one verdict. A deliberate re-evaluation
 // (reevaluate) gets an id of its own.
-func recordQuality(ctx context.Context, store qualityStore, req QualityRequest, res *QualityResult, now time.Time) {
+//
+// Concurrent requests with one id are serialized in this process; between
+// processes the store keeps the first insert of an id and drops the others,
+// and every request answers with what the store kept after its own insert, so
+// all of them answer with one record.
+func recordQuality(ctx context.Context, store qualityStore, locks *recordLocks, req QualityRequest, res *QualityResult, now time.Time) {
 	sum := sha256.Sum256([]byte(req.rulesText))
 	sha := hex.EncodeToString(sum[:])
 	reevaluated := ""
@@ -139,19 +190,14 @@ func recordQuality(ctx context.Context, store qualityStore, req QualityRequest, 
 		reevaluated = num(now.UnixNano())
 	}
 	id := qualityEvaluationID(req, sha, reevaluated)
+	defer locks.lock(id)()
 	body, found, err := store.lookup(ctx, res.Project, id)
 	if err != nil {
 		res.RecordError = "the evaluation was not recorded: " + err.Error()
 		return
 	}
 	if found {
-		var stored QualityResult
-		if err := json.Unmarshal([]byte(body), &stored); err != nil {
-			res.RecordError = "the evaluation " + id + " is recorded, but its record can't be read: " + err.Error()
-			return
-		}
-		*res = stored
-		res.RecordedBefore = true
+		answerWithRecord(res, id, body)
 		return
 	}
 	if res.Source == nil {
@@ -163,14 +209,44 @@ func recordQuality(ctx context.Context, store qualityStore, req QualityRequest, 
 	summary, _ := json.Marshal(summaryOf(*res))
 	// A batch sends the values as native columns: the rules text has newlines,
 	// which a {name:String} query parameter can't carry.
-	err = store.insert(ctx, []any{res.ID, res.Project, now.UnixNano(), res.Run, res.Source.Ref, res.Source.Commit,
+	err = store.insert(ctx, id, []any{res.ID, res.Project, now.UnixNano(), res.Run, res.Source.Ref, res.Source.Commit,
 		res.Gate, sha, req.rulesText, string(summary), string(raw)})
 	if err != nil {
 		res.ID, res.RecordedAt, res.Reevaluated, res.RecordError = "", "", false, "the evaluation was not recorded: "+err.Error()
+		return
+	}
+	// Another instance may have recorded this id at the same time: the store
+	// kept one of the inserts, and that one is the verdict.
+	kept, found, err := store.lookup(ctx, res.Project, id)
+	switch {
+	case err != nil:
+		res.RecordError = "the evaluation " + id + " was sent to the history, but reading it back failed (" + err.Error() + "): open it by its id for the recorded verdict"
+	case !found:
+		res.RecordError = "the evaluation " + id + " was sent to the history, but it is not there"
+	case kept != string(raw):
+		answerWithRecord(res, id, kept)
 	}
 }
 
-func insertQualityEvaluation(ctx context.Context, row []any) error {
+// answerWithRecord replaces res with the record stored under id.
+func answerWithRecord(res *QualityResult, id, body string) {
+	var stored QualityResult
+	if err := json.Unmarshal([]byte(body), &stored); err != nil {
+		res.RecordError = "the evaluation " + id + " is recorded, but its record can't be read: " + err.Error()
+		res.ID, res.RecordedAt, res.Reevaluated = "", "", false
+		return
+	}
+	*res = stored
+	res.RecordedBefore = true
+}
+
+// insertQualityEvaluation inserts with the id as deduplication token: the
+// table remembers the tokens of its latest inserts
+// (non_replicated_deduplication_window, set by the receiver) and drops an
+// insert whose token it has, also one that arrives at the same time.
+func insertQualityEvaluation(ctx context.Context, id string, row []any) error {
+	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
+		"insert_deduplicate": 1, "insert_deduplication_token": "quality-evaluation-" + id}))
 	batch, err := clickhouseDB.PrepareBatch(ctx, `INSERT INTO quality_evaluations (Id, Project, RecordedAt, Run, Ref, Commit, Gate, RulesSHA256, Rules, Summary, Body)`)
 	if err != nil {
 		return err
@@ -233,12 +309,15 @@ func ListQualityEvaluations(ctx context.Context, f QualityHistoryFilter) ([]Qual
 		where = append(where, `"Ref" = {ref:String}`)
 		params = append(params, clickhouse.Named("ref", f.Ref))
 	}
+	having := "1"
 	if f.Before > 0 {
-		where = append(where, `"RecordedAt" < {before:Int64}`)
+		having = `"At" < {before:Int64}`
 		params = append(params, clickhouse.Named("before", num(f.Before)))
 	}
-	rows, err := clickhouseDB.Query(withLimits(ctx), `SELECT "RecordedAt", "Summary" FROM quality_evaluations WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY "RecordedAt" DESC, "Id" DESC LIMIT 1 BY "Id" LIMIT `+strconv.Itoa(f.Limit+1), params...)
+	// One row per id, the earliest recorded (as lookup and LoadQualityEvaluation).
+	rows, err := clickhouseDB.Query(withLimits(ctx), `SELECT min("RecordedAt") AS "At", argMin("Summary", ("RecordedAt", cityHash64("Body")))
+		FROM quality_evaluations WHERE `+strings.Join(where, " AND ")+` GROUP BY "Id" HAVING `+having+`
+		ORDER BY "At" DESC, "Id" DESC LIMIT `+strconv.Itoa(f.Limit+1), params...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -277,7 +356,7 @@ type QualityRecord struct {
 // LoadQualityEvaluation returns a recorded evaluation.
 func LoadQualityEvaluation(ctx context.Context, id string) (QualityRecord, error) {
 	var body, rules string
-	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body", "Rules" FROM quality_evaluations WHERE "Id" = {id:String} LIMIT 1`,
+	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body", "Rules" FROM quality_evaluations WHERE "Id" = {id:String} ORDER BY "RecordedAt", cityHash64("Body") LIMIT 1`,
 		clickhouse.Named("id", id)).Scan(&body, &rules)
 	if errors.Is(err, errNoRows) {
 		return QualityRecord{}, ErrQualityEvaluationNotFound
@@ -327,16 +406,22 @@ type QualityHistoryPoint struct {
 	Commit       string `json:"commit,omitempty"`
 	Ref          string `json:"ref,omitempty"`
 	RulesSHA256  string `json:"rules_sha256,omitempty"`
-	Status       string `json:"status"`
+	// Criteria is the requirement's criteria_sha256 in that evaluation.
+	Criteria string `json:"criteria_sha256,omitempty"`
+	Status   string `json:"status"`
 }
 
-// QualityStreak is how long the current status has held: the oldest
-// evaluation of the newest run of equal statuses, and how many in a row.
+// QualityStreak is how long the current status has held under the current
+// criteria: the oldest evaluation of the newest run of equal statuses with
+// equal criteria, and how many in a row. A change of the requirement's
+// criteria ends it (CriteriaChanged), even when the status stayed the same:
+// two passes against different limits are not one streak.
 type QualityStreak struct {
-	Since        QualityHistoryPoint `json:"since"`
-	Evaluations  int                 `json:"evaluations"`
-	AtLeast      bool                `json:"at_least,omitempty"` // the streak reaches the end of the history read
-	StatusBefore string              `json:"status_before,omitempty"`
+	Since           QualityHistoryPoint `json:"since"`
+	Evaluations     int                 `json:"evaluations"`
+	AtLeast         bool                `json:"at_least,omitempty"` // the streak reaches the end of the history read
+	StatusBefore    string              `json:"status_before,omitempty"`
+	CriteriaChanged bool                `json:"criteria_changed,omitempty"`
 }
 
 // QualityCatalogueEntry is one requirement as the latest evaluation states
@@ -376,20 +461,20 @@ func buildCatalogue(project, ref string, latest QualityResult, summaries []Quali
 	}
 	linked := map[string]bool{}
 	for _, r := range latest.Requirements {
-		for _, id := range r.Checks {
+		for _, id := range append(append([]string{}, r.Checks...), r.Guardrails...) {
 			linked[id] = true
 		}
 		e := QualityCatalogueEntry{QualityRequirementResult: r, History: []QualityHistoryPoint{}}
 		for _, s := range summaries {
-			status := "absent"
+			status, criteria := "absent", ""
 			for _, x := range s.Requirements {
 				if x.ID == r.ID {
-					status = x.Status
+					status, criteria = x.Status, x.Criteria
 					break
 				}
 			}
 			e.History = append(e.History, QualityHistoryPoint{EvaluationID: s.ID, RecordedAt: s.RecordedAt, Commit: s.Source.Commit,
-				Ref: s.Source.Ref, RulesSHA256: s.Source.RulesSHA256, Status: status})
+				Ref: s.Source.Ref, RulesSHA256: s.Source.RulesSHA256, Criteria: criteria, Status: status})
 		}
 		e.Streak = streakOf(e.History)
 		cat.Requirements = append(cat.Requirements, e)
@@ -402,13 +487,30 @@ func buildCatalogue(project, ref string, latest QualityResult, summaries []Quali
 	return cat
 }
 
+// SameCriteria says whether two history points of one requirement were
+// evaluated against the same criteria: by their criteria hashes, or, for
+// evaluations recorded before those existed, by the whole rules file's sha256
+// (any edit of the rules then counts as a change). Unknown on either side:
+// the same.
+func SameCriteria(a, b QualityHistoryPoint) bool {
+	if a.Criteria != "" && b.Criteria != "" {
+		return a.Criteria == b.Criteria
+	}
+	if a.RulesSHA256 != "" && b.RulesSHA256 != "" {
+		return a.RulesSHA256 == b.RulesSHA256
+	}
+	return true
+}
+
 // streakOf: history is newest first.
 func streakOf(h []QualityHistoryPoint) QualityStreak {
 	if len(h) == 0 {
 		return QualityStreak{}
 	}
 	n := 1
-	for n < len(h) && h[n].Status == h[0].Status {
+	// Absent and not evaluated aren't decided by criteria: only their status counts.
+	assessed := h[0].Status != "absent" && h[0].Status != RequirementNotEvaluated
+	for n < len(h) && h[n].Status == h[0].Status && (!assessed || SameCriteria(h[n-1], h[n])) {
 		n++
 	}
 	s := QualityStreak{Since: h[n-1], Evaluations: n}
@@ -416,6 +518,7 @@ func streakOf(h []QualityHistoryPoint) QualityStreak {
 		s.AtLeast = true
 	} else {
 		s.StatusBefore = h[n].Status
+		s.CriteriaChanged = assessed && h[n].Status != "absent" && h[n].Status != RequirementNotEvaluated && !SameCriteria(h[n-1], h[n])
 	}
 	return s
 }

@@ -35,12 +35,16 @@
             <div v-if="r.checks.length" class="chks">
               <span v-for="id in r.checks" :key="id" class="chk" :class="checkStatus(id)" :title="checkSummary(id)">{{ id }}: {{ statusLabel(checkStatus(id)) }}</span>
             </div>
+            <div v-if="r.guardrails?.length" class="chks" :data-testid="'quality-catalogue-guardrails-' + r.id">
+              <span class="text-xs opacity-80">Guardrails (decide the gate, not this requirement):</span>
+              <span v-for="id in r.guardrails" :key="id" class="chk" :class="checkStatus(id)" :title="checkSummary(id)">{{ id }}: {{ statusLabel(checkStatus(id)) }}</span>
+            </div>
             <div class="hist">
               <span class="text-xs opacity-80" :data-testid="'quality-catalogue-streak-' + r.id">{{ streakText(r) }}</span>
               <ol class="cells" :aria-label="'History of ' + r.id + ', oldest first'">
                 <li v-for="(h, i) in historyCells(r.history)" :key="h.evaluation_id">
-                  <button type="button" class="cell" :class="[h.status, { changed: rulesChanged(r.history, r.history.length - 1 - i) }]"
-                    :title="h.label + (rulesChanged(r.history, r.history.length - 1 - i) ? ' · rules changed' : '')"
+                  <button type="button" class="cell" :class="[h.status, { changed: criteriaChanged(r.history, r.history.length - 1 - i) }]"
+                    :title="h.label + (criteriaChanged(r.history, r.history.length - 1 - i) ? ' · its checks changed' : '')"
                     :aria-label="h.label" @click="$emit('open-evaluation', h.evaluation_id)"></button>
                 </li>
               </ol>
@@ -48,7 +52,7 @@
           </li>
         </ul>
         <p v-if="catalogue.unlinked.length" class="text-xs opacity-80" data-testid="quality-catalogue-unlinked">Checks without a requirement: {{ catalogue.unlinked.join(', ') }}</p>
-        <p class="text-xs opacity-80 mt-2">A requirement's status comes from its checks in the latest evaluation; one without a check is listed and never met. The history shows the latest {{ catalogue.requirements[0]?.history.length ?? 0 }} recorded evaluations (at most 30), oldest on the left; a marked cell's rules differ from the one before it.</p>
+        <p class="text-xs opacity-80 mt-2">A requirement's status comes from its checks in the latest evaluation; one without a check is listed and never met. The history shows the latest {{ catalogue.requirements[0]?.history.length ?? 0 }} recorded evaluations (at most 30), oldest on the left; a marked cell's checks differ from the one before it, and a status that holds since then counts from there.</p>
       </template>
     </template>
   </section>
@@ -58,7 +62,7 @@
 import { computed, defineComponent, ref, watch } from 'vue'
 import qualityApi from '@/api/quality.api'
 import {
-  gateLabel, historyCells, recordedText, requirementCounts, requirementLabel, rulesChanged, sourceText, statusLabel, streakText
+  gateLabel, historyCells, recordedText, requirementCounts, requirementLabel, criteriaChanged, sourceText, statusLabel, streakText
 } from '@/services/quality'
 import { type Catalogue } from '@/types/quality'
 
@@ -100,7 +104,7 @@ export default defineComponent({
     const latestSource = computed(() => (catalogue.value?.latest ? sourceText(catalogue.value.latest.source) : ''))
     return {
       catalogue, loading, error, load, checkStatus, checkSummary, latestSource,
-      gateLabel, historyCells, recordedText, requirementCounts, requirementLabel, rulesChanged, statusLabel, streakText
+      gateLabel, historyCells, recordedText, requirementCounts, requirementLabel, criteriaChanged, statusLabel, streakText
     }
   }
 })
