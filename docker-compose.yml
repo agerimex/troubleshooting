@@ -54,6 +54,9 @@ services:
     depends_on:
       clickhouse-server:
         condition: service_healthy
+      # The API checks the schema once at startup; the receiver creates it.
+      log-receiver-compose:
+        condition: service_healthy
     restart: always
 
  log-receiver-compose:
@@ -70,6 +73,13 @@ services:
     depends_on:
       clickhouse-server:
         condition: service_healthy
+    # The receiver opens 50055 only after it has created the schema
+    # (EnsureSchema), so an accepted connection means the tables exist.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/50055"]
+      interval: 2s
+      timeout: 3s
+      retries: 150
     restart: always
 
  log-ui-compose:
