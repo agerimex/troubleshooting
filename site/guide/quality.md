@@ -8,6 +8,16 @@ The quality gate answers “does this change keep its limits?” before it ships
 
 A change can pass every functional test and still add twenty database calls per request, or call a service it must not. The gate measures what the run actually did, from its spans.
 
+| Word | Meaning |
+| --- | --- |
+| **Run** | One test run, identified by its `troubleshooting.run` tag |
+| **Entry** | The operation a check starts from, such as `POST /api/v1/login` (the `entry:` of `quality.yaml`) |
+| **Execution** | One run of the entry and everything it caused: usually one request, or one session in a desktop app |
+| **Check** | One measurable rule, for example "at most 3 database calls per execution" |
+| **Requirement** | Why checks exist: a title, an owner and a reason. It is met only when its checks pass |
+| **Result** | Pass, fail, or not enough data |
+| **Evidence** | The executions behind a result, saved with the report so they survive after the raw data expires |
+
 ## 1. Tag the test run
 
 Give the spans of the run an id with the attribute `troubleshooting.run`, preferably on the resource, so the application needs no code change:
