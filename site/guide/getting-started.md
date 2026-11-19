@@ -1,17 +1,17 @@
 ---
-description: Install Troubleshooting with Docker, send spans and correlated logs from Go or any OpenTelemetry SDK, and find your way around the six pages.
+description: Troubleshooting is a runtime quality gate for pull requests, built on OpenTelemetry traces. Install it with Docker, send spans and correlated logs from Go or any OpenTelemetry SDK, and find your way around the six pages.
 ---
 
 # Getting started
 
-Troubleshooting shows what one request did across your services: its spans and its log records together, in a table, a timeline or a sequence diagram. On top of that it groups recurring problems and compares call statistics, latency percentiles and error groups between releases.
+Troubleshooting is a runtime quality gate for pull requests. Rules like SonarQube, but checked against what your code actually did in a test run: database calls per request, forbidden service calls, failed requests, latency. Built on OpenTelemetry traces.
 
-It is for developers and support engineers of Go services (or any OpenTelemetry-instrumented service) who need to answer four questions fast:
+When a check fails, Troubleshooting shows you the execution that broke it: its spans and its log records together, as a timeline or a sequence of calls between services. The same views work outside CI, for any traced request:
 
+- **Does this change keep its limits?** [Quality gate](./quality), in CI.
 - **What happened in this execution?** [Log Analysis](./log-analysis) and [Timeline & Sequence](./timeline-sequence).
 - **What keeps going wrong?** [Problems](./problems).
 - **Did the new release make it better or worse?** [Releases](./releases).
-- **Does this change keep its limits?** [Quality gate](./quality), in CI.
 
 ## How data gets in
 

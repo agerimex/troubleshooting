@@ -50,6 +50,7 @@ export default defineConfig({
           text: 'Articles',
           items: [
             { text: 'Catch an N+1 query in a pull request', link: '/articles/catch-n-plus-one-in-a-pull-request' },
+            { text: 'Compared with Tracetest and Jaeger', link: '/articles/compared-with-tracetest-and-jaeger' },
             { text: 'Compare p95 latency between releases', link: '/articles/compare-p95-between-releases' },
             { text: 'Logs and traces in one view', link: '/articles/logs-and-traces-in-one-view' },
             { text: 'Execution shapes from traces', link: '/articles/execution-shapes' },
