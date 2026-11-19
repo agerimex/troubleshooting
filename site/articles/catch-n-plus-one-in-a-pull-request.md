@@ -62,13 +62,13 @@ The job starts a private Troubleshooting, runs the tests with spans going to it,
 
 ```yaml
 - id: troubleshooting
-  uses: agerimex/troubleshooting/quality-check/stack@main
+  uses: agerimex/troubleshooting/quality-check/stack@quality-check/v0.1.0
 - run: go test ./...
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
     OTEL_EXPORTER_OTLP_INSECURE: "true"
     OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=ci-${{ github.run_id }}-${{ github.run_attempt }}
-- uses: agerimex/troubleshooting/quality-check@main
+- uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.0
   with:
     url: ${{ steps.troubleshooting.outputs.url }}
     ui: ${{ steps.troubleshooting.outputs.ui }}

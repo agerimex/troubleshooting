@@ -72,7 +72,7 @@ const shot=computed(()=>shots[shotIndex.value])
   </section>
 
   <section class="band"><div class="wrap setup" id="start">
-    <div><p class="kicker">Use it in your pipeline</p><h2>Start with one operation you care about.</h2><p class="lead small">Bring an instrumented service and an existing test. Run the stack in a CI job or connect it to your own instance.</p><pre v-pre class="local-cmd action-cmd" aria-label="GitHub Actions step for the quality gate"><code>- uses: agerimex/troubleshooting/quality-check@main
+    <div><p class="kicker">Use it in your pipeline</p><h2>Start with one operation you care about.</h2><p class="lead small">Bring an instrumented service and an existing test. Run the stack in a CI job or connect it to your own instance.</p><pre v-pre class="local-cmd action-cmd" aria-label="GitHub Actions step for the quality gate"><code>- uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.0
   with:
     url: http://localhost:8095
     run: ci-${{ github.run_id }}-${{ github.run_attempt }}
