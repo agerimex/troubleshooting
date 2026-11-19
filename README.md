@@ -507,7 +507,7 @@ See [fixtures/regression/README.md](fixtures/regression/README.md) for the scena
 
 Versions
 ------
-Builds and CI use Go 1.21.13, Node 20.18.0 (UI build), ClickHouse 26.9.13.15 and Caddy 2.8.4; the UI's dependencies are pinned by `log-ui/package-lock.json` (`npm ci`).
+Builds and CI use Go 1.27.0 (the modules still require only Go 1.21.5, so applications that import log-sender keep their own Go version), Node 20.18.0 (UI build), ClickHouse 26.9.13.15 and Caddy 2.8.4; the UI's dependencies are pinned by `log-ui/package-lock.json` (`npm ci`).
 
 Coming soon
 ------
