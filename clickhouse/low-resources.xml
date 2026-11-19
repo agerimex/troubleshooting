@@ -35,4 +35,22 @@
          under Docker Desktop that read is so slow that the first start took
          4-10 minutes (restarts of the same container: under a second). -->
     <skip_binary_checksum_checks>true</skip_binary_checksum_checks>
+
+    <!-- Memory. By default the server may take 90% of the machine's RAM and
+         each cache (marks, primary index, uncompressed blocks, index marks)
+         up to half of it, about 2 GB each in Docker Desktop's 4 GB VM. Two
+         ClickHouse servers there (a dev and a test stack) plus other
+         containers exhausted the VM and Docker killed every container.
+         Measured with the regression fixture (load and check): the server
+         peaks near 500 MB, its largest query near 60 MB, so these caps leave
+         room. The API's own per-query limit (QUERY_MAX_MEMORY_BYTES, 1 GiB)
+         stays below the server cap. Background pools are left at their
+         defaults: smaller ones crash-loop the server (merge_tree's
+         number_of_free_entries_in_pool_* must fit in them). -->
+    <max_server_memory_usage_to_ram_ratio>0.4</max_server_memory_usage_to_ram_ratio>
+    <cache_size_to_ram_max_ratio>0.1</cache_size_to_ram_max_ratio>
+    <mark_cache_size>268435456</mark_cache_size>
+    <primary_index_cache_size>134217728</primary_index_cache_size>
+    <uncompressed_cache_size>134217728</uncompressed_cache_size>
+    <index_mark_cache_size>67108864</index_mark_cache_size>
 </clickhouse>
