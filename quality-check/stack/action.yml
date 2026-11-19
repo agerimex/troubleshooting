@@ -41,7 +41,9 @@ runs:
   steps:
     - uses: actions/setup-go@v5
       with:
-        go-version-file: ${{ github.action_path }}/../../log-analysis/go.mod
+        # A supported Go builds the tools; the go.mod files keep their minimum
+        # (1.21.5), which applications importing log-sender inherit.
+        go-version: "1.27.0"
         cache: false
     - name: Start Troubleshooting
       id: start
