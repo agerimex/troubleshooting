@@ -7,7 +7,7 @@ FIXTURE=cd fixtures/regression && go run .
 FIXTURE_ADDRS=-api http://127.0.0.1:28094 -otlp 127.0.0.1:24317 -sender 127.0.0.1:20055
 
 .PHONY: all images network up down test test-go test-ui \
-	test-stack-up test-stack-down test-stack-reset fixture-load fixture-check ui-e2e save upload
+	test-stack-up test-stack-down test-stack-reset fixture-load fixture-check ui-e2e save upload demo
 
 # Builds the images and creates the shared network. It does not start
 # anything: run "make up" (or docker compose up -d) afterwards.
@@ -30,6 +30,11 @@ down:
 	docker compose stop
 
 # Unit tests of every module; no database needed.
+# The quality gate passing and then failing on the example application
+# (scripts/demo.sh); reports in .demo/. Builds the images first if needed.
+demo: all
+	bash scripts/demo.sh
+
 test: test-go test-ui
 
 test-go:

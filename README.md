@@ -27,6 +27,16 @@ Try it locally
 
 You need Docker, `make` and Go. The first start of ClickHouse on Docker Desktop can take several minutes; later starts take seconds. The example is a small orders service (`examples/quality-gate/`) with a planted regression: prices are read one by one (a query per item) and a retired service is called. Every functional test still passes.
 
+One command does all of it: builds and starts the stack, runs the example's tests twice, and checks each run. The gate passes the good version and fails the regression (up to 9 database calls where the limit is 3, and a call to `legacy-pricing`). The reports are written to `.demo/`:
+
+```
+git clone https://github.com/agerimex/troubleshooting.git
+cd troubleshooting
+make demo
+```
+
+The same steps by hand:
+
 ```
 git clone https://github.com/agerimex/troubleshooting.git
 cd troubleshooting
