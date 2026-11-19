@@ -132,7 +132,7 @@ make down     # stops the stack and keeps the data
 
 ClickHouse keeps its data in the named volume `troubleshooting_clickhouse-data`, so it survives `docker compose down`, `up` and container recreation; only `docker compose down -v` (or `docker volume rm`) deletes it. Installations from before this volume existed kept their data in an anonymous volume, which is not carried over. On Docker Desktop the very first start of ClickHouse on an empty volume can take several minutes; `make up` waits for it.
 
-By default there is no authentication, and the UI (8095) and the receiver (50055, 4317) are reachable from the network. On a shared machine, turn on the settings under [Security](#security).
+By default every port is published on `127.0.0.1` only, and there is no authentication. To receive spans from other machines or open the UI to them, see [Security](#security).
 
 Built with: ClickHouse (storage, raw data kept 3 days), Go (receiver and API), Vue 3 + TypeScript (UI), OpenTelemetry and gRPC.
 
@@ -314,7 +314,7 @@ Only traces over gRPC are supported for now (not OTLP/HTTP on port 4318, not log
 
 A process that starts, does a few operations and exits has three traps a web service doesn't: spans that never leave the batch buffer, one long trace instead of one per operation, and no incoming request to tag. The steps below avoid all three. Commands are PowerShell.
 
-**Ports.** Send to `127.0.0.1`, not `localhost`: `localhost` may resolve to `::1` first, and the test stack publishes all its ports on IPv4 loopback only. The dev stack publishes only the API and ClickHouse on loopback; its receiver (4317, 50055) and UI (8095) listen on all interfaces, so on a shared network turn on the token (see [Security](#security)). The receiver speaks plaintext gRPC, so the endpoint URL starts with `http://` — that is OTLP over gRPC without TLS, not OTLP/HTTP, which the receiver does not support. Plaintext is for a local stack on the same machine only; never send it across a network. Use the three ports of one stack together:
+**Ports.** Send to `127.0.0.1`, not `localhost`: `localhost` may resolve to `::1` first, and the test stack publishes all its ports on IPv4 loopback only. The dev stack publishes its ports on loopback too, unless `TROUBLESHOOTING_BIND` opens the receiver and UI (see [Security](#security)). The receiver speaks plaintext gRPC, so the endpoint URL starts with `http://` — that is OTLP over gRPC without TLS, not OTLP/HTTP, which the receiver does not support. Plaintext is for a local stack on the same machine only; never send it across a network. Use the three ports of one stack together:
 
 | Stack | OTLP/gRPC | API | UI |
 | --- | --- | --- | --- |
@@ -438,6 +438,7 @@ All settings are environment variables; docker-compose reads them from the shell
 | `APP_ENV` | analysis | empty; `development` pretty-prints JSON |
 | `TROUBLESHOOTING_RUN` | analysis: tags its own spans with `troubleshooting.run` (the quality gate of its own CI) | empty = untagged |
 | `TROUBLESHOOTING_TOKEN` | receiver (both ports), log-sender | empty = no token check |
+| `TROUBLESHOOTING_BIND` | docker-compose: the address the receiver (50055, 4317) and the UI (8095) are published on; `0.0.0.0` opens them to the network (then set `TROUBLESHOOTING_TOKEN` and `UI_AUTH`) | `127.0.0.1` |
 | `TROUBLESHOOTING_REDACT` | receiver: `off` stores spans and logs as sent; otherwise SQL arguments (unless the sender opted in), URL credentials and query strings are removed before they are stored (`docs/privacy.md`) | on |
 | `UI_AUTH`, `UI_USER`, `UI_PASSWORD_HASH` | UI (Caddy) | `off` |
 | `QUERY_TIMEOUT` | analysis: ClickHouse `max_execution_time` per query (a request runs at most two) | `10s` |
@@ -457,7 +458,9 @@ A query that hits a limit, or a request that hits its deadline (2 × `QUERY_TIME
 
 Security
 ------
-By default there is no authentication, which is convenient for local debugging. ClickHouse and the API port are published on `127.0.0.1` only; the UI (8095) and the receiver (50055, 4317) are reachable from the network. On a shared server, turn on:
+By default every port of the stack is published on `127.0.0.1` only: the UI (8095), the receiver (50055, 4317), the API (8094) and ClickHouse. Applications on the same machine send to `127.0.0.1:4317`; containers join the `troubleshooting_network` and send to `log-receiver-compose:4317` (on Docker Desktop, `host.docker.internal:4317` works too). There is no authentication.
+
+To receive spans from other machines or open the UI to them, set `TROUBLESHOOTING_BIND=0.0.0.0` (or one address of the machine). This publishes the receiver and the UI on it; ClickHouse and the API stay on loopback. Anyone who reaches those ports can then write spans and read them, so turn on:
 
 * Basic auth for the UI and API: `UI_AUTH=basic`, `UI_USER=<name>`, `UI_PASSWORD_HASH=<hash>` where the hash comes from `docker run --rm caddy:2 caddy hash-password --plaintext '<password>'`. In `.env`, wrap the hash in single quotes because it contains `$`.
 * A shared token for the receiver: `TROUBLESHOOTING_TOKEN=<random string>` for the receiver and every application that sends traces. The token travels unencrypted (no TLS), so it keeps out stray senders, not someone who can watch the network.
