@@ -61,9 +61,12 @@ services:
 
  log-receiver-compose:
     image: 'docker-log-receiver:1'
+    # Loopback by default: anyone who reaches these ports can write spans.
+    # TROUBLESHOOTING_BIND=0.0.0.0 opens them to the network (then set
+    # TROUBLESHOOTING_TOKEN, README: Security).
     ports:
-      - "50055:50055"
-      - "4317:4317"   # OTLP/gRPC
+      - "${TROUBLESHOOTING_BIND:-127.0.0.1}:50055:50055"
+      - "${TROUBLESHOOTING_BIND:-127.0.0.1}:4317:4317"   # OTLP/gRPC
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
@@ -84,8 +87,9 @@ services:
 
  log-ui-compose:
     image: 'docker-log-ui:1'
+    # Loopback by default, like the receiver (UI_AUTH for basic auth when opened).
     ports:
-      - "8095:8095"
+      - "${TROUBLESHOOTING_BIND:-127.0.0.1}:8095:8095"
     environment:
       UI_AUTH: ${UI_AUTH:-off}
       UI_USER: ${UI_USER:-}
