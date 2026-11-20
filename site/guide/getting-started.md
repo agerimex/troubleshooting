@@ -4,12 +4,12 @@ description: Install Troubleshooting with Docker, send spans and correlated logs
 
 # Getting started
 
-Troubleshooting helps you find out why a request failed or slowed down. It shows what one request did across your services, its database calls and its log records together, as a table, a timeline or a sequence of calls. It groups recurring problems and compares releases to show what changed. Once you understand a regression, a runtime check in your pull requests keeps it from coming back.
+Troubleshooting helps you find out why a request failed or slowed down. It shows what one request did across your services, its database calls and its log records together, as a table, a timeline or a sequence of calls. It groups recurring problems and compares releases to show what changed. Investigating needs no rules or CI setup. If your team already knows what must stay true, the [quality gate](./quality) checks those requirements against the traces of pull-request and release test runs.
 
 - **What happened in this request?** [Log Analysis](./log-analysis) and [Timeline & Sequence](./timeline-sequence). A worked example: [Investigate a slow request](./investigate-a-slow-request).
 - **What keeps going wrong?** [Problems](./problems).
 - **Did the new release make it better or worse?** [Releases](./releases).
-- **Does this change keep its limits?** [Quality gate](./quality), in pull requests and release test runs.
+- **Does this test run keep our known requirements?** [Quality gate](./quality), in pull requests and release test runs.
 
 ## How data gets in
 

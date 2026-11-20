@@ -1,6 +1,6 @@
 # Troubleshooting
 
-**Find out why a request failed or slowed down.** Troubleshooting shows what one request did across your services: its spans, database calls and correlated log records, as a table, a timeline or a sequence of calls. It compares releases to show what changed. Once you understand a regression, a runtime check in your pull requests and release test runs keeps it from coming back. Self-hosted, built on OpenTelemetry traces.
+**Find out why a request failed or slowed down.** Troubleshooting shows what one request did across your services: its spans, database calls and correlated log records, as a table, a timeline or a sequence of calls. It compares releases to show what changed. You can start investigating right away, with no rules or CI setup. If your team already knows what must stay true, the quality gate checks those requirements against the traces of pull-request and release test runs. Self-hosted, built on OpenTelemetry traces.
 
 Where to start:
 
@@ -28,7 +28,7 @@ Investigating a failure
 ------
 
 A worked example with screenshots, from a release regression to its cause: [Investigate a slow request](https://agerimex.github.io/troubleshooting/guide/investigate-a-slow-request).
-When a check fails, the UI shows why. It has six pages (the product blueprint, `docs/product-blueprint.md`): **Log Analysis**, **Timeline & Sequence**, **Problems**, **Releases**, **Quality** and **Settings**. An investigation ends in one **report**: one trace's spans and its correlated log records together, within an explicit time window.
+Start from what you have: a slow operation, a failed request, a recurring error, a trace ID, or a difference between two releases. The UI has six pages (the product blueprint, `docs/product-blueprint.md`): **Log Analysis**, **Timeline & Sequence**, **Problems**, **Releases**, **Quality** and **Settings**. An investigation ends in one **report**: one trace's spans and its correlated log records together, within an explicit time window.
 
 1. Find an entry record:
    * **Log Analysis** (the default page): set the window (From/To; an empty To means now) and filter spans by name, status or service. As soon as you filter, the search covers spans at **any depth**, so a failed step under a successful request is found; "Root spans" lists only trace roots. Expanding a span shows its child spans and the log records that recorded exactly that span, inline in the same table and in time order; trace-level logs and logs naming an unknown span are a separate group under the root span. Filters select spans; they never search log text, and an OK span keeps its ERROR logs. The row's "⋯" button, right-click or the keyboard offer **Open timeline**, **Open sequence** and **Copy investigation link**.
@@ -100,11 +100,11 @@ your tests ──▶ your application ──OpenTelemetry traces──▶ Troubl
 1. Your application sends traces while its tests run. Each span of the run carries one tag: `troubleshooting.run=<run id>`.
 2. `troubleshooting-check` reads the run and checks it against `quality.yaml`.
 3. The result is pass, fail or not enough data. Every failure names the request behind it.
-4. When a check fails, the UI shows that request: its spans and logs as a timeline or a sequence of calls between services.
+4. When the gate flags a violation, the UI shows the execution behind it: its spans and logs as a timeline or a sequence of calls between services.
 
 The rule types:
 
-| Rule | Example | Catches |
+| Rule | Example | Flags in a test run |
 | --- | --- | --- |
 | `db_calls` | at most 3 database calls per request | N+1 queries, a query per row |
 | `forbidden_call` | `start_session` must never call `directory-api` | broken architecture rules, calls to retired services |

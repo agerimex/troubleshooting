@@ -21,7 +21,7 @@ const walkthrough='/guide/investigate-a-slow-request.html'
     <div>
       <p class="kicker"><span class="dot"></span>Traces, logs and runtime checks</p>
       <h1 id="title">Find out why a request <em>failed or slowed down.</em></h1>
-      <p class="lead">Follow a request across services, database calls, and logs. Compare releases to see what changed. Once you understand a regression, add a runtime check to catch it in future pull requests.</p>
+      <p class="lead">Compare releases, find an affected request, and follow its service calls, database queries, and correlated logs. If your team already knows what must stay true, check those requirements in pull requests and release test runs.</p>
       <div class="actions"><a class="primary" :href="doc(walkthrough)">Explore a slow request <span aria-hidden="true">→</span></a><a class="simple" :href="prCheck">See a real PR check ↗</a></div>
       <p class="facts">Self-hosted · OpenTelemetry · Go or any OTLP SDK</p>
     </div>
@@ -34,17 +34,17 @@ const walkthrough='/guide/investigate-a-slow-request.html'
     <ol class="steps">
       <li><a :href="doc('/screenshots/investigate-compare.png')" target="_blank" rel="noopener" aria-label="Open the full screenshot"><img :src="doc('/screenshots/investigate-compare.png')" alt="Release comparison of start_session: p95 420 ms in the baseline version, 910 ms in the candidate, marked as a regression signal." loading="lazy"></a><h3>1. Compare the releases.</h3><p><code>start_session</code> p95 rose from 420 ms to 910 ms between the two versions. Releases marks it as a regression signal.</p></li>
       <li><a :href="doc('/screenshots/investigate-examples.png')" target="_blank" rel="noopener" aria-label="Open the full screenshot"><img :src="doc('/screenshots/investigate-examples.png')" alt="The slowest candidate calls of start_session, each with a link to open its report." loading="lazy"></a><h3>2. Open a slow request.</h3><p>The slow examples are recorded executions at or above the p95. Each one opens as a timeline with its logs.</p></li>
-      <li><a :href="doc('/screenshots/investigate-sequence-repeats.png')" target="_blank" rel="noopener" aria-label="Open the full screenshot"><img :src="doc('/screenshots/investigate-sequence-repeats.png')" alt="Sequence view: permission_lookup repeated 1 of 20, 2 of 20 and so on, from the API to an uninstrumented PostgreSQL." loading="lazy"></a><h3>3. See the extra work.</h3><p>The new version reads permissions twenty times instead of once, and calls the directory service. The baseline does neither.</p></li>
+      <li><a :href="doc('/screenshots/investigate-sequence-repeats.png')" target="_blank" rel="noopener" aria-label="Open the full screenshot"><img :src="doc('/screenshots/investigate-sequence-repeats.png')" alt="Sequence view: permission_lookup repeated 1 of 20, 2 of 20 and so on, from the API to an uninstrumented PostgreSQL." loading="lazy"></a><h3>3. See what the request did.</h3><p>The baseline made one permission lookup. The candidate made twenty and also called Directory.</p></li>
     </ol>
     <a class="simple" :href="doc(walkthrough)">Read the whole walkthrough →</a>
   </div></section>
 
   <section id="gate" class="wrap gate" aria-labelledby="gate-title">
-    <p class="kicker">Then keep it from coming back</p>
-    <div class="intro"><h2 id="gate-title">Turn what you found into a check on every pull request.</h2><p>Write the limit down next to the code. A limit of three database calls per start flags the same behaviour in CI: the slow version makes 21. The check runs on your test run’s traces and links each failure to the execution behind it.</p></div>
+    <p class="kicker">Check known requirements in CI</p>
+    <div class="intro"><h2 id="gate-title">Write a requirement down, and check each test run against it.</h2><p>A team that knows what must stay true can write it next to the code, before any incident. The quality gate reads the traces of a pull-request or release test run and flags a violation it observes, with a link to the execution behind it. In this fixture, a limit of three database calls per start flags the candidate’s run: it makes 21.</p></div>
     <div class="gate-grid">
       <div class="ledger">
-        <div class="ledger-row"><span class="kind">Query budget</span><div><h3>Each start makes at most three database calls.</h3><p>Catches a query per item before it ships, even when the tests are fast enough.</p></div><code>max ≤ 3 calls</code></div>
+        <div class="ledger-row"><span class="kind">Query budget</span><div><h3>Each start makes at most three database calls.</h3><p>Flags a query per item in a recorded test run, even when the tests are fast enough.</p></div><code>max ≤ 3 calls</code></div>
         <div class="ledger-row"><span class="kind">Architecture</span><div><h3>Starting a session must never call Directory.</h3><p>Looks for that dependency anywhere in the recorded path.</p></div><code>0 calls</code></div>
         <div class="ledger-row"><span class="kind">Performance</span><div><h3>95% of starts finish within 800 ms.</h3><p>The 95th percentile across the run’s 200 starts.</p></div><code>p95 ≤ 800 ms</code></div>
         <p class="note">The real example is a different one: <a :href="prCheck">this repository’s own API checked on pull request #30</a>, with its own limits and measurements.</p>

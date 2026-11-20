@@ -10,7 +10,7 @@ export default defineConfig({
   lang: 'en-US',
   title: name,
   description:
-    'Open-source quality gate for Go and OpenTelemetry services: check every pull request’s test run against latency and call rules kept in your repository, with the execution behind every failure, then investigate it as a timeline or sequence with its logs, recurring problems and release comparisons.',
+    'Investigate application behavior with OpenTelemetry traces and correlated logs: follow a request across services, database calls and logs, find recurring problems and compare releases. A runtime quality gate checks known requirements against pull-request and release test runs.',
   // Served from https://agerimex.github.io/troubleshooting/
   base: '/troubleshooting/',
   cleanUrls: true,

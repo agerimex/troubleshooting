@@ -1,5 +1,5 @@
 ---
-description: A worked investigation with real product screenshots - a session start got slower between two versions; compare the releases, open a slow request, and find the extra database work in its timeline and sequence. Then add a runtime check so it can't come back.
+description: A worked investigation with real product screenshots - a session start got slower between two versions; compare the releases, open a slow request, and find the repeated database work and the new dependency in its timeline and sequence. Then check that requirement in a test run with the quality gate.
 ---
 
 # Investigate a slow request
@@ -37,8 +37,6 @@ A comparison points at what to investigate. It doesn't prove the cause, so the n
 
 The execution has 25 spans. Under `check_permissions` there are **twenty `permission_lookup` database calls**, one per permission, followed by one `insert_session` and a `GET /users` call. In the baseline version the same operation makes one lookup and one insert, and no other call.
 
-In this fixture the durations are set by the data generator. The timeline shows what work the new version does, not where each of the 490 extra milliseconds went. In your own application the span durations show both.
-
 ## 4. See who called whom
 
 **Sequence** draws the same execution as calls between services:
@@ -51,20 +49,22 @@ Each `permission_lookup` is an arrow from the API to PostgreSQL, numbered *repea
 
 At the end, the API also calls the **directory service** (`GET /users`). The baseline version never calls it.
 
-**What changed:** the new version reads permissions one by one, a query per permission, and it added a dependency on the directory service. That is the cause to fix.
+**What the trace shows:** the new version reads permissions one by one, a query per permission, and it added a dependency on the directory service. Both are worth investigating. They don't establish how much each contributed to the 490 ms increase in p95: the fixture generates each request's duration independently of its calls.
 
-## 5. Keep it from coming back
+## 5. Check it in a test run
 
-Once you know what must stay true, write it down next to the code as a runtime check. For this operation:
+Once you know what must stay true, you can write it down next to the code and check each test run against it with the quality gate. For this operation:
 
 ```yaml
 # quality.yaml
 version: 1
-entry: {service: qg-api, operation: start_session, span_kind: server}
+entry: {service: fxb7d3b725-qg-api, operation: start_session, span_kind: server}
 checks:
   - {id: db-calls, type: db_calls, max_per_execution: 3}
-  - {id: no-directory, type: forbidden_call, to: qg-directory}
+  - {id: no-directory, type: forbidden_call, to: fxb7d3b725-qg-directory}
 ```
+
+Service names must match exactly. These are the names recorded in the run on this page; a fresh fixture run gets a different prefix, so use the service names recorded in your own run.
 
 Checked against the same test run, the gate fails: "up to 21 database calls per execution, limit 3" and a call to the directory service "in 200 of 200 executions", each with a link to an execution that broke the rule. The fixed version passes. In CI the result becomes a comment on the pull request; see [Quality gate](./quality).
 
