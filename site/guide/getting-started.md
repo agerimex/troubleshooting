@@ -1,17 +1,15 @@
 ---
-description: Troubleshooting is a runtime quality gate for pull requests, built on OpenTelemetry traces. Install it with Docker, send spans and correlated logs from Go or any OpenTelemetry SDK, and find your way around the six pages.
+description: Install Troubleshooting with Docker, send spans and correlated logs from Go or any OpenTelemetry SDK, and find your way around the six pages - from investigating one request to checking runtime requirements in CI.
 ---
 
 # Getting started
 
-Troubleshooting is a runtime quality gate for pull requests. Rules like SonarQube, but checked against what your code actually did in a test run: database calls per request, forbidden service calls, failed requests, latency. Built on OpenTelemetry traces.
+Troubleshooting helps you find out why a request failed or slowed down. It shows what one request did across your services, its database calls and its log records together, as a table, a timeline or a sequence of calls. It groups recurring problems and compares releases to show what changed. Investigating needs no rules or CI setup. If your team already knows what must stay true, the [quality gate](./quality) checks those requirements against the traces of pull-request and release test runs.
 
-When a check fails, Troubleshooting shows you the execution that broke it: its spans and its log records together, as a timeline or a sequence of calls between services. The same views work outside CI, for any traced request:
-
-- **Does this change keep its limits?** [Quality gate](./quality), in CI.
-- **What happened in this execution?** [Log Analysis](./log-analysis) and [Timeline & Sequence](./timeline-sequence).
+- **What happened in this request?** [Log Analysis](./log-analysis) and [Timeline & Sequence](./timeline-sequence). A worked example: [Investigate a slow request](./investigate-a-slow-request).
 - **What keeps going wrong?** [Problems](./problems).
 - **Did the new release make it better or worse?** [Releases](./releases).
+- **Does this test run keep our known requirements?** [Quality gate](./quality), in pull requests and release test runs.
 
 ## How data gets in
 
