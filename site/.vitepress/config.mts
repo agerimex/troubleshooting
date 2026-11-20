@@ -24,6 +24,7 @@ export default defineConfig({
   ],
   themeConfig: {
     nav: [
+      { text: 'Investigate', link: '/guide/investigate-a-slow-request' },
       { text: 'Quality gate', link: '/guide/quality' },
       { text: 'Handbook', link: '/guide/getting-started' },
       { text: 'Articles', link: '/articles/' },
@@ -35,6 +36,7 @@ export default defineConfig({
           text: 'Handbook',
           items: [
             { text: 'Getting started', link: '/guide/getting-started' },
+            { text: 'Investigate a slow request', link: '/guide/investigate-a-slow-request' },
             { text: 'Quality gate', link: '/guide/quality' },
             { text: 'Log Analysis', link: '/guide/log-analysis' },
             { text: 'Timeline & Sequence', link: '/guide/timeline-sequence' },

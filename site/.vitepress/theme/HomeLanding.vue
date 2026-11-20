@@ -11,63 +11,60 @@ const run = computed(() => runs[current.value])
 const repo='https://github.com/agerimex/troubleshooting'
 const doc=(s:string)=>withBase(s)
 const ruleFile=repo+'/blob/main/fixtures/regression/qghistory.go'
-const shots=[
-  {label:'Execution timeline', file:'quality-evidence.webp', title:'Find the repeated work.', text:'In this failing execution, startup reads permissions twenty times. The baseline reads them once.',alt:'Recorded timeline of start_session with repeated permission_lookup database spans.'},
-  {label:'Service calls',file:'sequence.webp',title:'See who called whom.',text:'Follow a recorded execution across service boundaries. The sequence shows observed calls and their logs, so you can inspect the dependency behind a failed rule.',alt:'Sequence view with recorded calls drawn between service lanes.'},
-  {label:'Requirement history',file:'quality-requirements.webp',title:'See when a requirement passed again.',text:'Open a recorded run to see the commit, rules and verdict. The history marks changes to the checks so a relaxed limit can be distinguished from a code fix.',alt:'Quality catalogue showing requirements, owners and previous evaluation results.'}
-]
-const shotIndex=ref(0)
-const shot=computed(()=>shots[shotIndex.value])
+const prCheck='https://github.com/agerimex/troubleshooting/pull/30#issuecomment-6992712426'
+const walkthrough='/guide/investigate-a-slow-request.html'
 </script>
 
 <template>
 <div class="landing">
   <section class="hero wrap" aria-labelledby="title">
     <div>
-      <p class="kicker"><span class="dot"></span>Open-source, requirements-driven quality gate</p>
-      <h1 id="title">Check runtime requirements on every <em>pull request and release.</em></h1>
-      <p class="lead">Set limits on response time and database calls, and define which services an operation may call. Troubleshooting checks the traces from your CI test run and shows the execution behind a failed check.</p>
-      <div class="actions"><a class="primary" :href="doc('/guide/quality.html')">Add a check to CI <span aria-hidden="true">→</span></a><a class="simple" href="#evidence" @click="shotIndex=0">See the failing trace ↓</a></div>
-      <p class="facts">Self-hosted · OpenTelemetry · GitHub Actions or CLI</p>
+      <p class="kicker"><span class="dot"></span>Traces, logs and runtime checks</p>
+      <h1 id="title">Find out why a request <em>failed or slowed down.</em></h1>
+      <p class="lead">Follow a request across services, database calls, and logs. Compare releases to see what changed. Once you understand a regression, add a runtime check to catch it in future pull requests.</p>
+      <div class="actions"><a class="primary" :href="doc(walkthrough)">Explore a slow request <span aria-hidden="true">→</span></a><a class="simple" :href="prCheck">See a real PR check ↗</a></div>
+      <p class="facts">Self-hosted · OpenTelemetry · Go or any OTLP SDK</p>
     </div>
-    <div class="console" aria-label="Interactive reference test runs">
-      <div class="console-head"><span><i></i> Run report</span><code>start_session</code></div>
-      <div class="console-body">
-        <div class="switch" role="group" aria-label="Select fixture run">
-          <button v-for="(r,i) in runs" :key="r.name" :aria-pressed="i===current" @click="current=i">{{r.name}}</button>
-        </div>
-        <div aria-live="polite" aria-atomic="true">
-          <div class="metric"><span class="metric-number">{{run.calls}}</span><span>database calls<br>per startup <small>limit ≤ 3</small></span></div>
-          <div class="ticks" aria-hidden="true"><i v-for="n in 21" :key="n" :class="{on:n<=run.calls,over:n>3 && n<=run.calls}"></i></div>
-          <div class="verdict" :class="{fail:current===1}"><b>{{current===1?'× Failed':'✓ Passed'}}</b><span>{{run.summary}}</span></div>
-          <p class="observed">{{run.note}}</p>
-          <dl><div><dt>Startup p95 <small>· limit 800 ms</small></dt><dd>{{run.ms}} ms <span class="row-verdict" :class="{over:run.ms>800}">{{run.ms>800?'× over the limit':'✓'}}</span></dd></div><div><dt>Startups calling Directory <small>· limit 0</small></dt><dd>{{run.dir}} / 200 <span class="row-verdict" :class="{over:run.dir>0}">{{run.dir>0?'× over the limit':'✓'}}</span></dd></div></dl>
-        </div>
-      </div>
-      <div class="console-foot"><span>Reference fixture · 200 starts per run</span><a :href="repo+'/blob/main/fixtures/regression/qg.go'">View data ↗</a></div>
-    </div>
+    <figure class="hero-shot"><a :href="doc(walkthrough)"><img :src="doc('/screenshots/investigate-hero.png')" alt="Timeline of one slow start_session: check_permissions with permission_lookup database spans repeated one after another." width="822" height="560"></a><figcaption>Product screenshot · fixture data. One slow <code>start_session</code> of the new version: twenty permission lookups, one insert, and a call to the directory service.</figcaption></figure>
   </section>
 
-  <section class="rules band" aria-labelledby="rules-title"><div class="wrap">
-    <p class="kicker">Requirements in your repository</p>
-    <div class="intro"><h2 id="rules-title">Write down what must stay true.</h2><p>Give a requirement an owner and a measurable check. The team reviews these rules alongside the code. A pull request can be checked against the rules on its base branch.</p></div>
-    <div class="ledger">
-      <div class="ledger-row"><span class="kind">Performance</span><div><h3>At least 95% of recording sessions must start within 800 ms.</h3><p>Measure the 95th percentile across 200 starts.</p></div><code>p95 ≤ 800 ms</code></div>
-      <div class="ledger-row"><span class="kind">Query budget</span><div><h3>Each startup makes at most three database calls.</h3><p>This guardrail can block a merge even when startup is fast enough.</p></div><code>max ≤ 3 calls</code></div>
-      <div class="ledger-row"><span class="kind">Architecture</span><div><h3>Starting a session must never call Directory.</h3><p>Look for that dependency anywhere in the recorded startup path.</p></div><code>0 calls</code></div>
-    </div>
-    <a class="simple" :href="ruleFile">See the fixture’s rules ↗</a>
+  <section id="investigate" class="band" aria-labelledby="investigate-title"><div class="wrap">
+    <p class="kicker">A worked investigation</p>
+    <div class="intro"><h2 id="investigate-title">A session start got slower. Here is how you find out why.</h2><p>Fixture data from this repository’s regression fixture: two versions of a session-start operation, 200 starts each. No installation needed to follow along.</p></div>
+    <ol class="steps">
+      <li><a :href="doc('/screenshots/investigate-compare.png')" target="_blank" rel="noopener" aria-label="Open the full screenshot"><img :src="doc('/screenshots/investigate-compare.png')" alt="Release comparison of start_session: p95 420 ms in the baseline version, 910 ms in the candidate, marked as a regression signal." loading="lazy"></a><h3>1. Compare the releases.</h3><p><code>start_session</code> p95 rose from 420 ms to 910 ms between the two versions. Releases marks it as a regression signal.</p></li>
+      <li><a :href="doc('/screenshots/investigate-examples.png')" target="_blank" rel="noopener" aria-label="Open the full screenshot"><img :src="doc('/screenshots/investigate-examples.png')" alt="The slowest candidate calls of start_session, each with a link to open its report." loading="lazy"></a><h3>2. Open a slow request.</h3><p>The slow examples are recorded executions at or above the p95. Each one opens as a timeline with its logs.</p></li>
+      <li><a :href="doc('/screenshots/investigate-sequence-repeats.png')" target="_blank" rel="noopener" aria-label="Open the full screenshot"><img :src="doc('/screenshots/investigate-sequence-repeats.png')" alt="Sequence view: permission_lookup repeated 1 of 20, 2 of 20 and so on, from the API to an uninstrumented PostgreSQL." loading="lazy"></a><h3>3. See the extra work.</h3><p>The new version reads permissions twenty times instead of once, and calls the directory service. The baseline does neither.</p></li>
+    </ol>
+    <a class="simple" :href="doc(walkthrough)">Read the whole walkthrough →</a>
   </div></section>
 
-  <section id="evidence" class="wrap evidence" aria-labelledby="evidence-title">
-    <p class="kicker">From a failed check to the trace</p>
-    <h2 id="evidence-title">Open the execution that broke the rule.</h2>
-    <div class="evidence-grid">
-      <div><div class="selectors" role="group" aria-label="Product screenshots">
-        <button v-for="(s,i) in shots" :key="s.file" :aria-pressed="shotIndex===i" @click="shotIndex=i">{{s.label}} <span aria-hidden="true">→</span></button>
-      </div><div aria-live="polite"><h3>{{shot.title}}</h3><p>{{shot.text}}</p></div>
-      <a class="simple" :href="doc('/landing/'+shot.file)" target="_blank" rel="noopener">Open full screenshot ↗</a></div>
-      <figure><a :href="doc('/landing/'+shot.file)" target="_blank" rel="noopener"><img :src="doc('/landing/'+shot.file)" :alt="shot.alt" loading="lazy"></a><figcaption>{{shot.label}} · Product screenshot with fixture data</figcaption></figure>
+  <section id="gate" class="wrap gate" aria-labelledby="gate-title">
+    <p class="kicker">Then keep it from coming back</p>
+    <div class="intro"><h2 id="gate-title">Turn what you found into a check on every pull request.</h2><p>Write the limit down next to the code. A limit of three database calls per start flags the same behaviour in CI: the slow version makes 21. The check runs on your test run’s traces and links each failure to the execution behind it.</p></div>
+    <div class="gate-grid">
+      <div class="ledger">
+        <div class="ledger-row"><span class="kind">Query budget</span><div><h3>Each start makes at most three database calls.</h3><p>Catches a query per item before it ships, even when the tests are fast enough.</p></div><code>max ≤ 3 calls</code></div>
+        <div class="ledger-row"><span class="kind">Architecture</span><div><h3>Starting a session must never call Directory.</h3><p>Looks for that dependency anywhere in the recorded path.</p></div><code>0 calls</code></div>
+        <div class="ledger-row"><span class="kind">Performance</span><div><h3>95% of starts finish within 800 ms.</h3><p>The 95th percentile across the run’s 200 starts.</p></div><code>p95 ≤ 800 ms</code></div>
+        <p class="note">The real example is a different one: <a :href="prCheck">this repository’s own API checked on pull request #30</a>, with its own limits and measurements.</p>
+      </div>
+      <div class="console" aria-label="Interactive reference test runs">
+        <div class="console-head"><span><i></i> Run report · fixture data</span><code>start_session</code></div>
+        <div class="console-body">
+          <div class="switch" role="group" aria-label="Select fixture run">
+            <button v-for="(r,i) in runs" :key="r.name" :aria-pressed="i===current" @click="current=i">{{r.name}}</button>
+          </div>
+          <div aria-live="polite" aria-atomic="true">
+            <div class="metric"><span class="metric-number">{{run.calls}}</span><span>database calls<br>per startup <small>limit ≤ 3</small></span></div>
+            <div class="ticks" aria-hidden="true"><i v-for="n in 21" :key="n" :class="{on:n<=run.calls,over:n>3 && n<=run.calls}"></i></div>
+            <div class="verdict" :class="{fail:current===1}"><b>{{current===1?'× Failed':'✓ Passed'}}</b><span>{{run.summary}}</span></div>
+            <p class="observed">{{run.note}}</p>
+            <dl><div><dt>Startup p95 <small>· limit 800 ms</small></dt><dd>{{run.ms}} ms <span class="row-verdict" :class="{over:run.ms>800}">{{run.ms>800?'× over the limit':'✓'}}</span></dd></div><div><dt>Startups calling Directory <small>· limit 0</small></dt><dd>{{run.dir}} / 200 <span class="row-verdict" :class="{over:run.dir>0}">{{run.dir>0?'× over the limit':'✓'}}</span></dd></div></dl>
+          </div>
+        </div>
+        <div class="console-foot"><span>Regression fixture · 200 starts per run</span><a :href="repo+'/blob/main/fixtures/regression/qg.go'">View data ↗</a></div>
+      </div>
     </div>
   </section>
 
@@ -116,6 +113,9 @@ dl>div{display:flex;align-items:center;justify-content:space-between;border-top:
 .setup ol{list-style:none;counter-reset:step;padding:0;margin:0}.setup li{counter-increment:step;padding:0 0 18px 42px;position:relative}.setup li:before{content:counter(step,decimal-leading-zero);position:absolute;left:0;color:var(--green);font:14px var(--vp-font-family-mono)}.setup li p{margin-top:6px}.setup li:last-child{padding-bottom:0}.setup p a,.more p a{text-decoration:underline;text-underline-offset:3px;color:var(--green)}
 .more>div{min-width:0}.more h3{margin-top:28px}.local-cmd{background:#17251c;color:#f3f7ee;border-radius:8px;padding:14px 18px;margin:12px 0 0;overflow-x:auto;font:13px/1.6 var(--vp-font-family-mono),monospace}.local-cmd code{background:none;padding:0;color:inherit}.more p code{font-size:14px}
 .more h2{font-size:34px}.more p{margin:12px 0}.more details{padding:12px 0;border-top:1px solid var(--line)}summary{cursor:pointer;font-weight:600}summary h3{display:inline;font-size:inherit;font-weight:600;margin:0;letter-spacing:normal}.more summary h3{margin-top:0}.row-verdict{margin-left:8px;color:#c3e49b}.row-verdict.over{color:#edaa76}.action-cmd{margin:16px 0 20px}.setup>div,.setup>ol{min-width:0}.landing :focus-visible{outline:3px solid #78a6df;outline-offset:3px}#evidence,#start{scroll-margin-top:85px}
-@media(max-width:850px){.wrap{width:calc(100% - 40px)}.hero{grid-template-columns:1fr 1fr;gap:20px}.console-body{padding:16px}.console-head,.console-foot{padding:11px 16px}.evidence-grid{grid-template-columns:.85fr 1.25fr}.ledger-row{grid-template-columns:100px 1fr auto}}
-@media(max-width:690px){.wrap{width:calc(100% - 36px)}.hero,.intro,.setup,.more,.evidence-grid{grid-template-columns:1fr;gap:24px}.hero{padding-block:40px}.actions{gap:16px}.ledger-row{grid-template-columns:1fr auto;gap:5px 12px}.kind{grid-column:1/-1}.ledger-row>code{font-size:11px}.console-body{padding:16px}.more{gap:12px}.selectors{margin-bottom:16px}.evidence-grid{margin-top:22px}.facts{font-size:11px}}
+.hero-shot{margin:0;min-width:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#17251c}.hero-shot img{display:block;width:100%;height:auto;max-height:520px;object-fit:cover;object-position:top}.hero-shot figcaption{font:12px/1.5 var(--vp-font-family-mono),monospace;color:#c1d0c1;padding:10px 14px}.hero-shot code{color:#f3f7ee}
+.steps{list-style:none;padding:0;margin:32px 0 22px;display:grid;grid-template-columns:repeat(3,1fr);gap:28px}.steps li{min-width:0}.steps img{display:block;width:100%;aspect-ratio:1.45;object-fit:cover;object-position:top left;border:1px solid var(--line);border-radius:8px;background:#17251c}.steps h3{margin-top:14px}.steps p{color:var(--muted);font-size:15px;line-height:1.6;margin:6px 0 0}
+.gate{padding-block:clamp(48px,5.8vw,85px)}.gate-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:5%;align-items:start;margin-top:32px}.gate-grid>*{min-width:0}.gate .ledger{margin:0}.note{color:var(--muted);font-size:14px;margin-top:16px}.note a{color:var(--green);text-decoration:underline;text-underline-offset:3px}
+@media(max-width:850px){.wrap{width:calc(100% - 40px)}.hero{grid-template-columns:1fr 1fr;gap:20px}.steps{grid-template-columns:1fr 1fr}.console-body{padding:16px}.console-head,.console-foot{padding:11px 16px}.evidence-grid{grid-template-columns:.85fr 1.25fr}.ledger-row{grid-template-columns:100px 1fr auto}}
+@media(max-width:690px){.steps,.gate-grid{grid-template-columns:1fr}.wrap{width:calc(100% - 36px)}.hero,.intro,.setup,.more,.evidence-grid{grid-template-columns:1fr;gap:24px}.hero{padding-block:40px}.actions{gap:16px}.ledger-row{grid-template-columns:1fr auto;gap:5px 12px}.kind{grid-column:1/-1}.ledger-row>code{font-size:11px}.console-body{padding:16px}.more{gap:12px}.selectors{margin-bottom:16px}.evidence-grid{margin-top:22px}.facts{font-size:11px}}
 </style>
