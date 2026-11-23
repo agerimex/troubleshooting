@@ -181,7 +181,7 @@ test('M2-INV-005: a slow candidate call is compared with the slowest baseline ca
   expect(api.exampleRequests.at(-1)).toMatchObject({ kind: 'slow', threshold_ms: 100, limit: 1, population: { version: '1.0.0', operation: 'upload_recording', span_kind: 'consumer' } })
   expect(api.reportRequests.at(-1)).toMatchObject({ trace_id: BASE_TRACE, time_from: T0.toString(), time_to: (T0 + HOUR).toString() })
   await expect(page.getByTestId('compare-reference')).toContainText('the baseline call: trace ' + BASE_TRACE)
-  await expect(page.getByTestId('compare-row').getByTestId('compare-name')).toHaveText(['start_recording', 'upload_recording'])
+  await expect(page.getByTestId('compare-block-reference').getByTestId('compare-stacked-name')).toHaveText(['start_recording', 'upload_recording'])
   await expect(page.getByTestId('compare-differences')).toContainText('the same calls')
 })
 

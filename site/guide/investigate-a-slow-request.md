@@ -39,11 +39,11 @@ The execution has 25 spans. Under `check_permissions` there are **twenty `permis
 
 ## 4. Compare with a baseline call
 
-**Compare → Compare with a slow baseline call** loads the slowest baseline call of `start_session` at or above the baseline p95 and puts both executions on one time scale, call by call:
+**Compare → Compare with a slow baseline call** loads the slowest baseline call of `start_session` at or above the baseline p95 and puts both executions on one time scale, one block each:
 
-![Compare: the slow candidate call (1010 ms) against a slow baseline call (520 ms), permission_lookup × 1 → 20 and a new GET /users](/screenshots/investigate-compare-executions.png)
+![Compare, stacked: a slow baseline call (520 ms) above the slow candidate call (1010 ms); in the candidate permission_lookup runs 20 times one after another for 459 ms, and GET /users is new](/screenshots/investigate-compare-executions.png)
 
-The baseline call makes one lookup and one insert. The candidate call makes the same insert, **twenty lookups instead of one**, and a **new call to the directory service**. The time after the last recorded call is about the same in both.
+The baseline call makes one lookup and one insert. The candidate call makes the same insert, **twenty lookups instead of one**, one after another for 459 ms (orange), and a **new call to the directory service** (blue). **Side by side** shows the same as one row per call, `× 1 → 20`. The time after the last recorded call is about the same in both.
 
 ## 5. See who called whom
 

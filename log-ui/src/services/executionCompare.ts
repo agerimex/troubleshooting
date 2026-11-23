@@ -155,3 +155,61 @@ export function differences (c: ExecutionComparison): string[] {
       }
     })
 }
+
+// --- presentation
+
+// Tone is what a row's color says: the entry, an unchanged call, more or
+// fewer calls of it, a new call, or one no longer made.
+export type CompareTone = 'entry' | 'same' | 'more' | 'fewer' | 'new' | 'missing'
+
+export function toneOf (r: CompareRow): CompareTone {
+  return r.depth === 0 && r.change === 'same' ? 'entry' : r.change
+}
+
+// RunNote describes the calls of one row on one side when there are
+// several: how many, whether they ran one after another (no two overlap)
+// or overlapped, and the time from the first start to the last end.
+export interface RunNote {
+  count: number
+  sequential: boolean
+  startMs: number
+  endMs: number
+  text: string
+}
+
+export function runNote (side: CompareSide): RunNote | null {
+  const valid = side.segments.filter((s) => s.endMs !== null).sort((a, b) => a.startMs - b.startMs)
+  if (side.count < 2 || valid.length < 2) {
+    return null
+  }
+  let sequential = true
+  for (let i = 1; i < valid.length; i++) {
+    if (valid[i].startMs < valid[i - 1].endMs!) {
+      sequential = false
+    }
+  }
+  const startMs = valid[0].startMs
+  const endMs = Math.max(...valid.map((s) => s.endMs!))
+  const ms = endMs - startMs
+  const span = ms.toFixed(ms >= 10 ? 0 : 1) + ' ms'
+  return {
+    count: side.count,
+    sequential,
+    startMs,
+    endMs,
+    text: `${side.count} calls, ${sequential ? 'one after another' : 'overlapping'}: ${span}`
+  }
+}
+
+// sideRows are the rows of one execution in the stacked layout: the calls
+// it made, in order.
+export function sideRows (c: ExecutionComparison, side: 'reference' | 'current'): CompareRow[] {
+  return c.rows.filter((r) => r[side].count > 0)
+}
+
+// deltaText: the difference of the two executions' durations.
+export function deltaText (c: ExecutionComparison): string {
+  const d = c.currentMs - c.referenceMs
+  const v = Math.abs(d)
+  return (d >= 0 ? '+' : '−') + v.toFixed(v >= 10 ? 0 : 1) + ' ms'
+}

@@ -25,7 +25,7 @@ const walkthrough='/guide/investigate-a-slow-request.html'
       <div class="actions"><a class="primary" :href="doc(walkthrough)">Explore a slow request <span aria-hidden="true">→</span></a><a class="simple" :href="prCheck">See a real PR check ↗</a></div>
       <p class="facts">Self-hosted · OpenTelemetry · Go or any OTLP SDK</p>
     </div>
-    <figure class="hero-shot"><a :href="doc(walkthrough)"><img :src="doc('/screenshots/investigate-hero.png')" alt="Compare view: a slow start_session of the new version (1010 ms) against a slow baseline call (520 ms) on one time scale. permission_lookup went from 1 to 20 calls and GET /users to the directory service is new." width="588" height="350"></a><figcaption>Product screenshot · fixture data. A slow <code>start_session</code> of the new version next to a slow baseline call: twenty permission lookups where there was one, and a new call to the directory service.</figcaption></figure>
+    <figure class="hero-shot"><a :href="doc(walkthrough)"><img :src="doc('/screenshots/investigate-hero.png')" alt="Compare view, stacked: a slow baseline call of start_session (520 ms) above a slow call of the new version (1010 ms) on one time scale. In the new version permission_lookup runs 20 times, one after another, for 459 ms, and GET /users to the directory service is new." width="588" height="445"></a><figcaption>Product screenshot · fixture data. A slow baseline call above a slow call of the new version, on one time scale: twenty permission lookups in a row where there was one, and a new call to the directory service.</figcaption></figure>
   </section>
 
   <section id="investigate" class="band" aria-labelledby="investigate-title"><div class="wrap">
