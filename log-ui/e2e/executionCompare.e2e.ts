@@ -63,18 +63,36 @@ test('EXC-003: Compare reads another trace in the same window and lines up their
   await page.getByTestId('compare-trace-submit').click()
   await expect(page.getByTestId('execution-compare')).toBeVisible()
   expect(api.reportRequests.at(-1)).toMatchObject({ trace_id: BASELINE, time_from: FROM, time_to: TO })
+  // Stacked by default: one block per execution, the changed call colored and described.
+  await expect(page.getByTestId('execution-compare')).toHaveAttribute('data-layout', 'stacked')
+  const reference = page.getByTestId('compare-block-reference')
+  const current = page.getByTestId('compare-block-current')
+  await expect(reference.getByTestId('compare-stacked-name')).toHaveText(['start_session', 'check_permissions', 'permission_lookup'])
+  await expect(current.getByTestId('compare-stacked-name')).toHaveText(['start_session', 'check_permissions', 'permission_lookup', 'GET /users'])
+  const lookups = current.getByTestId('compare-stacked-row').filter({ hasText: 'permission_lookup' })
+  await expect(lookups).toHaveAttribute('data-change', 'more')
+  await expect(lookups.getByTestId('compare-stacked-count')).toHaveText('× 5')
+  await expect(lookups.getByTestId('compare-stacked-bar')).toHaveCount(5)
+  await expect(current.getByTestId('compare-run-note')).toContainText('5 calls, overlapping')
+  await expect(current.getByTestId('compare-stacked-new')).toHaveText('new')
+  await expect(page.getByTestId('compare-totals')).toContainText('+')
+  await page.getByTestId('compare-differences').locator('summary').click()
+  await expect(page.getByTestId('compare-difference')).toHaveText(['permission_lookup: 1 → 5 calls', 'GET /users: a new call'])
+
+  // Side by side: one row per call with a bar for each execution; the choice is kept.
+  await page.getByTestId('compare-layout-side').click()
   const rows = page.getByTestId('compare-row')
   await expect(rows.getByTestId('compare-name')).toHaveText(['start_session', 'check_permissions', 'permission_lookup', 'GET /users'])
   await expect(rows.filter({ hasText: 'permission_lookup' })).toHaveAttribute('data-change', 'more')
   await expect(rows.filter({ hasText: 'permission_lookup' }).getByTestId('compare-counts')).toHaveText('× 1 → 5')
   await expect(rows.filter({ hasText: 'permission_lookup' }).getByTestId('compare-current-bar')).toHaveCount(5)
   await expect(rows.filter({ hasText: 'GET /users' })).toHaveAttribute('data-change', 'new')
-  await expect(page.getByTestId('compare-difference')).toHaveText(['permission_lookup: 1 → 5 calls', 'GET /users: a new call'])
-  // Back to the timeline and the compared trace stays loaded.
+  await expect(rows.filter({ hasText: 'GET /users' }).getByTestId('compare-counts')).toHaveText('new')
+  // Back to the timeline and the compared trace stays loaded, in the chosen layout.
   await page.getByTestId('view-timeline').click()
   await expect(page.getByTestId('trace-timeline')).toBeVisible()
   await page.getByTestId('view-compare').click()
-  await expect(page.getByTestId('execution-compare')).toBeVisible()
+  await expect(page.getByTestId('execution-compare')).toHaveAttribute('data-layout', 'side')
 })
 
 test('EXC-004: a trace without spans in the window is said, not drawn', async ({ page }) => {

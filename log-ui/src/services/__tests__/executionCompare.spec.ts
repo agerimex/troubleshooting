@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareExecutions, differences } from '@/services/executionCompare'
+import { compareExecutions, deltaText, differences, runNote, sideRows, toneOf } from '@/services/executionCompare'
 import { groupRepeats, REPEAT_MIN, timeline } from '@/services/problems'
 import { type Span } from '@/types/filter'
 
@@ -127,5 +127,35 @@ describe('comparing two executions', () => {
     const other = [span('4', 'a000000000000000', ROOT, 'end_session', 0, 50, { spanKind: 'server' })]
     expect(compareExecutions(baseline, other).differentEntry).toBe(true)
     expect(compareExecutions([], candidate)).toMatchObject({ referenceMs: 0, currentMs: 910, differentEntry: false })
+  })
+})
+
+describe('presenting a comparison', () => {
+  const baseline = startSession('5', 1, 420, false)
+  const candidate = startSession('6', 20, 910, true)
+  const c = compareExecutions(baseline, candidate)
+  const row = (name: string) => c.rows.find((r) => r.name === name)!
+
+  it('gives each row a tone: the entry, unchanged, more, new, fewer or missing', () => {
+    expect(c.rows.map(toneOf)).toEqual(['entry', 'same', 'more', 'same', 'new', 'new'])
+    expect(compareExecutions(candidate, baseline).rows.map(toneOf)).toEqual(['entry', 'same', 'fewer', 'same', 'missing', 'missing'])
+  })
+
+  it('describes a run of calls: count, one after another or overlapping, first start to last end', () => {
+    expect(runNote(row('permission_lookup').current)).toEqual({ count: 20, sequential: true, startMs: 2, endMs: 461, text: '20 calls, one after another: 459 ms' })
+    expect(runNote(row('permission_lookup').reference)).toBeNull()
+    const overlapping = { count: 3, segments: [{ startMs: 0, endMs: 10, error: false }, { startMs: 5, endMs: 12, error: false }, { startMs: 20, endMs: 21, error: false }] }
+    expect(runNote(overlapping)?.text).toBe('3 calls, overlapping: 21 ms')
+    expect(runNote({ count: 2, segments: [{ startMs: 0, endMs: null, error: false }, { startMs: 1, endMs: 2, error: false }] })).toBeNull()
+  })
+
+  it('lists the calls of each execution for the stacked layout', () => {
+    expect(sideRows(c, 'reference').map((r) => r.name)).toEqual(['start_session', 'check_permissions', 'permission_lookup', 'insert_session'])
+    expect(sideRows(c, 'current')).toHaveLength(6)
+  })
+
+  it('states the difference in duration with its sign', () => {
+    expect(deltaText(c)).toBe('+490 ms')
+    expect(deltaText(compareExecutions(candidate, baseline))).toBe('−490 ms')
   })
 })

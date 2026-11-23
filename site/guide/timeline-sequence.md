@@ -54,13 +54,21 @@ Click a span to select it. The right panel then shows only that span's logs: **T
 
 ## Compare two executions
 
-**Compare** puts another execution next to this one on one time scale, each timed from its own start. Calls are matched by their path: the service, kind and name of the call and of each caller up to the entry. Repeated calls share a row, so a lookup made once in one execution and twenty times in the other is one row, `× 1 → 20`. Calls only one execution made are marked *new* or *not called*, and a list names the calls that differ.
+**Compare** puts another execution next to this one on one time scale, each timed from its own start, with both durations and the difference at the top. Calls are matched by their path: the service, kind and name of the call and of each caller up to the entry. Colors say what changed: orange for more calls of the same kind, blue for a new call, dashed for fewer or no longer made, grey for unchanged.
+
+- **Stacked** (the default) shows one block per execution, each with its calls in order and repeated calls in one row (`× 20`). Under a call made more often it says how many, whether they ran one after another or overlapped, and for how long.
+- **Side by side** shows one row per call with a bar for each execution, upper this one, lower the other, and the counts (`× 1 → 20`). It suits large executions, where the two blocks of Stacked get long.
+
+The layout you pick is kept for next time. The calls that differ are listed under the totals.
 
 - **Compare with trace id** reads any other trace within this report's window.
 - **Compare with a slow baseline call** appears for a slow example opened from [Releases](./releases). It loads the slowest baseline call of the same operation at or above the baseline p95: a slow call of each version.
 
-![Compare: a slow start_session of the new version against a slow baseline call](/screenshots/investigate-compare-executions.png)
+![Compare, stacked: a slow baseline call above a slow start_session of the new version](/screenshots/investigate-compare-executions.png)
 *A slow `start_session` of the new version (1010 ms) against a slow baseline call (520 ms): twenty `permission_lookup` calls where the baseline made one, and a new `GET /users` call.*
+
+![Compare, side by side: one row per call, permission_lookup × 1 → 20, GET /users new](/screenshots/exec-compare-side.png)
+*The same two executions side by side.*
 
 Compare shows what the two executions recorded differently. It doesn't say which difference caused the change in duration.
 
