@@ -197,7 +197,7 @@ deploy or change shared config without asking me; ask before deleting anything.
      sender.Shutdown(ctx) on exit. Router middleware (otelchi with WithChiRoutes, or otelhttp)
      so span names are route patterns, not raw paths with ids. DB: otelsql with
      TraceQueryWithoutArgs, db.system set per driver, and no rows_close/rows_affected spans
-     (they double the gate's db_calls). Get log-sender with `go get ...log-sender@v0.1.0`.
+     (they double the gate's db_calls). Get log-sender with `go get ...log-sender@v0.1.1`.
    - Other languages: the standard OpenTelemetry SDK, OTLP over gRPC to <receiver host>:4317
      (set the protocol explicitly: some SDKs default to HTTP, which is not supported).
    - Throttle export errors: otel.SetErrorHandler that logs the first failure, then at most one
@@ -260,7 +260,7 @@ log-sender and the receiver redact the most common of these by default (below), 
 **2. Send spans, off by default.** Go applications use log-sender (spans with child counts, plus logs that carry their span):
 
 ```
-go get github.com/agerimex/troubleshooting/log-sender@v0.1.0
+go get github.com/agerimex/troubleshooting/log-sender@v0.1.1
 ```
 
 ```go
