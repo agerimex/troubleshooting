@@ -70,7 +70,7 @@ The same steps by hand:
 git clone https://github.com/agerimex/troubleshooting.git
 cd troubleshooting
 make all && make up          # builds and starts the stack; UI on http://localhost:8095
-go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.0
+go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.1
 
 cd examples/quality-gate
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317 OTEL_EXPORTER_OTLP_INSECURE=true
@@ -129,13 +129,13 @@ Counts depend on the code and the test data, not on the machine, so `db_calls`, 
 
 ```yaml
 - id: troubleshooting
-  uses: agerimex/troubleshooting/quality-check/stack@quality-check/v0.1.0   # starts a private Troubleshooting inside the job
+  uses: agerimex/troubleshooting/quality-check/stack@quality-check/v0.1.1   # starts a private Troubleshooting inside the job
 - run: go test ./...                                          # or your own test command
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
     OTEL_EXPORTER_OTLP_INSECURE: "true"
     OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=ci-${{ github.run_id }}-${{ github.run_attempt }}
-- uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.0   # a release; @main for the newest
+- uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.1   # a release; @main for the newest
   with:
     url: ${{ steps.troubleshooting.outputs.url }}
     ui: ${{ steps.troubleshooting.outputs.ui }}
@@ -217,7 +217,7 @@ deploy or change shared config without asking me; ask before deleting anything.
    sessions' tokens), with TROUBLESHOOTING_ADDR=127.0.0.1:50055 TROUBLESHOOTING_RUN=<run id>.
    Send requests that carry a password you choose, a ?token=SECRET123, and anything with URL
    credentials. Wait 6 s, then:
-     go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.0
+     go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.1
      troubleshooting-check privacy --url http://127.0.0.1:8094 --service <service>   # must exit 0
    It finds SQL arguments, URL credentials (keys too), tokens in query strings, bearer tokens and
    password hashes. Your own values it can't know, so also check that the password and a
@@ -231,7 +231,7 @@ deploy or change shared config without asking me; ask before deleting anything.
    (https://github.com/agerimex/troubleshooting/blob/main/docs/quality-gate.md): run.executions = N,
    latency p95 and db_calls per operation, limits with headroom for slower CI. Use a dataset big
    enough to expose N+1 queries (a list with 1 row hides them). Run:
-     go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.0
+     go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.1
      troubleshooting-check --url http://127.0.0.1:8094 --rules quality.yaml --run <run id> \
        --from <UTC> --to <UTC> --markdown summary.md --ui none   # 0 pass,1 fail,2 unresolved,3 error
 
