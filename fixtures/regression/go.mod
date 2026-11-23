@@ -13,7 +13,7 @@ require (
 )
 
 require (
-	github.com/agerimex/troubleshooting/protos v0.0.0-20261118173553-a5eb3407b92e // indirect
+	github.com/agerimex/troubleshooting/protos v0.1.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
