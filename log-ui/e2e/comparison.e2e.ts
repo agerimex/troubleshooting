@@ -156,6 +156,35 @@ test('M2-INV-001 / M2-REF-001: a slow example opens its trace in the population 
   expect(data.embeddedReports[0].report.logs.records.map((l: { message: string }) => l.message)).toContain('Storage returned 403 AccessDenied')
 })
 
+test('M2-INV-005: a slow candidate call is compared with the slowest baseline call at or above the baseline p95', async ({ page }) => {
+  const BASE_TRACE = 'abcdefabcdefabcdefabcdefabcdef01'
+  const slow = (traceId: string, durationMs: number, version: string) => ({ data: { Examples: {
+    status: 'ok', condition: 'ok', limit: 10, shown: 1, total: 1, truncated: false, thresholdMs: 100, cutoff: '1', description: '',
+    examples: [{ sourceKind: 'span', traceId, spanId: UPLOAD, time: (T0 + 1000n).toString(), durationMs, service: 'recording-worker', operation: 'upload_recording', version, message: '' }]
+  } } })
+  const baseSpan = { ...uploadSpan, traceId: BASE_TRACE, status: 'ok', statusCode: 2, duration: 100000 }
+  const api = await openCompare(page, {
+    compare: () => ({ data: { Analysis: regression() } }),
+    examples: (body) => body.population.version === '1.0.0' ? slow(BASE_TRACE, 100, '1.0.0') : slow(FAILED_TRACE, 160, '1.1.0'),
+    report: (body) => body.trace_id === BASE_TRACE
+      ? { spans: { records: [{ ...apiSpan, traceId: BASE_TRACE }, baseSpan] }, logs: { records: [] } }
+      : { spans: { records: [apiSpan, uploadSpan] }, logs: { records: [accepted, retry, denied] } }
+  })
+  await runComparison(page)
+  await page.getByTestId('row-slow-examples').click()
+  await page.getByTestId('open-example-report').click()
+  await page.getByTestId('view-compare').click()
+  await expect(page.getByTestId('compare-counterpart')).toHaveText('Compare with a slow baseline call')
+  await page.getByTestId('compare-counterpart').click()
+  await expect(page.getByTestId('execution-compare')).toBeVisible()
+  // The baseline population, the operation of the row, its own p95, one call.
+  expect(api.exampleRequests.at(-1)).toMatchObject({ kind: 'slow', threshold_ms: 100, limit: 1, population: { version: '1.0.0', operation: 'upload_recording', span_kind: 'consumer' } })
+  expect(api.reportRequests.at(-1)).toMatchObject({ trace_id: BASE_TRACE, time_from: T0.toString(), time_to: (T0 + HOUR).toString() })
+  await expect(page.getByTestId('compare-reference')).toContainText('the baseline call: trace ' + BASE_TRACE)
+  await expect(page.getByTestId('compare-row').getByTestId('compare-name')).toHaveText(['start_recording', 'upload_recording'])
+  await expect(page.getByTestId('compare-differences')).toContainText('the same calls')
+})
+
 test('M2-INV-002: an error log example opens its report with the log highlighted', async ({ page }) => {
   await openCompare(page, {
     compare: () => ({ data: { Analysis: regression() } }),

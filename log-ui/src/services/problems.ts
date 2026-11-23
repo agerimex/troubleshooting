@@ -301,6 +301,81 @@ export function timeline (spans: Span[]): Timeline {
   return { rows, totalMs }
 }
 
+// --- repeated calls
+
+// REPEAT_MIN is the shortest run of repeated calls that is folded into one
+// timeline row.
+export const REPEAT_MIN = 3
+
+// TimelineGroup is a run of repeated calls: consecutive sibling spans of one
+// parent with the same service, kind and name and no children of their own
+// (an N+1 query, a call per item). Folding is presentation only: every span
+// stays in the report and the group expands into its rows.
+export interface TimelineGroup {
+  key: string // 'repeat:' + the first span's key
+  name: string
+  depth: number
+  rows: TimelineRow[]
+  startMs: number // the first start
+  endMs: number | null // the last valid end; null if none is valid
+  minMs: number | null // shortest and longest valid duration
+  maxMs: number | null
+  errors: number // spans with status error
+}
+
+export type TimelineItem =
+  | { type: 'row', row: TimelineRow }
+  | { type: 'group', group: TimelineGroup, expanded: boolean }
+
+const repeatOf = (r: TimelineRow) => [r.span.traceId, r.span.parentSpanId, r.span.service, r.span.spanKind ?? '', r.span.name].join('\u0000')
+
+// groupRepeats folds runs of at least REPEAT_MIN repeated leaf calls (see
+// TimelineGroup) of an ordered timeline. A group listed in expanded, or one
+// that holds the selected span, is shown expanded: its header followed by
+// its rows. Detached spans (parent not loaded) are never folded.
+export function groupRepeats (rows: TimelineRow[], expanded: ReadonlySet<string>, selected: string | null): TimelineItem[] {
+  const out: TimelineItem[] = []
+  const isLeaf = (i: number) => i + 1 >= rows.length || rows[i + 1].depth <= rows[i].depth
+  let i = 0
+  while (i < rows.length) {
+    let j = i + 1
+    if (!rows[i].detached && isLeaf(i)) {
+      const id = repeatOf(rows[i])
+      while (j < rows.length && rows[j].depth === rows[i].depth && !rows[j].detached && repeatOf(rows[j]) === id && isLeaf(j)) {
+        j++
+      }
+    }
+    if (j - i < REPEAT_MIN) {
+      out.push({ type: 'row', row: rows[i] })
+      i++
+      continue
+    }
+    const run = rows.slice(i, j)
+    const valid = run.filter((r) => r.endMs !== null)
+    const durations = valid.map((r) => r.endMs! - r.startMs)
+    const group: TimelineGroup = {
+      key: 'repeat:' + run[0].key,
+      name: run[0].span.name,
+      depth: run[0].depth,
+      rows: run,
+      startMs: Math.min(...run.map((r) => r.startMs)),
+      endMs: valid.length ? Math.max(...valid.map((r) => r.endMs!)) : null,
+      minMs: durations.length ? Math.min(...durations) : null,
+      maxMs: durations.length ? Math.max(...durations) : null,
+      errors: run.filter((r) => r.span.status === 'error').length
+    }
+    const open = expanded.has(group.key) || (selected !== null && run.some((r) => r.key === selected))
+    out.push({ type: 'group', group, expanded: open })
+    if (open) {
+      for (const r of run) {
+        out.push({ type: 'row', row: r })
+      }
+    }
+    i = j
+  }
+  return out
+}
+
 // --- logs
 
 export const TASK_ATTRIBUTE = 'task.id'

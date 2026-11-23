@@ -141,7 +141,7 @@ import {
   statsStatusText, windowText, type IncludedReport
 } from '@/services/comparison'
 import {
-  type Analysis, type AnalysisSummary, type CallStats, type ComparisonRow, type Example, type ExamplesRequest, type GroupComparison, type Population
+  type Analysis, type AnalysisSummary, type CallStats, type ComparisonRow, type Counterpart, type Example, type ExamplesRequest, type GroupComparison, type Population
 } from '@/types/stats'
 
 // populationOf turns the stored population definition of an analysis back
@@ -173,7 +173,7 @@ export default defineComponent({
     const comparing = ref(false)
     const saved = ref<{ id: string, label: string }[]>([])
     const savedId = ref<string | null>(null)
-    const examples = ref<{ request: ExamplesRequest, title: string, side: 'baseline' | 'candidate', example: string } | null>(null)
+    const examples = ref<{ request: ExamplesRequest, title: string, side: 'baseline' | 'candidate', example: string, counterpart?: Counterpart } | null>(null)
     let seq = 0
 
     async function loadSaved () {
@@ -281,11 +281,23 @@ export default defineComponent({
       const row = a.rows[i]
       const threshold = slowThreshold(row)!
       const pop = { ...populationFor('candidate'), operation: row.operation, spanKind: row.spanKind }
+      // A slow candidate call is compared with the slowest baseline call at
+      // or above the baseline p95: a slow call of each version.
+      const baseP95 = row.baseline?.percentiles?.p95?.valueMs ?? null
+      const counterpart: Counterpart | undefined = baseP95 === null
+        ? undefined
+        : {
+            request: { population: { ...populationFor('baseline'), operation: row.operation, spanKind: row.spanKind }, kind: 'slow', thresholdMs: baseP95, cutoff: a.baseline.cutoff, limit: 1 },
+            window: { from: populationFor('baseline').timeFrom, to: populationFor('baseline').timeTo },
+            label: 'baseline',
+            description: `the slowest baseline call of ${row.operation} at or above the baseline p95 (${baseP95.toFixed(1)} ms)`
+          }
       examples.value = {
         request: { population: pop, kind: 'slow', thresholdMs: threshold, cutoff: a.candidate.cutoff },
         title: `Observed slow candidate calls of ${row.operation} at or above the displayed p95 (${threshold.toFixed(1)} ms)`,
         side: 'candidate',
-        example: `observed slow call (≥ ${threshold.toFixed(1)} ms, the candidate p95) of ${row.operation}`
+        example: `observed slow call (≥ ${threshold.toFixed(1)} ms, the candidate p95) of ${row.operation}`,
+        counterpart
       }
     }
 
@@ -315,7 +327,8 @@ export default defineComponent({
           analysisTitle: a.title,
           analysisGeneratedAt: a.generatedAt,
           example: examples.value!.example,
-          population: `${side}: ${a[side].label}`
+          population: `${side}: ${a[side].label}`,
+          counterpart: examples.value!.counterpart
         }
       })
     }

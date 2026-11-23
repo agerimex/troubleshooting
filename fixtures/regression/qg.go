@@ -69,27 +69,33 @@ func (d dataset) qgSpans() []*collectortracepb.ExportTraceServiceRequest {
 			trace := d.traceID(scQG+ri, i+1)
 			at := d.qgStart(ri).Add(time.Duration(i) * 600 * time.Millisecond)
 			ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
-			api = append(api,
-				spanSpec{trace: trace, id: idRoot, name: "start_session", kind: server, start: at, dur: qgDuration(i, r.p95), status: ok},
-				spanSpec{trace: trace, id: idChild1, parent: idRoot, name: "check_permissions", kind: internal, start: at.Add(ms(1)), dur: ms(30), status: ok})
-			lookups, name := 1, "permission_lookup"
+			// The recorded calls account for the difference between the
+			// versions: a lookup takes 22 ms (the candidate makes twenty), the
+			// batched one 140 ms, the directory call 45 ms. The rest of each
+			// execution (about 300-500 ms) is work outside recorded spans,
+			// alike in every version.
+			lookups, name, step := 1, "permission_lookup", 23
 			switch r.name {
 			case "candidate":
 				lookups = 20
 			case "fixed", "few":
-				name = "permission_batch_lookup"
+				name, step = "permission_batch_lookup", 141
 			}
+			permEnd := 2 + lookups*step
+			api = append(api,
+				spanSpec{trace: trace, id: idRoot, name: "start_session", kind: server, start: at, dur: qgDuration(i, r.p95), status: ok},
+				spanSpec{trace: trace, id: idChild1, parent: idRoot, name: "check_permissions", kind: internal, start: at.Add(ms(1)), dur: ms(permEnd - 1), status: ok})
 			for k := 0; k < lookups; k++ {
 				api = append(api, spanSpec{trace: trace, id: fmt.Sprintf("00000000000001%02x", k), parent: idChild1, name: name, kind: client,
-					start: at.Add(ms(2 + k)), dur: ms(1), status: ok, attrs: db})
+					start: at.Add(ms(2 + k*step)), dur: ms(step - 1), status: ok, attrs: db})
 			}
 			api = append(api, spanSpec{trace: trace, id: idChild2, parent: idRoot, name: "insert_session", kind: client,
-				start: at.Add(ms(40)), dur: ms(2), status: ok, attrs: db})
+				start: at.Add(ms(permEnd + 3)), dur: ms(4), status: ok, attrs: db})
 			if r.name == "candidate" {
 				api = append(api, spanSpec{trace: trace, id: qgClientID, parent: idRoot, name: "GET /users", kind: client,
-					start: at.Add(ms(50)), dur: ms(20), status: ok})
+					start: at.Add(ms(permEnd + 10)), dur: ms(45), status: ok})
 				dir = append(dir, spanSpec{trace: trace, id: "00000000000000d2", parent: qgClientID, name: "GET /users/{id}", kind: server,
-					start: at.Add(ms(51)), dur: ms(18), status: ok})
+					start: at.Add(ms(permEnd + 11)), dur: ms(43), status: ok})
 			}
 		}
 		parts := []*collectortracepb.ExportTraceServiceRequest{request(d.service("qg-api"), res, api...)}
