@@ -59,13 +59,15 @@ runs:
         echo "logs=$dir" >> "$GITHUB_OUTPUT"
         echo "bin=$dir/bin" >> "$GITHUB_OUTPUT"
 
-        # ClickHouse first: pulling and starting it overlaps with restoring
-        # or building the receiver and the API.
-        docker run -d --name troubleshooting-clickhouse \
+        # ClickHouse first, in the background: pulling and starting it
+        # overlaps with installing Go and restoring or building the receiver
+        # and the API. "Start Troubleshooting" waits for it; a failed start
+        # shows up there with this log.
+        nohup docker run -d --name troubleshooting-clickhouse \
           -p "127.0.0.1:$TS_CH_PORT:9000" \
           -e CLICKHOUSE_USER=default -e CLICKHOUSE_PASSWORD= -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
           -v "$TS_ROOT/clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml:ro" \
-          --ulimit nofile=262144:262144 "$TS_CH_IMAGE" > /dev/null
+          --ulimit nofile=262144:262144 "$TS_CH_IMAGE" > "$dir/clickhouse-start.log" 2>&1 &
 
         # The built receiver and API are cached under a hash of their sources
         # and of the modules they replace, so they are built once per version
@@ -80,8 +82,9 @@ runs:
       with:
         path: ${{ steps.clickhouse.outputs.bin }}
         key: ${{ steps.clickhouse.outputs.key }}
+    # Installed on a cache hit too: the job's later steps get the same Go on
+    # the PATH either way, as they did before the cache.
     - uses: actions/setup-go@v5
-      if: steps.cache.outputs.cache-hit != 'true'
       with:
         # A supported Go builds the tools; the go.mod files keep their minimum
         # (1.21.5), which applications importing log-sender inherit.
