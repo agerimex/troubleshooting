@@ -79,7 +79,7 @@ lifecycle, load and outage experiments, and an enforced CI trust model (see
 3. Run the tests against your instrumented application, then:
 
    ```
-   go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.0
+   go install github.com/agerimex/troubleshooting/quality-check/cmd/troubleshooting-check@v0.1.1
    troubleshooting-check --url http://localhost:8095 --rules quality.yaml \
        --run pr-42-1 --baseline main-118 --json result.json
    ```
@@ -133,7 +133,7 @@ the gate.
 
 ```yaml
 - name: Quality gate
-  uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.0   # a release; @main for the newest
+  uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.1   # a release; @main for the newest
   with:
     url: http://localhost:8095          # where your Troubleshooting runs
     run: ci-${{ github.run_id }}-${{ github.run_attempt }}
@@ -208,13 +208,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: troubleshooting
-        uses: agerimex/troubleshooting/quality-check/stack@quality-check/v0.1.0
+        uses: agerimex/troubleshooting/quality-check/stack@quality-check/v0.1.1
       - run: go test ./...
         env:
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.troubleshooting.outputs.otlp-endpoint }}
           OTEL_EXPORTER_OTLP_INSECURE: "true"
           OTEL_RESOURCE_ATTRIBUTES: troubleshooting.run=ci-${{ github.run_id }}-${{ github.run_attempt }}
-      - uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.0
+      - uses: agerimex/troubleshooting/quality-check@quality-check/v0.1.1
         with:
           url: ${{ steps.troubleshooting.outputs.url }}
           ui: ${{ steps.troubleshooting.outputs.ui }}   # none: no links to a server that is gone after the job
