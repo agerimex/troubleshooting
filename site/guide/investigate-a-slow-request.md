@@ -6,7 +6,7 @@ description: A worked investigation with real product screenshots - a session st
 
 A session start got slower in the new version. This page follows the investigation step by step, with screenshots of the product. You don't need to install anything to follow it.
 
-The data is the regression fixture of this repository ([`fixtures/regression/qg.go`](https://github.com/agerimex/troubleshooting/blob/main/fixtures/regression/qg.go)): a `start_session` operation of a service `qg-api`, 200 starts in the version `baseline` and 200 in the version `candidate`. Service names carry the fixture run's prefix (`fxb7d3b725-`).
+The data is the regression fixture of this repository ([`fixtures/regression/qg.go`](https://github.com/agerimex/troubleshooting/blob/main/fixtures/regression/qg.go)): a `start_session` operation of a service `qg-api`, 200 starts in the version `baseline` and 200 in the version `candidate`. Service names carry the fixture run's prefix (`fx6dfd6b65-`).
 
 ## 1. Compare the releases
 
@@ -14,8 +14,8 @@ The data is the regression fixture of this repository ([`fixtures/regression/qg.
 
 | | Service | Operation | Version |
 | --- | --- | --- | --- |
-| Baseline | `fxb7d3b725-qg-api` | `start_session` | `baseline` |
-| Candidate | `fxb7d3b725-qg-api` | `start_session` | `candidate` |
+| Baseline | `fx6dfd6b65-qg-api` | `start_session` | `baseline` |
+| Candidate | `fx6dfd6b65-qg-api` | `start_session` | `candidate` |
 
 ![Release comparison of start_session: p95 420 ms in the baseline version and 910 ms in the candidate, marked as a regression signal](/screenshots/investigate-compare.png)
 
@@ -33,11 +33,19 @@ A comparison points at what to investigate. It doesn't prove the cause, so the n
 
 ## 3. Read the timeline
 
-![Timeline of one slow start_session: check_permissions with twenty permission_lookup spans, insert_session, and GET /users to the directory service](/screenshots/investigate-timeline.png)
+![Timeline of one slow start_session: check_permissions with twenty permission_lookup calls folded into one row, insert_session, and GET /users to the directory service](/screenshots/investigate-timeline.png)
 
-The execution has 25 spans. Under `check_permissions` there are **twenty `permission_lookup` database calls**, one per permission, followed by one `insert_session` and a `GET /users` call. In the baseline version the same operation makes one lookup and one insert, and no other call.
+The execution has 25 spans. Under `check_permissions` there are **twenty `permission_lookup` database calls**, one per permission, run one after another: 22 ms each, 461 ms in all, almost half of the request. The timeline folds them into one row, `× 20`, with each call as a segment; click it to list every call. Then come one `insert_session` and a 45 ms `GET /users` call. The time after `GET /users` has no recorded spans: it is the service's own work.
 
-## 4. See who called whom
+## 4. Compare with a baseline call
+
+**Compare → Compare with a slow baseline call** loads the slowest baseline call of `start_session` at or above the baseline p95 and puts both executions on one time scale, call by call:
+
+![Compare: the slow candidate call (1010 ms) against a slow baseline call (520 ms), permission_lookup × 1 → 20 and a new GET /users](/screenshots/investigate-compare-executions.png)
+
+The baseline call makes one lookup and one insert. The candidate call makes the same insert, **twenty lookups instead of one**, and a **new call to the directory service**. The time after the last recorded call is about the same in both.
+
+## 5. See who called whom
 
 **Sequence** draws the same execution as calls between services:
 
@@ -49,19 +57,19 @@ Each `permission_lookup` is an arrow from the API to PostgreSQL, numbered *repea
 
 At the end, the API also calls the **directory service** (`GET /users`). The baseline version never calls it.
 
-**What the trace shows:** the new version reads permissions one by one, a query per permission, and it added a dependency on the directory service. Both are worth investigating. They don't establish how much each contributed to the 490 ms increase in p95: the fixture generates each request's duration independently of its calls.
+**What the trace shows:** the new version reads permissions one by one, a query per permission, and it added a dependency on the directory service. Together they account for most of the 490 ms increase in p95: nineteen extra lookups of about 23 ms and a 45 ms directory call. A trace shows where one request spent its time. To confirm the cause, fix it and compare again.
 
-## 5. Check it in a test run
+## 6. Check it in a test run
 
 Once you know what must stay true, you can write it down next to the code and check each test run against it with the quality gate. For this operation:
 
 ```yaml
 # quality.yaml
 version: 1
-entry: {service: fxb7d3b725-qg-api, operation: start_session, span_kind: server}
+entry: {service: fx6dfd6b65-qg-api, operation: start_session, span_kind: server}
 checks:
   - {id: db-calls, type: db_calls, max_per_execution: 3}
-  - {id: no-directory, type: forbidden_call, to: fxb7d3b725-qg-directory}
+  - {id: no-directory, type: forbidden_call, to: fx6dfd6b65-qg-directory}
 ```
 
 Service names must match exactly. These are the names recorded in the run on this page; a fresh fixture run gets a different prefix, so use the service names recorded in your own run.

@@ -91,8 +91,9 @@
           <span v-if="tl.totalMs > 1">{{ fmt(tl.totalMs) }} ms from first start to last end</span>
         </div>
         <div v-if="report.spans.records.length" class="seg" role="tablist" aria-label="Execution view">
-          <button type="button" role="tab" :aria-selected="view === 'timeline'" :class="{ on: view === 'timeline' }" @click="setView('timeline')" data-testid="view-timeline">Timeline</button>
-          <button type="button" role="tab" :aria-selected="view === 'sequence'" :class="{ on: view === 'sequence' }" @click="setView('sequence')" data-testid="view-sequence">Sequence</button>
+          <button type="button" role="tab" :aria-selected="!comparing && view === 'timeline'" :class="{ on: !comparing && view === 'timeline' }" @click="setView('timeline')" data-testid="view-timeline">Timeline</button>
+          <button type="button" role="tab" :aria-selected="!comparing && view === 'sequence'" :class="{ on: !comparing && view === 'sequence' }" @click="setView('sequence')" data-testid="view-sequence">Sequence</button>
+          <button type="button" role="tab" :aria-selected="comparing" :class="{ on: comparing }" @click="comparing = true" data-testid="view-compare">Compare</button>
         </div>
       </div>
 
@@ -106,7 +107,31 @@
           </div>
           <template v-else>
             <p v-if="report.spans.truncated" class="state warn" data-testid="spans-truncated">{{ report.spans.shown }} of {{ report.spans.total ?? 'more' }} spans were loaded (limit {{ report.spans.limit }}): the rest are not in this report.</p>
-            <SequenceView v-if="view === 'sequence' && seqModel" :model="seqModel" :selected="selected" @select="select" @select-log="selectLog" @show-timing="setView('timeline')"/>
+            <div v-if="comparing" data-testid="compare-panel">
+              <div class="state">
+                <div v-if="context?.counterpart" class="mb-2">
+                  <PrimeButton type="button" size="small" :label="'Compare with a slow ' + context.counterpart.label + ' call'" icon="pi pi-clone"
+                    :loading="compareLoading && compareSource === 'counterpart'" @click="compareWithCounterpart" data-testid="compare-counterpart"/>
+                  <div class="text-xs opacity-80 mt-1">Loads {{ context.counterpart.description }}.</div>
+                </div>
+                <form class="flex flex-wrap items-center gap-2" @submit.prevent="compareWithTrace">
+                  <label for="compare-trace" class="text-sm">Compare with trace id</label>
+                  <input id="compare-trace" v-model="otherTrace" class="trace-input" placeholder="32 hex characters" autocomplete="off" data-testid="compare-trace-input"/>
+                  <PrimeButton type="submit" size="small" outlined label="Compare" :loading="compareLoading && compareSource === 'trace'" data-testid="compare-trace-submit"/>
+                </form>
+                <div class="text-xs opacity-80 mt-1">The other trace is read within this report's window.</div>
+              </div>
+              <p v-if="compareError" class="state bad mt-2" role="alert" data-testid="compare-error">{{ compareError }}</p>
+              <template v-if="reference">
+                <div class="flex flex-wrap items-center gap-2 mt-2 text-sm" data-testid="compare-reference">
+                  <span>Compared with {{ reference.label }}: trace <code>{{ reference.traceId }}</code></span>
+                  <PrimeButton type="button" size="small" text label="Open it" @click="$emit('open-execution', { traceId: reference.traceId, window: { ...reference.window } })" data-testid="compare-open-reference"/>
+                </div>
+                <p v-if="reference.truncated" class="state warn mt-2" data-testid="compare-reference-truncated">Not every span of the other trace was loaded: calls it made may be missing below.</p>
+                <ExecutionCompare class="mt-2" :reference="reference.spans" :current="report.spans.records" :referenceLabel="reference.label" currentLabel="this execution"/>
+              </template>
+            </div>
+            <SequenceView v-else-if="view === 'sequence' && seqModel" :model="seqModel" :selected="selected" @select="select" @select-log="selectLog" @show-timing="setView('timeline')"/>
             <TraceTimeline v-else :spans="report.spans.records" :selected="selected" :counts="counts" @select="select"/>
           </template>
         </div>
@@ -154,6 +179,9 @@ import TraceTimeline from '@/components/problems/TraceTimeline.vue'
 import SequenceView from '@/components/problems/SequenceView.vue'
 import LogInspector from '@/components/problems/LogInspector.vue'
 import SpanEvidenceDialog from '@/components/SpanEvidenceDialog.vue'
+import ExecutionCompare from '@/components/problems/ExecutionCompare.vue'
+import statsApi from '@/api/stats.api'
+import { Stats } from '@/logs-api/stats.impl'
 import { type Span } from '@/types/filter'
 import logsApi from '@/api/logs.api'
 import { Logs } from '@/logs-api/logs.impl'
@@ -180,7 +208,7 @@ const hourMs = 60 * 60 * 1000
 // executions here; the origin is optional context with a return action.
 export default defineComponent({
   name: 'ExecutionViewer',
-  components: { PrimeButton, Tag, TraceTimeline, SequenceView, LogInspector, SpanEvidenceDialog },
+  components: { PrimeButton, Tag, TraceTimeline, SequenceView, LogInspector, SpanEvidenceDialog, ExecutionCompare },
   props: {
     traceId: { type: String, required: true },
     initialWindow: { type: Object as PropType<{ from: string, to: string }>, required: true },
@@ -198,11 +226,83 @@ export default defineComponent({
   emits: ['back', 'open-execution', 'include'],
   setup (props, { emit }) {
     logsApi.init(new Logs())
+    statsApi.init(new Stats())
+
+    // Compare: another execution on one time scale with this one. It is a
+    // view of its own; it is not saved as the view preference or in links.
+    const comparing = ref(false)
+    const otherTrace = ref('')
+    const reference = ref<{ spans: Span[], label: string, traceId: string, window: { from: string, to: string }, truncated: boolean } | null>(null)
+    const compareLoading = ref(false)
+    const compareSource = ref<'trace' | 'counterpart' | ''>('')
+    const compareError = ref('')
+    let compareSeq = 0
+
+    async function loadReference (traceId: string, w: { from: string, to: string }, label: string, mine: number) {
+      const [error, response] = await logsApi.traceReport({ traceId, timeFrom: w.from, timeTo: w.to })
+      if (mine !== compareSeq) {
+        return
+      }
+      compareLoading.value = false
+      const r = response ? fromResponse(response) : null
+      if (error !== null || r === null || r.traceId !== traceId) {
+        compareError.value = 'Could not read the other trace: ' + (error ?? 'invalid response')
+      } else if (r.spans.status !== 'ok') {
+        compareError.value = `Could not read the other trace: the span source is unavailable (${r.spans.error || r.spans.status}).`
+      } else if (r.spans.records.length === 0) {
+        compareError.value = `No spans of trace ${traceId} were found in ${windowText(w.from, w.to)}.`
+      } else {
+        reference.value = { spans: r.spans.records, label, traceId, window: { ...w }, truncated: r.spans.truncated }
+      }
+    }
+
+    function startCompare (source: 'trace' | 'counterpart'): number {
+      compareLoading.value = true
+      compareSource.value = source
+      compareError.value = ''
+      return ++compareSeq
+    }
+
+    async function compareWithTrace () {
+      const id = otherTrace.value.trim().toLowerCase()
+      if (!/^[0-9a-f]{32}$/.test(id)) {
+        compareError.value = 'A trace id is 32 hex characters.'
+        return
+      }
+      if (id === props.traceId) {
+        compareError.value = 'That is this execution: enter another trace id.'
+        return
+      }
+      const mine = startCompare('trace')
+      await loadReference(id, reportWindow.value, 'trace ' + id.slice(0, 8) + '…', mine)
+    }
+
+    async function compareWithCounterpart () {
+      const cp = props.context?.counterpart
+      if (!cp) {
+        return
+      }
+      const mine = startCompare('counterpart')
+      const [error, result] = await statsApi.examples(cp.request)
+      if (mine !== compareSeq) {
+        return
+      }
+      const ex = result?.status === 'ok' ? result.examples.find((e) => e.traceId && e.traceId !== props.traceId) : undefined
+      if (!ex) {
+        compareLoading.value = false
+        compareError.value = error !== null
+          ? 'Could not find a ' + cp.label + ' call: ' + error
+          : `No ${cp.label} call was found: ${result?.status === 'ok' ? 'none was recorded at or above the threshold' : result?.condition ?? 'invalid response'}.`
+        return
+      }
+      await loadReference(ex.traceId, cp.window, 'the ' + cp.label + ' call', mine)
+    }
 
     const savedView = (): string | null => { try { return window.localStorage.getItem(VIEW_PREFERENCE_KEY) } catch { return null } }
     const view = ref<ExecutionView>(initialView(props.initialViewChoice, savedView()))
     function setView (v: ExecutionView) {
       view.value = v
+      comparing.value = false
       try { window.localStorage.setItem(VIEW_PREFERENCE_KEY, v) } catch { /* a convenience only */ }
     }
 
@@ -370,6 +470,7 @@ export default defineComponent({
     generate()
 
     return {
+      comparing, otherTrace, reference, compareLoading, compareSource, compareError, compareWithTrace, compareWithCounterpart,
       view, setView, reportWindow, report, saved, loading, loadError, retrying, selected, select, selectLog, focusLog, logScope, originMissing,
       generate, retrySection, widen, include, state, links, counts, tl, selectedSpan, entry, seqModel, endpoints, nameOf,
       copyLink, linkText, linkCopied, evidence, evidenceLabel, exportAs, originPageLabel, fmt, formatNs, windowText, sectionSummary,
@@ -400,5 +501,6 @@ export default defineComponent({
 .state.bad { background: rgba(248, 113, 113, 0.12); color: #fca5a5; }
 .state.warn { background: rgba(251, 191, 36, 0.12); color: #fcd34d; }
 .link { background: none; border: 0; color: var(--primary-color); cursor: pointer; padding: 0; font: inherit; }
+.trace-input { flex: 1 1 260px; min-width: 0; background: var(--surface-card); color: var(--text-color); border: 1px solid var(--surface-border); border-radius: 6px; padding: 5px 8px; font: 12px var(--font-family-monospace, monospace); }
 .link-input { width: 100%; margin-top: 4px; background: var(--surface-card); color: var(--text-color); border: 1px solid var(--surface-border); border-radius: 6px; padding: 6px; font: inherit; font-size: 12px; }
 </style>

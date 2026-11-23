@@ -50,6 +50,20 @@ Click a span to select it. The right panel then shows only that span's logs: **T
 ![Selected span with task lanes](/screenshots/exec-timeline-span.png)
 *`upload_recording` selected: its logs on the task lanes `checksum` and `transfer`, with the ERROR “Storage returned 403 AccessDenied” in `transfer`.*
 
+**Repeated calls** fold into one row: three or more consecutive calls under one parent with the same service, kind and name, and no children of their own, such as a query per item. The row shows the count (`× 20`), each call as a segment, the shortest and longest duration, and the time from the first start to the last end. Click it to list every call; an execution opened on one of them shows it expanded and selected.
+
+## Compare two executions
+
+**Compare** puts another execution next to this one on one time scale, each timed from its own start. Calls are matched by their path: the service, kind and name of the call and of each caller up to the entry. Repeated calls share a row, so a lookup made once in one execution and twenty times in the other is one row, `× 1 → 20`. Calls only one execution made are marked *new* or *not called*, and a list names the calls that differ.
+
+- **Compare with trace id** reads any other trace within this report's window.
+- **Compare with a slow baseline call** appears for a slow example opened from [Releases](./releases). It loads the slowest baseline call of the same operation at or above the baseline p95: a slow call of each version.
+
+![Compare: a slow start_session of the new version against a slow baseline call](/screenshots/investigate-compare-executions.png)
+*A slow `start_session` of the new version (1010 ms) against a slow baseline call (520 ms): twenty `permission_lookup` calls where the baseline made one, and a new `GET /users` call.*
+
+Compare shows what the two executions recorded differently. It doesn't say which difference caused the change in duration.
+
 ## Sequence
 
 The Sequence view draws services as lanes and calls as arrows. A CLIENT span with exactly one SERVER child in another service is one arrow; a client whose peer sends no spans points to “unknown peer”. Start, end and ERROR-log markers sit on each service's lane. Vertical spacing shows order, not elapsed time. A notice points out overlapping operations. At most 6 lanes and 80 marks fit on a page.

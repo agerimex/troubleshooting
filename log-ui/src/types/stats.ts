@@ -280,6 +280,16 @@ export interface ReportContext {
   analysisGeneratedAt: string
   example: string
   population: string
+  // A call of the other population to compare this execution with: the
+  // examples request that finds it (limit 1) and that population's window.
+  counterpart?: Counterpart
+}
+
+export interface Counterpart {
+  request: ExamplesRequest
+  window: { from: string, to: string }
+  label: string // e.g. "baseline"
+  description: string
 }
 
 // The effective retention (GET retention): raw spans and logs and

@@ -25,7 +25,7 @@ const walkthrough='/guide/investigate-a-slow-request.html'
       <div class="actions"><a class="primary" :href="doc(walkthrough)">Explore a slow request <span aria-hidden="true">→</span></a><a class="simple" :href="prCheck">See a real PR check ↗</a></div>
       <p class="facts">Self-hosted · OpenTelemetry · Go or any OTLP SDK</p>
     </div>
-    <figure class="hero-shot"><a :href="doc(walkthrough)"><img :src="doc('/screenshots/investigate-hero.png')" alt="Timeline of one slow start_session: check_permissions with permission_lookup database spans repeated one after another." width="822" height="560"></a><figcaption>Product screenshot · fixture data. One slow <code>start_session</code> of the new version: twenty permission lookups, one insert, and a call to the directory service.</figcaption></figure>
+    <figure class="hero-shot"><a :href="doc(walkthrough)"><img :src="doc('/screenshots/investigate-hero.png')" alt="Compare view: a slow start_session of the new version (1010 ms) against a slow baseline call (520 ms) on one time scale. permission_lookup went from 1 to 20 calls and GET /users to the directory service is new." width="588" height="350"></a><figcaption>Product screenshot · fixture data. A slow <code>start_session</code> of the new version next to a slow baseline call: twenty permission lookups where there was one, and a new call to the directory service.</figcaption></figure>
   </section>
 
   <section id="investigate" class="band" aria-labelledby="investigate-title"><div class="wrap">
