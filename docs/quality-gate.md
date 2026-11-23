@@ -193,6 +193,9 @@ fork code with secrets to reach a private Troubleshooting.
 An application doesn't need a Troubleshooting server its CI can reach:
 `quality-check/stack` starts a private one inside the job (ClickHouse in
 Docker, the receiver and the API built from this repository; Linux runners).
+The built receiver and API are cached under a hash of their sources (Actions
+cache, saved right after the build), so only the first job of each action
+version builds them.
 The tests export spans over OTLP to it, then the gate checks them:
 
 ```yaml
@@ -637,4 +640,5 @@ requirement kinds and support relations, filters of the catalogue by status,
 deleting recorded evaluations (today only with SQL: `ALTER TABLE
 quality_evaluations DELETE WHERE "Project" = '…'`), load and outage
 experiments, sync-call semantics and allowlists, published container images
-for the in-job stack (it builds the receiver and API, about a minute).
+for the in-job stack (it builds the receiver and API once per version of the
+action, about 40 s, and restores them from the Actions cache afterwards).

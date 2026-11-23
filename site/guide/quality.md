@@ -124,7 +124,7 @@ The action builds the CLI, checks the run, writes the Markdown summary to the jo
 
 ### No Troubleshooting server? Start one in the job
 
-`quality-check/stack` starts a private Troubleshooting inside the CI job (ClickHouse, receiver and API; Linux runners). Your tests export their spans to it with the standard OpenTelemetry variables:
+`quality-check/stack` starts a private Troubleshooting inside the CI job (ClickHouse, receiver and API; Linux runners). The receiver and API are built on the first run of each action version (about 40 s) and restored from the Actions cache afterwards: a start then takes about 15–20 s on a GitHub-hosted runner, instead of about a minute. Your tests export their spans to it with the standard OpenTelemetry variables:
 
 ```yaml
 - id: troubleshooting

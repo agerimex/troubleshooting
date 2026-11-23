@@ -35,18 +35,12 @@ outputs:
     value: ${{ steps.start.outputs.sender-address }}
   logs:
     description: Directory with the services' logs (upload it when the job fails).
-    value: ${{ steps.start.outputs.logs }}
+    value: ${{ steps.clickhouse.outputs.logs }}
 runs:
   using: composite
   steps:
-    - uses: actions/setup-go@v5
-      with:
-        # A supported Go builds the tools; the go.mod files keep their minimum
-        # (1.21.5), which applications importing log-sender inherit.
-        go-version: "1.27.0"
-        cache: false
-    - name: Start Troubleshooting
-      id: start
+    - name: Start ClickHouse
+      id: clickhouse
       shell: bash
       env:
         TS_ROOT: ${{ github.action_path }}/../..
@@ -63,17 +57,69 @@ runs:
         dir="$RUNNER_TEMP/troubleshooting"
         mkdir -p "$dir/bin"
         echo "logs=$dir" >> "$GITHUB_OUTPUT"
+        echo "bin=$dir/bin" >> "$GITHUB_OUTPUT"
 
-        # ClickHouse first: pulling and starting it overlaps with the builds.
-        docker run -d --name troubleshooting-clickhouse \
+        # ClickHouse first, in the background: pulling and starting it
+        # overlaps with installing Go and restoring or building the receiver
+        # and the API. "Start Troubleshooting" waits for it; a failed start
+        # shows up there with this log.
+        nohup docker run -d --name troubleshooting-clickhouse \
           -p "127.0.0.1:$TS_CH_PORT:9000" \
           -e CLICKHOUSE_USER=default -e CLICKHOUSE_PASSWORD= -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
           -v "$TS_ROOT/clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml:ro" \
-          --ulimit nofile=262144:262144 "$TS_CH_IMAGE" > /dev/null
+          --ulimit nofile=262144:262144 "$TS_CH_IMAGE" > "$dir/clickhouse-start.log" 2>&1 &
 
-        (cd "$TS_ROOT/log-receiver" && go build -o "$dir/bin/receiver" ./cmd/grpc_api)
-        (cd "$TS_ROOT/log-analysis" && go build -o "$dir/bin/api" ./cmd/rest_api)
-
+        # The built receiver and API are cached under a hash of their sources
+        # and of the modules they replace, so they are built once per version
+        # of this action, not in every job.
+        src=$(cd "$TS_ROOT" && find log-receiver log-analysis log-sender protos -type f \
+          \( -name '*.go' -o -name go.mod -o -name go.sum \) ! -name '*_test.go' \
+          | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-20)
+        echo "key=troubleshooting-stack-$RUNNER_OS-$RUNNER_ARCH-go1.27.0-$src" >> "$GITHUB_OUTPUT"
+    - name: Restore the built receiver and API
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.clickhouse.outputs.bin }}
+        key: ${{ steps.clickhouse.outputs.key }}
+    # Installed on a cache hit too: the job's later steps get the same Go on
+    # the PATH either way, as they did before the cache.
+    - uses: actions/setup-go@v5
+      with:
+        # A supported Go builds the tools; the go.mod files keep their minimum
+        # (1.21.5), which applications importing log-sender inherit.
+        go-version: "1.27.0"
+        cache: false
+    - name: Build the receiver and the API
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        TS_ROOT: ${{ github.action_path }}/../..
+        TS_BIN: ${{ steps.clickhouse.outputs.bin }}
+      run: |
+        set -euo pipefail
+        (cd "$TS_ROOT/log-receiver" && go build -o "$TS_BIN/receiver" ./cmd/grpc_api)
+        (cd "$TS_ROOT/log-analysis" && go build -o "$TS_BIN/api" ./cmd/rest_api)
+    # Saved right after the build, not at the end of the job: a job whose
+    # quality gate fails would otherwise never save it.
+    - name: Save the built receiver and API
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.clickhouse.outputs.bin }}
+        key: ${{ steps.clickhouse.outputs.key }}
+    - name: Start Troubleshooting
+      id: start
+      shell: bash
+      env:
+        TS_OTLP_PORT: ${{ inputs.otlp-port }}
+        TS_SENDER_PORT: ${{ inputs.sender-port }}
+        TS_API_PORT: ${{ inputs.api-port }}
+        TS_CH_PORT: ${{ inputs.clickhouse-port }}
+        TS_DIR: ${{ steps.clickhouse.outputs.logs }}
+      run: |
+        set -euo pipefail
+        dir="$TS_DIR"
         wait_for() { # what, seconds, command...
           local what=$1 secs=$2; shift 2
           for _ in $(seq "$secs"); do
