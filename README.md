@@ -18,7 +18,7 @@ make up       # starts the stack (docker compose up -d --wait); UI on http://loc
 make down     # stops the stack and keeps the data
 ```
 
-ClickHouse keeps its data in the named volume `troubleshooting_clickhouse-data`, so it survives `docker compose down`, `up` and container recreation; only `docker compose down -v` (or `docker volume rm`) deletes it. Installations from before this volume existed kept their data in an anonymous volume, which is not carried over. On Docker Desktop the very first start of ClickHouse on an empty volume can take several minutes; `make up` waits for it.
+ClickHouse keeps its data in the named volume `troubleshooting_clickhouse-data`, so it survives `docker compose down`, `up` and container recreation; only `docker compose down -v` (or `docker volume rm`) deletes it. On Docker Desktop the very first start of ClickHouse on an empty volume can take several minutes; `make up` waits for it.
 
 By default every port is published on `127.0.0.1` only, and there is no authentication. To receive spans from other machines or open the UI to them, see [Security](#security).
 
@@ -28,7 +28,7 @@ Investigating a failure
 ------
 
 A worked example with screenshots, from a release regression to its cause: [Investigate a slow request](https://agerimex.github.io/troubleshooting/guide/investigate-a-slow-request).
-Start from what you have: a slow operation, a failed request, a recurring error, a trace ID, or a difference between two releases. The UI has six pages (the product blueprint, `docs/product-blueprint.md`): **Log Analysis**, **Timeline & Sequence**, **Problems**, **Releases**, **Quality** and **Settings**. An investigation ends in one **report**: one trace's spans and its correlated log records together, within an explicit time window.
+Start from what you have: a slow operation, a failed request, a recurring error, a trace ID, or a difference between two releases. The UI has six pages: **Log Analysis**, **Timeline & Sequence**, **Problems**, **Releases**, **Quality** and **Settings**. An investigation ends in one **report**: one trace's spans and its correlated log records together, within an explicit time window.
 
 1. Find an entry record:
    * **Log Analysis** (the default page): set the window (From/To; an empty To means now) and filter spans by name, status or service. As soon as you filter, the search covers spans at **any depth**, so a failed step under a successful request is found; "Root spans" lists only trace roots. Expanding a span shows its child spans and the log records that recorded exactly that span, inline in the same table and in time order; trace-level logs and logs naming an unknown span are a separate group under the root span. Filters select spans; they never search log text, and an OK span keeps its ERROR logs. The row's "⋯" button, right-click or the keyboard offer **Open timeline**, **Open sequence** and **Copy investigation link**.
@@ -156,9 +156,9 @@ This repository gates its own pull requests the same way (`.github/quality.yaml`
 - **A successful span is not proof that the business task succeeded.** Span status and log severity are what the application recorded.
 - **Advisory checks and the baseline are shown but never decide the result.**
 
-### Like SonarQube, but at runtime
+### Static analysis vs. runtime checks
 
-| SonarQube | Troubleshooting |
+| Static analysis | Troubleshooting |
 | --- | --- |
 | Reads the source code | Reads the traces of a test run |
 | Rules and quality gate | Rules in `quality.yaml`, next to your code |
@@ -167,7 +167,7 @@ This repository gates its own pull requests the same way (`.github/quality.yaml`
 | New code compared with the main branch | `--baseline` compares with a main-branch run; `rules-from: base` stops a pull request from loosening its own limits |
 | Project history | Requirement history: when it broke, which commit fixed it |
 
-One difference matters: SonarQube only needs the code. Troubleshooting needs the code to **run**. Your tests are the workload. If the run didn't produce enough requests to judge, the result is **not enough data**, never a pass.
+One difference matters: static analysis only needs the code. Troubleshooting needs the code to **run**. Your tests are the workload. If the run didn't produce enough requests to judge, the result is **not enough data**, never a pass.
 
 Integrating your application
 ------
@@ -431,11 +431,7 @@ $q = "SELECT count() FROM otel_traces WHERE ServiceName='media-tool' AND positio
 docker exec troubleshooting-test-clickhouse clickhouse-client --query $q            # must print 0 (dev stack: logs-clickhouse-server)
 ```
 
-In a Windows desktop pilot built this way, one test session produced 15 session traces with 86 spans, located its 3 input failures by stage, and none of the structured file-name or transcript canaries was stored.
-
 **Quality gate.** In `quality.yaml` the entry is the root: `service: media-tool`, `operation: convert-file`. A latency check needs at least 20 executions (its default minimum), so run each checked operation at least 20 times and declare that number as `run.executions`. `troubleshooting-check --url http://127.0.0.1:28094 --rules quality.yaml --run $run --ui none` exits 0 passed, 1 failed (a limit was broken: fix the code or the limit), 2 unresolved and 3 error. Exit 2 is not a failure but missing evidence: fewer executions than declared (spans not flushed, the run tag missing, too few runs), no database call for a `db_calls` check, or executions without a valid duration. Read the reason in the output before changing limits.
-
-**Statistics off after the first start.** The API checks the schema once at startup, and the receiver creates it. Both compose files therefore start the API only once the receiver is healthy, which means it accepts connections on 50055; it opens that port only after it has created the schema. On an empty ClickHouse volume that can take a few minutes. With compose files from before this change, the API could start first, and its log showed `statistics are off: the statistics tables or raw retention are missing; start the receiver of this version first` right at startup. Spans, Log Analysis and the quality gate are not affected. The statistics refresher retries every `STATS_REFRESH_INTERVAL` (1 min), and `GET /api/v1/stats/status` shows its last error. If statistics stay off, restart only the API. That keeps the receiver and all data: `docker compose -p troubleshooting-test -f docker-compose.test.yml restart log-analysis` (dev stack: `docker compose restart log-analysis-compose`). Don't use `down -v` (it deletes the volume) or recreate the receiver to fix this.
 
 **Plain `404 page not found` from an endpoint this README describes** (e.g. `/api/v1/privacy/scan` or `/api/v1/quality/evaluate`) usually means the API container runs an old, cached `docker-log-analysis:1` image. The compose files only use local images and never rebuild them. Rebuild the images from your checkout with `make all`, then recreate the stack with `make up` (test stack: `make test-stack-up`). Compose replaces only the containers whose image changed, and the ClickHouse volume is kept. To check which image a container runs, compare `docker inspect --format '{{.Image}}' <container>` with `docker image inspect --format '{{.Id}}' docker-log-analysis:1`.
 
@@ -525,14 +521,9 @@ Versions
 ------
 Builds and CI use Go 1.27.0 (the modules still require only Go 1.21.5, so applications that import log-sender keep their own Go version), Node 20.18.0 (UI build), ClickHouse 26.9.13.15 and Caddy 2.8.4; the UI's dependencies are pinned by `log-ui/package-lock.json` (`npm ci`).
 
-Coming soon
-------
-* Search by sql (text and parameters)
-* search by duration
-
 Statistics and release comparison
 ------
-Milestone 2 (`features/milestone_2`): call counts, error fractions, latency percentiles and error groups of an explicitly selected population, compared between two releases or windows, with examples that open the combined trace report. In the UI: **Statistics** and **Compare releases**.
+Call counts, error fractions, latency percentiles and error groups of an explicitly selected population, compared between two releases or windows, with examples that open the combined trace report. In the UI: the **Releases** page (release comparison and operation statistics).
 
 **Population.** A recorded call is one canonical span of one service that started in a half-open window `[time_from, time_to)`. Operation (span name), span kind, environment, version, installation and workload segment are optional filters; a missing value is its own "not recorded" group and is never borrowed from another span. Without an operation the result has one row per (operation, span kind): SERVER, CONSUMER and CLIENT spans are never summed. Statistics read these attributes (resource or span attributes; on logs, record attributes): `service.version`, `deployment.environment.name`, `troubleshooting.installation`, `troubleshooting.workload_segment`, `troubleshooting.sampling_policy` (`unsampled` or `head:<ratio>`), and `operation.name` on logs. log-sender's `WithResourceAttributes` adds them to spans and logs.
 
@@ -560,7 +551,7 @@ Population fields: `service` (required), `operation`, `span_kind`, `environment`
 
 Problems, Releases and Settings
 ------
-**Problems** (from the `troubleshooting-ui-agent` proposal; record: `docs/problem-workspace.md`): for one service and window it lists recurring error groups (headline: distinct affected calls, or matching records with "Call attribution unavailable" when the records name no span), slow calls (distinct calls above the slow-call duration) and release regressions (the p95 change of a stored comparison; no baseline is guessed from version text). A problem's **Investigate** tab has a bounded list of retained examples; the chosen one opens in Timeline & Sequence with its span and log selected. **Compare releases** compares releases of the problem's operation and checks a fix against the affected release and the original baseline. **Releases** holds the release comparison and the operation statistics. **Settings** holds the **detection rules** (three templates: error signals, slow calls, release regressions; every save is a revision, and a save based on an older revision is a conflict) and the effective **data retention** (read-only; set on the receiver). The Sequence view is described in `docs/sequence-investigation.md`; spans in `view-spans` and `trace-report` carry `spanKind`.
+**Problems**: for one service and window it lists recurring error groups (headline: distinct affected calls, or matching records with "Call attribution unavailable" when the records name no span), slow calls (distinct calls above the slow-call duration) and release regressions (the p95 change of a stored comparison; no baseline is guessed from version text). A problem's **Investigate** tab has a bounded list of retained examples; the chosen one opens in Timeline & Sequence with its span and log selected. **Compare releases** compares releases of the problem's operation and checks a fix against the affected release and the original baseline. **Releases** holds the release comparison and the operation statistics. **Settings** holds the **detection rules** (three templates: error signals, slow calls, release regressions; every save is a revision, and a save based on an older revision is a conflict) and the effective **data retention** (read-only; set on the receiver). The Sequence view is described in `docs/sequence-investigation.md`; spans in `view-spans` and `trace-report` carry `spanKind`.
 
 | Endpoint | Body → result |
 | --- | --- |
@@ -569,19 +560,6 @@ Problems, Releases and Settings
 | `GET /api/v1/detection-rules` | the latest revision, or the defaults as revision 0 |
 | `POST /api/v1/detection-rules` | `{rules, expected_revision}` → `{Rules}` (the stored revision); 400 `{FieldErrors}`; 409 `{Rules}` with the current revision |
 
-## Open for feature requests, happy for helping with integration, and Welcome to connect for developing an awesome observability system
-
-Screenshots
+Feedback and help
 ------
-
-* Full page
-<img src="img/full_page.png" alt="Full Page" style="display: block; margin: auto;">
-
-* Possible for select a list of colums for view
-<img src="img/columns_list.png" alt="Column List" style="display: block; margin: auto;">
-
-* Details of SQL request with auto fill parameters
-<img src="img/sql.png" alt="SQL" style="display: block; margin: auto;">
-
-* Details for all http tags for request
-<img src="img/tags.png" alt="Tags" style="display: block; margin: auto;">
+Feature requests, bug reports and integration questions are welcome: [open an issue](https://github.com/agerimex/troubleshooting/issues). If you are trying Troubleshooting with your own service, say so in the issue, and I will help you set it up.
