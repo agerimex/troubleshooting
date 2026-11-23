@@ -1,29 +1,58 @@
 # Troubleshooting
 
-**A runtime quality gate for pull requests.** Rules like SonarQube, but checked against what your code actually did in a test run: database calls per request, services it must not call, failed requests, latency. Built on OpenTelemetry traces. Self-hosted.
+**Find out why a request failed or slowed down.** Troubleshooting shows what one request did across your services: its spans, database calls and correlated log records, as a table, a timeline or a sequence of calls. It compares releases to show what changed. You can start investigating right away, with no rules or CI setup. If your team already knows what must stay true, the quality gate checks those requirements against the traces of pull-request and release test runs. Self-hosted, built on OpenTelemetry traces.
 
-A change can pass every functional test and still add twenty database calls per request. Static analysis can't see that, because the queries happen at runtime. Troubleshooting records your test run, checks it against rules kept in your repository, and fails the pull request when a rule is broken. Every failure links to the request that broke it.
+Where to start:
+
+| You have… | Start here |
+| --- | --- |
+| a trace ID, a slow operation or a release regression | **Investigate an execution** → [Investigating a failure](#investigating-a-failure), and the worked walkthrough [Investigate a slow request](https://agerimex.github.io/troubleshooting/guide/investigate-a-slow-request) |
+| behaviour that must stay true, such as "at most 3 database calls per request" | **Check runtime requirements in CI** → [Checking runtime requirements in CI](#checking-runtime-requirements-in-ci), and `make demo` |
+
+Install
+------
+
+```
+make all      # builds the images and creates the troubleshooting_network network; safe to repeat
+make up       # starts the stack (docker compose up -d --wait); UI on http://localhost:8095
+make down     # stops the stack and keeps the data
+```
+
+ClickHouse keeps its data in the named volume `troubleshooting_clickhouse-data`, so it survives `docker compose down`, `up` and container recreation; only `docker compose down -v` (or `docker volume rm`) deletes it. Installations from before this volume existed kept their data in an anonymous volume, which is not carried over. On Docker Desktop the very first start of ClickHouse on an empty volume can take several minutes; `make up` waits for it.
+
+By default every port is published on `127.0.0.1` only, and there is no authentication. To receive spans from other machines or open the UI to them, see [Security](#security).
+
+Built with: ClickHouse (storage, raw data kept 3 days), Go (receiver and API), Vue 3 + TypeScript (UI), OpenTelemetry and gRPC.
+
+Investigating a failure
+------
+
+A worked example with screenshots, from a release regression to its cause: [Investigate a slow request](https://agerimex.github.io/troubleshooting/guide/investigate-a-slow-request).
+Start from what you have: a slow operation, a failed request, a recurring error, a trace ID, or a difference between two releases. The UI has six pages (the product blueprint, `docs/product-blueprint.md`): **Log Analysis**, **Timeline & Sequence**, **Problems**, **Releases**, **Quality** and **Settings**. An investigation ends in one **report**: one trace's spans and its correlated log records together, within an explicit time window.
+
+1. Find an entry record:
+   * **Log Analysis** (the default page): set the window (From/To; an empty To means now) and filter spans by name, status or service. As soon as you filter, the search covers spans at **any depth**, so a failed step under a successful request is found; "Root spans" lists only trace roots. Expanding a span shows its child spans and the log records that recorded exactly that span, inline in the same table and in time order; trace-level logs and logs naming an unknown span are a separate group under the root span. Filters select spans; they never search log text, and an OK span keeps its ERROR logs. The row's "⋯" button, right-click or the keyboard offer **Open timeline**, **Open sequence** and **Copy investigation link**.
+   * **Timeline & Sequence**: opens on the sequence library, the distinct shapes of execution in a window (`docs/sequence-library.md`), each opening a representative execution; or open a trace by its id.
+   * **Problems**: a recurring error group or slow call has retained examples; each opens in Timeline & Sequence. A log without a recorded TraceId can be inspected but opens no report: a SpanId or a timestamp alone never identifies a trace.
+2. The report keeps the window of where it was opened and takes only the trace from the entry record: filters don't narrow it, and the record it was opened for is selected. It shows:
+   * the scope (one trace, the window, when it was generated) and whether it is **Complete** or **Incomplete**, with the reasons; "Back to …" returns to the page it was opened from, as it was;
+   * **Timeline** (default): every span on one time axis in parent order, with status and duration, and "parent missing" when a parent isn't in the report ("Widen by 1 h on each side" regenerates with a wider window); or **Sequence**: calls between services as arrows (a CLIENT span with exactly one SERVER child of another service), operation starts and ends, and ERROR log markers. The last chosen view is remembered;
+   * next to it the selected span's logs (as task lanes or a list) or **All trace logs**, each with its log severity and association: the span it recorded, "No span identifier recorded", or "Referenced span not found within the window". A log is never attached to a span by its time. The span's events (exception type, message, stack trace) and links are one click away; a linked trace is marked "not inspected" and can be opened as its own report.
+3. Each source has its own status. If spans or logs could not be read (database unavailable, query limit or timeout), that section says so and offers Retry; it is never shown as zero records, and the report is Incomplete. A section cut at its limit says how many records are shown and that more match. A window older than the retention period warns that records may have expired.
+4. **Export HTML** or **Export JSON** saves the report as displayed (not a new query), including its limitations, the full trace whatever is selected, the view and the generation time. The HTML file has no scripts and shows recorded text as text. **Regenerate** queries again. **Investigation link** gives a link with the trace, window and selection (no log text); opening it generates the report again.
+
+A span's status and a log's severity are what the application recorded. A successful span is not proof that the business task behind it succeeded, and a complete report does not prove every event was instrumented or delivered. A report covers one trace; other traces of the same business operation are not merged into it.
+
+Checking runtime requirements in CI
+------
+
+A change can pass every functional test and still add twenty database calls per request. Static analysis can't see that, because the queries happen at runtime. When you know which behaviour must stay true, write it down next to the code and check every test run against it: database calls per request, services an operation must not call, failed requests, latency. Troubleshooting reads the traces of your pull request's or release candidate's test run, and every failed check links to the execution that broke it.
 
 <img src="img/quality-pr-comment.png" alt="The quality gate's comment on a pull request: two requirements met, six checks passed, with values, limits and executions" width="560">
 
 *The gate's comment on one of this repository's own pull requests. It checks how many ClickHouse queries each API request runs.*
 
-Like SonarQube, but at runtime
-------
-
-| SonarQube | Troubleshooting |
-| --- | --- |
-| Reads the source code | Reads the traces of a test run |
-| Rules and quality gate | Rules in `quality.yaml`, next to your code |
-| Comment on the pull request | Comment on the pull request |
-| Issue → the line of code | Failed check → the request that broke it, as a timeline |
-| New code compared with the main branch | `--baseline` compares with a main-branch run; `rules-from: base` stops a pull request from loosening its own limits |
-| Project history | Requirement history: when it broke, which commit fixed it |
-
-One difference matters: SonarQube only needs the code. Troubleshooting needs the code to **run**. Your tests are the workload. If the run didn't produce enough requests to judge, the result is **not enough data**, never a pass.
-
-Try it locally
-------
+### Try it locally
 
 You need Docker, `make` and Go. The first start of ClickHouse on Docker Desktop can take several minutes; later starts take seconds. The example is a small orders service (`examples/quality-gate/`) with a planted regression: prices are read one by one (a query per item) and a retired service is called. Every functional test still passes.
 
@@ -57,8 +86,7 @@ troubleshooting-check --url http://localhost:8095 --rules quality.yaml --run dem
 
 The second check names the broken rules (9 database calls where the limit is 3, a call to `legacy-pricing`) and links to a request that broke them. Open the link to see that request's timeline. If a check says "not enough data", wait a few seconds for the spans to arrive and run it again.
 
-How it works
-------
+### How it works
 
 ```
 your tests ──▶ your application ──OpenTelemetry traces──▶ Troubleshooting ──▶ ClickHouse
@@ -72,11 +100,11 @@ your tests ──▶ your application ──OpenTelemetry traces──▶ Troubl
 1. Your application sends traces while its tests run. Each span of the run carries one tag: `troubleshooting.run=<run id>`.
 2. `troubleshooting-check` reads the run and checks it against `quality.yaml`.
 3. The result is pass, fail or not enough data. Every failure names the request behind it.
-4. When a check fails, the UI shows that request: its spans and logs as a timeline or a sequence of calls between services.
+4. When the gate flags a violation, the UI shows the execution behind it: its spans and logs as a timeline or a sequence of calls between services.
 
 The rule types:
 
-| Rule | Example | Catches |
+| Rule | Example | Flags in a test run |
 | --- | --- | --- |
 | `db_calls` | at most 3 database calls per request | N+1 queries, a query per row |
 | `forbidden_call` | `start_session` must never call `directory-api` | broken architecture rules, calls to retired services |
@@ -85,8 +113,7 @@ The rule types:
 
 Counts depend on the code and the test data, not on the machine, so `db_calls`, `forbidden_call` and `errors` make good hard gates. They can still vary a little: an application that caches a lookup makes one call fewer on some requests. Set the limit at the highest count you measured, not at a typical one. Latency depends on the machine, so this repository uses it as an advisory check.
 
-Words used in this guide
-------
+### Words used in this guide
 
 | Term | Meaning |
 | --- | --- |
@@ -98,8 +125,7 @@ Words used in this guide
 | **Result** | Pass, fail, or not enough data |
 | **Evidence** | The executions behind a result, saved with the report so they survive after the raw data expires |
 
-In your CI
-------
+### In your CI
 
 ```yaml
 - id: troubleshooting
@@ -121,8 +147,7 @@ The step posts one comment on the pull request (updated on re-runs), writes a su
 
 This repository gates its own pull requests the same way (`.github/quality.yaml`: database queries per API request).
 
-What a pass means, and what it doesn't
-------
+### What a pass means, and what it doesn't
 
 - **A pass means the limits were not broken in this run.** Nothing more. Requests your tests didn't make were not checked.
 - **A missing measurement is never a pass.** Too few executions, missing spans or no database calls to count give "not enough data" (exit code 2), not a pass.
@@ -131,20 +156,18 @@ What a pass means, and what it doesn't
 - **A successful span is not proof that the business task succeeded.** Span status and log severity are what the application recorded.
 - **Advisory checks and the baseline are shown but never decide the result.**
 
-Install
-------
+### Like SonarQube, but at runtime
 
-```
-make all      # builds the images and creates the troubleshooting_network network; safe to repeat
-make up       # starts the stack (docker compose up -d --wait); UI on http://localhost:8095
-make down     # stops the stack and keeps the data
-```
+| SonarQube | Troubleshooting |
+| --- | --- |
+| Reads the source code | Reads the traces of a test run |
+| Rules and quality gate | Rules in `quality.yaml`, next to your code |
+| Comment on the pull request | Comment on the pull request |
+| Issue → the line of code | Failed check → the request that broke it, as a timeline |
+| New code compared with the main branch | `--baseline` compares with a main-branch run; `rules-from: base` stops a pull request from loosening its own limits |
+| Project history | Requirement history: when it broke, which commit fixed it |
 
-ClickHouse keeps its data in the named volume `troubleshooting_clickhouse-data`, so it survives `docker compose down`, `up` and container recreation; only `docker compose down -v` (or `docker volume rm`) deletes it. Installations from before this volume existed kept their data in an anonymous volume, which is not carried over. On Docker Desktop the very first start of ClickHouse on an empty volume can take several minutes; `make up` waits for it.
-
-By default every port is published on `127.0.0.1` only, and there is no authentication. To receive spans from other machines or open the UI to them, see [Security](#security).
-
-Built with: ClickHouse (storage, raw data kept 3 days), Go (receiver and API), Vue 3 + TypeScript (UI), OpenTelemetry and gRPC.
+One difference matters: SonarQube only needs the code. Troubleshooting needs the code to **run**. Your tests are the workload. If the run didn't produce enough requests to judge, the result is **not enough data**, never a pass.
 
 Integrating your application
 ------
@@ -269,23 +292,6 @@ If the receiver is unreachable, the application keeps running and spans are drop
 Other languages send OTLP/gRPC to port 4317 (see below). OTLP carries no child counts, so their `quality.yaml` must not set `run.child_counts: required`, or every database-call check stays unresolved.
 
 **3. Check a test run.** Write `quality.yaml` for one to three operations that matter. Run them first with generous limits and set the real limits from what you measured (see [In your CI](#in-your-ci) and [docs/quality-gate.md](docs/quality-gate.md)). The test data must be able to show the problem: a list with one entry hides a query per entry. Start the application with `TROUBLESHOOTING_ADDR` and `TROUBLESHOOTING_RUN`, make a fixed number of requests (as many as `run.executions` declares), wait about 6 s for the last batch, and run `troubleshooting-check` with a window that starts before the first request. An unresolved result (exit 2) usually means the window or the number of requests doesn't match `run.executions`: the gate counts what it can't see as missing data, never as a pass.
-
-Investigating a failure
-------
-When a check fails, the UI shows why. It has six pages (the product blueprint, `docs/product-blueprint.md`): **Log Analysis**, **Timeline & Sequence**, **Problems**, **Releases**, **Quality** and **Settings**. An investigation ends in one **report**: one trace's spans and its correlated log records together, within an explicit time window.
-
-1. Find an entry record:
-   * **Log Analysis** (the default page): set the window (From/To; an empty To means now) and filter spans by name, status or service. As soon as you filter, the search covers spans at **any depth**, so a failed step under a successful request is found; "Root spans" lists only trace roots. Expanding a span shows its child spans and the log records that recorded exactly that span, inline in the same table and in time order; trace-level logs and logs naming an unknown span are a separate group under the root span. Filters select spans; they never search log text, and an OK span keeps its ERROR logs. The row's "⋯" button, right-click or the keyboard offer **Open timeline**, **Open sequence** and **Copy investigation link**.
-   * **Timeline & Sequence**: opens on the sequence library, the distinct shapes of execution in a window (`docs/sequence-library.md`), each opening a representative execution; or open a trace by its id.
-   * **Problems**: a recurring error group or slow call has retained examples; each opens in Timeline & Sequence. A log without a recorded TraceId can be inspected but opens no report: a SpanId or a timestamp alone never identifies a trace.
-2. The report keeps the window of where it was opened and takes only the trace from the entry record: filters don't narrow it, and the record it was opened for is selected. It shows:
-   * the scope (one trace, the window, when it was generated) and whether it is **Complete** or **Incomplete**, with the reasons; "Back to …" returns to the page it was opened from, as it was;
-   * **Timeline** (default): every span on one time axis in parent order, with status and duration, and "parent missing" when a parent isn't in the report ("Widen by 1 h on each side" regenerates with a wider window); or **Sequence**: calls between services as arrows (a CLIENT span with exactly one SERVER child of another service), operation starts and ends, and ERROR log markers. The last chosen view is remembered;
-   * next to it the selected span's logs (as task lanes or a list) or **All trace logs**, each with its log severity and association: the span it recorded, "No span identifier recorded", or "Referenced span not found within the window". A log is never attached to a span by its time. The span's events (exception type, message, stack trace) and links are one click away; a linked trace is marked "not inspected" and can be opened as its own report.
-3. Each source has its own status. If spans or logs could not be read (database unavailable, query limit or timeout), that section says so and offers Retry; it is never shown as zero records, and the report is Incomplete. A section cut at its limit says how many records are shown and that more match. A window older than the retention period warns that records may have expired.
-4. **Export HTML** or **Export JSON** saves the report as displayed (not a new query), including its limitations, the full trace whatever is selected, the view and the generation time. The HTML file has no scripts and shows recorded text as text. **Regenerate** queries again. **Investigation link** gives a link with the trace, window and selection (no log text); opening it generates the report again.
-
-A span's status and a log's severity are what the application recorded. A successful span is not proof that the business task behind it succeeded, and a complete report does not prove every event was instrumented or delivered. A report covers one trace; other traces of the same business operation are not merged into it.
 
 Sending logs
 ------
