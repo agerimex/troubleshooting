@@ -149,6 +149,17 @@ describe('presenting a comparison', () => {
     expect(runNote({ count: 2, segments: [{ startMs: 0, endMs: null, error: false }, { startMs: 1, endMs: 2, error: false }] })).toBeNull()
   })
 
+  it('does not call clock jitter of calls made in turn an overlap', () => {
+    const seg = (startMs: number, endMs: number) => ({ startMs, endMs, error: false })
+    // Recorded on Windows: one call ends at +0.881 ms, the next starts at +0.880 ms.
+    const inTurn = { count: 3, segments: [seg(0.517, 0.881), seg(0.88, 1.484), seg(1.485, 2.242)] }
+    expect(runNote(inTurn)?.sequential).toBe(true)
+    // A real overlap of a fast run: 0.3 ms of a 2 ms run.
+    expect(runNote({ count: 2, segments: [seg(0, 1.2), seg(0.9, 2)] })?.sequential).toBe(false)
+    // A long call covering later ones is an overlap.
+    expect(runNote({ count: 3, segments: [seg(0, 10), seg(1, 2), seg(5, 6)] })?.sequential).toBe(false)
+  })
+
   it('lists the calls of each execution for the stacked layout', () => {
     expect(sideRows(c, 'reference').map((r) => r.name)).toEqual(['start_session', 'check_permissions', 'permission_lookup', 'insert_session'])
     expect(sideRows(c, 'current')).toHaveLength(6)

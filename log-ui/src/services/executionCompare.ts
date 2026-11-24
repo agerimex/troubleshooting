@@ -169,6 +169,14 @@ export function toneOf (r: CompareRow): CompareTone {
 // RunNote describes the calls of one row on one side when there are
 // several: how many, whether they ran one after another (no two overlap)
 // or overlapped, and the time from the first start to the last end.
+//
+// A span's start comes from the wall clock and its duration from a
+// monotonic one, so calls made strictly in turn can overlap by a few
+// microseconds (seen on Windows: one ends at +0.881 ms, the next starts at
+// +0.880 ms). An overlap up to OVERLAP_TOLERANCE of the run, at least
+// OVERLAP_MIN_MS, is not counted.
+export const OVERLAP_MIN_MS = 0.05
+export const OVERLAP_TOLERANCE = 0.01
 export interface RunNote {
   count: number
   sequential: boolean
@@ -182,15 +190,19 @@ export function runNote (side: CompareSide): RunNote | null {
   if (side.count < 2 || valid.length < 2) {
     return null
   }
-  let sequential = true
-  for (let i = 1; i < valid.length; i++) {
-    if (valid[i].startMs < valid[i - 1].endMs!) {
-      sequential = false
-    }
-  }
   const startMs = valid[0].startMs
   const endMs = Math.max(...valid.map((s) => s.endMs!))
   const ms = endMs - startMs
+  const tolerance = Math.max(OVERLAP_MIN_MS, ms * OVERLAP_TOLERANCE)
+  // Against the latest end so far: a long call can cover later ones.
+  let sequential = true
+  let lastEnd = valid[0].endMs!
+  for (let i = 1; i < valid.length; i++) {
+    if (lastEnd - valid[i].startMs > tolerance) {
+      sequential = false
+    }
+    lastEnd = Math.max(lastEnd, valid[i].endMs!)
+  }
   const span = ms.toFixed(ms >= 10 ? 0 : 1) + ' ms'
   return {
     count: side.count,
