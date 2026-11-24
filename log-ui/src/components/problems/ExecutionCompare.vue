@@ -20,6 +20,13 @@
       <ul><li v-for="d in diffs" :key="d" data-testid="compare-difference">{{ d }}</li></ul>
     </details>
     <p v-else class="diffs" data-testid="compare-differences">Both executions made the same calls, the same number of times.</p>
+    <div v-for="(rp, i) in c.replacements" :key="i" class="replaced-note" data-testid="compare-replacement">
+      <b>Likely in place of each other</b> <span class="inferred">inferred</span>:
+      <span v-for="(r, j) in rp.reference" :key="'r' + j"><template v-if="j">, </template><code :title="r.statement || r.name">{{ rowLabel(r) }}</code> × {{ r.reference.count }}</span>
+      →
+      <span v-for="(r, j) in rp.current" :key="'c' + j"><template v-if="j">, </template><code :title="r.statement || r.name">{{ rowLabel(r) }}</code> × {{ r.current.count }}</span>.
+      <span class="why" data-testid="compare-replacement-reasons">{{ rp.reasons.join('; ') }}.</span>
+    </div>
 
     <div class="axis"><span></span><div class="ticks"><span>0 ms</span><span>{{ fmt(c.axisMs / 2) }} ms</span><span>{{ fmt(c.axisMs) }} ms</span></div></div>
 
@@ -31,8 +38,9 @@
             <span class="label" :style="{ paddingLeft: r.depth * 12 + 'px' }">
               <span class="name" :title="r.service + ' · ' + (r.spanKind || 'kind not recorded')" data-testid="compare-stacked-name">{{ r.name }}</span>
               <em v-if="r[b.side].count > 1" class="note" data-testid="compare-stacked-count">× {{ r[b.side].count }}</em>
-              <em v-if="b.side === 'current' && r.change === 'new'" class="note" data-testid="compare-stacked-new">new</em>
-              <em v-if="b.side === 'reference' && r.change === 'missing'" class="note" data-testid="compare-stacked-missing">not called now</em>
+              <em v-if="b.side === 'current' && r.change === 'new'" class="note" data-testid="compare-stacked-new">{{ r.replacement === null ? 'new' : 'replaces' }}</em>
+              <em v-if="b.side === 'reference' && r.change === 'missing'" class="note" data-testid="compare-stacked-missing">{{ r.replacement === null ? 'not called now' : 'replaced' }}</em>
+              <code v-if="r.statement" class="stmt" :title="r.statement" data-testid="compare-stacked-statement">{{ r.statement }}</code>
             </span>
             <span class="track">
               <template v-for="(s, i) in r[b.side].segments" :key="i">
@@ -53,11 +61,12 @@
         <span class="label" :style="{ paddingLeft: r.depth * 12 + 'px' }">
           <span class="name" :title="r.service + ' · ' + (r.spanKind || 'kind not recorded')" data-testid="compare-name">{{ r.name }}</span>
           <em class="note" data-testid="compare-counts">
-            <template v-if="r.change === 'new'">new<template v-if="r.current.count > 1"> × {{ r.current.count }}</template></template>
-            <template v-else-if="r.change === 'missing'">not called now</template>
+            <template v-if="r.change === 'new'">{{ r.replacement === null ? 'new' : 'replaces' }}<template v-if="r.current.count > 1"> × {{ r.current.count }}</template></template>
+            <template v-else-if="r.change === 'missing'">{{ r.replacement === null ? 'not called now' : 'replaced' }}</template>
             <template v-else-if="r.change === 'same'"><template v-if="r.current.count > 1">× {{ r.current.count }}</template></template>
             <template v-else>× {{ r.reference.count }} → {{ r.current.count }}</template>
           </em>
+          <code v-if="r.statement" class="stmt" :title="r.statement" data-testid="compare-statement">{{ r.statement }}</code>
         </span>
         <span class="lanes">
           <span class="track">
@@ -77,19 +86,22 @@
     <p class="foot">
       Each execution is timed from its own start<template v-if="layout === 'side'">; upper bar {{ currentLabel }}, lower bar {{ referenceLabel }}</template>.
       This shows what the two executions recorded differently, not which difference caused the change in duration.
-      <span class="legend"><i class="k more"></i>more calls <i class="k new"></i>new <i class="k fewer"></i>fewer or not called <i class="k same"></i>unchanged</span>
+      <span class="legend"><i class="k more"></i>more calls <i class="k new"></i>new <i class="k fewer"></i>fewer or not called <i class="k replaced"></i>likely replaced (inferred) <i class="k same"></i>unchanged</span>
     </p>
     <details class="how">
       <summary>How calls are matched</summary>
-      Calls are matched by their path: the service, kind and name of the call and of each caller up to the entry. Calls with the same path share a row,
-      so a call made once in one execution and twenty times in the other is one row.
+      Calls are matched by their path: the service, kind and name of the call and of each caller up to the entry; a database call also by its statement,
+      with values, placeholders and lists of values written as ?. Calls with the same path share a row, so a call made once in one execution and twenty
+      times in the other is one row. Calls only one execution made are paired as "likely in place of each other" when they have the same caller, sit
+      between the same calls both executions made, talk to the same target (database system or peer) and, if both name tables, share one. That pairing
+      is an inference from those facts, not something either execution recorded.
     </details>
   </div>
 </template>
 
 <script lang="ts">
 import { computed, defineComponent, ref, type PropType } from 'vue'
-import { compareExecutions, deltaText, differences, runNote, sideRows, toneOf, type CompareRow, type RunNote } from '@/services/executionCompare'
+import { compareExecutions, deltaText, differences, rowLabel, runNote, sideRows, toneOf, type CompareRow, type RunNote } from '@/services/executionCompare'
 import { type Span } from '@/types/filter'
 
 export const COMPARE_LAYOUT_KEY = 'troubleshooting.compare.layout'
@@ -128,13 +140,13 @@ export default defineComponent({
     const pct = (v: number) => Math.min(100, Math.max(0, (v / c.value.axisMs) * 100))
     const bar = (start: number, end: number) => ({ left: pct(start) + '%', width: Math.max(0.4, pct(end) - pct(start)) + '%' })
     const fmt = (v: number) => v.toFixed(v >= 10 ? 0 : 1)
-    return { layout, setLayout, c, diffs, blocks, noteFor, toneOf, deltaText, bar, fmt }
+    return { layout, setLayout, c, diffs, blocks, noteFor, toneOf, deltaText, rowLabel, bar, fmt }
   }
 })
 </script>
 
 <style scoped>
-.cmp { --entry: var(--primary-color); --same: #8b98a8; --more: #fb923c; --new: #60a5fa; --fewer: #a5b4c8;
+.cmp { --entry: var(--primary-color); --same: #8b98a8; --more: #fb923c; --new: #60a5fa; --fewer: #a5b4c8; --replaced: #c084fc;
   background: var(--surface-ground); border-radius: 8px; padding: 14px; font-size: 13px; display: grid; gap: 6px; }
 .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .totals { font-size: 14px; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
@@ -157,13 +169,19 @@ export default defineComponent({
 .block h4 { display: flex; justify-content: space-between; margin: 0 0 2px; font-size: 13px; font-weight: 600; }
 .block h4 b { color: var(--entry); font-variant-numeric: tabular-nums; }
 .label { display: flex; gap: 6px; align-items: baseline; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size: 12px; }
-.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; max-width: 60%; }
+.stmt { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-color-secondary); }
+.replaced-note { font-size: 12px; border-left: 3px solid var(--replaced); padding: 4px 8px; background: rgba(192, 132, 252, 0.08); border-radius: 0 6px 6px 0; }
+.replaced-note code { font-size: 11px; }
+.replaced-note .inferred { color: var(--replaced); font-weight: 600; }
+.replaced-note .why { display: block; color: var(--text-color-secondary); }
 .note { font-style: normal; font-weight: 700; white-space: nowrap; color: var(--tone); }
 .row { --tone: var(--same); }
 .row.entry { --tone: var(--entry); }
 .row.more { --tone: var(--more); }
 .row.new { --tone: var(--new); }
 .row.fewer, .row.missing { --tone: var(--fewer); }
+.row.replaced { --tone: var(--replaced); }
 .row.same .note { color: var(--text-color-secondary); font-weight: 400; }
 .track { position: relative; display: block; height: 12px; background: var(--surface-border); border-radius: 3px; }
 .track.open { background: none; height: auto; min-height: 18px; }
@@ -178,7 +196,7 @@ export default defineComponent({
 .foot { margin: 8px 0 0; font-size: 11px; color: var(--text-color-secondary); }
 .legend { display: inline-flex; gap: 4px 10px; flex-wrap: wrap; align-items: center; margin-left: 6px; }
 .k { display: inline-block; width: 10px; height: 8px; border-radius: 2px; margin-right: -6px; }
-.k.more { background: var(--more); } .k.new { background: var(--new); } .k.fewer { border: 1px dashed var(--fewer); } .k.same { background: var(--same); }
+.k.more { background: var(--more); } .k.new { background: var(--new); } .k.fewer { border: 1px dashed var(--fewer); } .k.same { background: var(--same); } .k.replaced { background: var(--replaced); }
 .how { font-size: 11px; color: var(--text-color-secondary); }
 .how summary { cursor: pointer; }
 .state.warn { margin: 0; padding: 8px; border-radius: 6px; background: rgba(251, 191, 36, 0.12); color: #fcd34d; }

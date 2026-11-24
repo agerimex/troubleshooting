@@ -156,6 +156,8 @@ describe('presenting a comparison', () => {
     expect(runNote(inTurn)?.sequential).toBe(true)
     // A real overlap of a fast run: 0.3 ms of a 2 ms run.
     expect(runNote({ count: 2, segments: [seg(0, 1.2), seg(0.9, 2)] })?.sequential).toBe(false)
+    // A call of no length that starts with a longer one is not inside it.
+    expect(runNote({ count: 3, segments: [seg(5, 6), seg(5, 5), seg(6, 7)] })?.sequential).toBe(true)
     // A long call covering later ones is an overlap.
     expect(runNote({ count: 3, segments: [seg(0, 10), seg(1, 2), seg(5, 6)] })?.sequential).toBe(false)
   })

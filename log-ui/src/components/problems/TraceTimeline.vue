@@ -10,6 +10,7 @@
           <span class="name" :style="{ paddingLeft: item.group.depth * 12 + 'px' }">
             <span class="caret" aria-hidden="true">{{ item.expanded ? '▾' : '▸' }}</span>
             <span data-testid="timeline-name">{{ item.group.name }}</span> <span class="count" data-testid="timeline-group-count">× {{ item.group.rows.length }}</span>
+            <code v-if="item.group.statement" class="stmt" :title="item.group.statement" data-testid="timeline-group-statement">{{ item.group.statement }}</code>
           </span>
           <span class="meta" data-testid="timeline-group-meta">{{ groupMeta(item.group) }}</span>
         </span>
@@ -99,6 +100,7 @@ export default defineComponent({
 .warn { color: #fbbf24; font-weight: 400; }
 .caret { display: inline-block; width: 12px; color: var(--text-color-secondary); }
 .count { color: #fb923c; font-weight: 700; }
+.stmt { display: block; margin-top: 1px; font-weight: 400; font-size: 11px; color: var(--text-color-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60ch; }
 .track { position: relative; display: block; height: 10px; margin-top: 5px; background: var(--surface-border); border-radius: 3px; }
 .bar { position: absolute; top: 0; height: 10px; border-radius: 3px; background: var(--text-color-secondary); }
 .bar.seg { background: #fb923c; box-shadow: inset -1px 0 0 var(--surface-ground); border-radius: 2px; }
