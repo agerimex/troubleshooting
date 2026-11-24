@@ -123,7 +123,7 @@
               </div>
               <p v-if="compareError" class="state bad mt-2" role="alert" data-testid="compare-error">{{ compareError }}</p>
               <template v-if="reference">
-                <div class="flex flex-wrap items-center gap-2 mt-2 text-sm" data-testid="compare-reference">
+                <div class="flex flex-wrap items-center gap-2 mt-2 px-2 text-sm" data-testid="compare-reference">
                   <span>Compared with {{ reference.label }}: trace <code>{{ reference.traceId }}</code></span>
                   <PrimeButton type="button" size="small" text label="Open it" @click="$emit('open-execution', { traceId: reference.traceId, window: { ...reference.window } })" data-testid="compare-open-reference"/>
                 </div>
