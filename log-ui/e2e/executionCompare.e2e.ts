@@ -108,3 +108,57 @@ test('EXC-004: a trace without spans in the window is said, not drawn', async ({
   await expect(page.getByTestId('compare-error')).toHaveText('That is this execution: enter another trace id.')
 })
 
+// Database calls are told apart by statement; a query replaced by others is
+// paired as an inference, with its reasons.
+const OLD = 'e'.repeat(32)
+const NEW = 'f'.repeat(32)
+function roomList (traceId: string, perRoom: boolean): MockSpan[] {
+  const root = span('/rooms', { traceId, spanId: '00000000000000a0', service: 'api', spanKind: 'server', status: 'ok', duration: 9000 } as Partial<MockSpan>)
+  let n = 0
+  const db = (statement: string) => span('sql:query', {
+    traceId, spanId: '00000000000001' + (n++).toString(16).padStart(2, '0'), parentSpanId: root.spanId, service: 'api', spanKind: 'client', status: 'ok', duration: 300,
+    tags: [{ key: 'db.system', value: 'sqlite' }, { key: 'db.statement', value: statement }]
+  } as Partial<MockSpan>)
+  const out = [root, db('SELECT id FROM tokens WHERE hash = ?')]
+  if (perRoom) {
+    out.push(db('SELECT DISTINCT name FROM rooms'))
+    for (let r = 1; r <= 4; r++) {
+      out.push(db(`SELECT * FROM rooms r LEFT JOIN devices d ON d.room_id = r.id WHERE r.id = ${r}`))
+    }
+  } else {
+    out.push(db('SELECT r.id, d.id FROM rooms r LEFT JOIN devices d ON d.room_id = r.id'))
+  }
+  return out
+}
+const oldRooms = roomList(OLD, false)
+const newRooms = roomList(NEW, true)
+const roomReport = (body: Record<string, any>): ReportReply => ({
+  spans: { records: body.trace_id === OLD ? oldRooms : body.trace_id === NEW ? newRooms : [] },
+  logs: { records: [] }
+})
+
+test('EXC-005: a replaced query is paired with the queries in its place, as an inference', async ({ page }) => {
+  await mockApi(page, () => ({ spans: [] }), () => ({ count: 0 }), { report: roomReport })
+  await page.goto(`/#/executions?trace=${NEW}&from=${FROM}&to=${TO}&view=timeline`)
+  // The timeline folds the per-room query only, with its statement.
+  const group = page.getByTestId('timeline-group')
+  await expect(group).toHaveCount(1)
+  await expect(group.getByTestId('timeline-group-count')).toHaveText('× 4')
+  await expect(group.getByTestId('timeline-group-statement')).toHaveText('SELECT * FROM rooms r LEFT JOIN devices d ON d.room_id = r.id WHERE r.id = ?')
+
+  await page.getByTestId('view-compare').click()
+  await page.getByTestId('compare-trace-input').fill(OLD)
+  await page.getByTestId('compare-trace-submit').click()
+  const note = page.getByTestId('compare-replacement')
+  await expect(note).toHaveCount(1)
+  await expect(note).toContainText('Likely in place of each other')
+  await expect(note).toContainText('inferred')
+  await expect(note.getByTestId('compare-replacement-reasons')).toHaveText('same place: after sql:query SELECT id FROM tokens WHERE hash = ?; same target: sqlite; same tables: devices, rooms.')
+  const current = page.getByTestId('compare-block-current')
+  await expect(current.getByTestId('compare-stacked-row').filter({ hasText: 'FROM tokens' })).toHaveAttribute('data-change', 'same')
+  await expect(current.getByTestId('compare-stacked-new')).toHaveText(['replaces', 'replaces'])
+  await expect(page.getByTestId('compare-block-reference').getByTestId('compare-stacked-missing')).toHaveText('replaced')
+  await expect(current.getByTestId('compare-stacked-row').filter({ hasText: 'WHERE r.id = ?' }).getByTestId('compare-stacked-count')).toHaveText('× 4')
+  await page.getByTestId('compare-differences').locator('summary').click()
+  await expect(page.getByTestId('compare-difference')).toHaveCount(1)
+})

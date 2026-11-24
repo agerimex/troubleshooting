@@ -1,3 +1,4 @@
+import { callIdentity, statementOf } from '@/services/callIdentity'
 import { ROOT_PARENT } from '@/services/spanTree'
 import { association, sortedLogs, spanOrder, type Association } from '@/services/report'
 import { type Span } from '@/types/filter'
@@ -308,12 +309,14 @@ export function timeline (spans: Span[]): Timeline {
 export const REPEAT_MIN = 3
 
 // TimelineGroup is a run of repeated calls: consecutive sibling spans of one
-// parent with the same service, kind and name and no children of their own
-// (an N+1 query, a call per item). Folding is presentation only: every span
+// parent with the same service, kind and name (and, for database calls, the
+// same normalized statement: services/callIdentity.ts) and no children of
+// their own (an N+1 query, a call per item). Folding is presentation only: every span
 // stays in the report and the group expands into its rows.
 export interface TimelineGroup {
   key: string // 'repeat:' + the first span's key
   name: string
+  statement: string // the normalized statement of a database call, '' when none
   depth: number
   rows: TimelineRow[]
   startMs: number // the first start
@@ -327,7 +330,7 @@ export type TimelineItem =
   | { type: 'row', row: TimelineRow }
   | { type: 'group', group: TimelineGroup, expanded: boolean }
 
-const repeatOf = (r: TimelineRow) => [r.span.traceId, r.span.parentSpanId, r.span.service, r.span.spanKind ?? '', r.span.name].join('\u0000')
+const repeatOf = (r: TimelineRow) => [r.span.traceId, r.span.parentSpanId, callIdentity(r.span)].join('\u0000')
 
 // groupRepeats folds runs of at least REPEAT_MIN repeated leaf calls (see
 // TimelineGroup) of an ordered timeline. A group listed in expanded, or one
@@ -356,6 +359,7 @@ export function groupRepeats (rows: TimelineRow[], expanded: ReadonlySet<string>
     const group: TimelineGroup = {
       key: 'repeat:' + run[0].key,
       name: run[0].span.name,
+      statement: statementOf(run[0].span),
       depth: run[0].depth,
       rows: run,
       startMs: Math.min(...run.map((r) => r.startMs)),
