@@ -86,6 +86,9 @@ describe('a changed query, compared', () => {
     expect(rp.current.map((r) => r.statement)).toEqual([normalizeStatement(NAMES), normalizeStatement(ROOM(1))])
     expect(rp.reasons).toEqual(['same place: after sql:query SELECT key, value FROM user_config WHER…', 'same target: sqlite', 'same tables: devices, rooms'])
     expect(toneOf(row(JOIN))).toBe('replaced')
+    // the replaced query is listed just before the queries in its place
+    const statements = c.rows.map((r) => r.statement)
+    expect(statements.indexOf(JOIN) + 1).toBe(statements.indexOf(normalizeStatement(NAMES)))
     expect(toneOf(row(AUTH[0]))).toBe('same')
     const d = differences(c)
     expect(d).toHaveLength(1)

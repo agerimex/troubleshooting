@@ -160,6 +160,13 @@ export function compareExecutions (reference: Span[], current: Span[]): Executio
     for (const r of [...rp.reference, ...rp.current]) {
       r.replacement = i
     }
+    // The replaced calls (with their subtrees) go just before the calls in
+    // their place, so the pair reads together.
+    const moving = (r: CompareRow) => rp.reference.some((m) => r === m || r.path.startsWith(m.path + SEP))
+    const moved = rows.filter(moving)
+    const rest = rows.filter((r) => !moving(r))
+    rest.splice(rest.indexOf(rp.current[0]), 0, ...moved)
+    rows.splice(0, rows.length, ...rest)
   })
   const referenceMs = totalMs(reference, refOrigin)
   const currentMs = totalMs(current, curOrigin)
