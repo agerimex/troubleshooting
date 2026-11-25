@@ -1,17 +1,21 @@
 <template>
   <div class="population-form flex flex-col gap-2" :data-testid="testid">
-    <div class="flex flex-wrap items-center gap-2">
-      <InputText :modelValue="modelValue.service" @update:modelValue="(v) => set('service', v ?? '')" placeholder="Service (required)" class="w-64"
-        :data-testid="testid + '-service'"/>
-      <label class="text-sm">From</label>
-      <Calendar :modelValue="from" @update:modelValue="setFrom" showTime hourFormat="24" dateFormat="dd.mm.yy" :data-testid="testid + '-from'"/>
-      <label class="text-sm">to (exclusive)</label>
-      <Calendar :modelValue="to" @update:modelValue="setTo" showTime hourFormat="24" dateFormat="dd.mm.yy" :data-testid="testid + '-to'"/>
+    <div class="form-row">
+      <label class="form-field pf-service">Service
+        <InputText :modelValue="modelValue.service" @update:modelValue="(v) => set('service', v ?? '')" placeholder="required"
+          :data-testid="testid + '-service'"/>
+      </label>
+      <label class="form-field pf-time">From
+        <Calendar :modelValue="from" @update:modelValue="setFrom" showTime hourFormat="24" dateFormat="dd.mm.yy" :data-testid="testid + '-from'"/>
+      </label>
+      <label class="form-field pf-time">To (exclusive)
+        <Calendar :modelValue="to" @update:modelValue="setTo" showTime hourFormat="24" dateFormat="dd.mm.yy" :data-testid="testid + '-to'"/>
+      </label>
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <div v-for="d in dimensions" :key="d.key" class="flex flex-wrap items-center gap-1">
         <Dropdown :modelValue="modeOf(d.key)" @update:modelValue="(m) => setMode(d.key, m)" :options="modes" optionLabel="label" optionValue="value"
-          class="w-36" :data-testid="testid + '-' + d.key + '-mode'">
+          :data-testid="testid + '-' + d.key + '-mode'">
           <template #value="{ value }">{{ d.label }}: {{ modes.find((m) => m.value === value)?.label }}</template>
         </Dropdown>
         <InputText v-if="modeOf(d.key) === 'is'" :modelValue="modelValue[d.key] ?? ''" @update:modelValue="(v) => set(d.key, v ?? '')"
@@ -115,4 +119,7 @@ export default defineComponent({
 <style scoped>
 /* The rows stack; without this they sat side by side and overflowed narrow screens. */
 .population-form { display: flex; flex-direction: column; min-width: 0; }
+.pf-service { flex: 1 1 12rem; }
+.pf-time { flex: 0 1 11.5rem; }
+.pf-time :deep(.p-calendar), .pf-time :deep(input) { width: 100%; }
 </style>

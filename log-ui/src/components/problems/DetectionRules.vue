@@ -1,8 +1,8 @@
 <template>
   <div data-testid="detection-rules">
-    <div class="flex justify-between items-start flex-wrap gap-2">
+    <div class="flex justify-between items-center flex-wrap gap-2">
       <div>
-        <h2 class="title">What counts as a problem?</h2>
+        <h3 class="title">What counts as a problem?</h3>
         <div class="text-xs opacity-80" data-testid="rules-revision">
           <template v-if="saved && saved.revision > 0">Revision {{ saved.revision }} · saved {{ time(saved.savedAt) }} · effective from {{ time(saved.effectiveAt) }}</template>
           <template v-else-if="saved">Built-in defaults (not saved yet) · applies to every service of this installation</template>
@@ -214,7 +214,7 @@ export default defineComponent({
 </script>
 
 <style scoped>
-.title { font-size: 25px; font-weight: 500; margin: 0; }
+.title { font-size: 18px; font-weight: 600; margin: 0; }
 .pill { font-size: 12px; background: var(--surface-hover); padding: 3px 8px; border-radius: 6px; }
 .rule { border: 0; border-top: 1px solid var(--surface-border); padding: 14px 0; margin: 0; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 16px; cursor: pointer; }

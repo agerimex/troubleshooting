@@ -19,7 +19,7 @@
         <Calendar v-model="to" showTime hourFormat="24" dateFormat="dd.mm.yy" inputId="lib-to" data-testid="library-to"/>
       </label>
       <label class="fld">Service
-        <input v-model="service" placeholder="any service in the shape" class="w-48" data-testid="library-service"/>
+        <input v-model="service" placeholder="any" class="w-48" data-testid="library-service"/>
       </label>
       <label class="fld">Entry operation
         <input v-model="operation" placeholder="any" class="w-48" data-testid="library-operation"/>

@@ -205,7 +205,8 @@ export default defineComponent({
 .pill { font-size: 12px; background: var(--surface-hover); padding: 3px 8px; border-radius: 6px; }
 .scope { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-top: 12px; }
 .fld { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-color-secondary); }
-.fld input { background: var(--surface-ground); color: var(--text-color); border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px; font: inherit; font-size: 14px; }
+.fld { font-size: 13px; }
+.fld input { background: var(--surface-ground); color: var(--text-color); border: 1px solid var(--surface-border); border-radius: 6px; padding: 0 10px; height: 36px; font: inherit; font-size: 14px; }
 .fld input:focus-visible { outline: 2px solid var(--primary-color); }
 .rows { list-style: none; padding: 0; margin: 12px 0 0; border-top: 1px solid var(--surface-border); }
 .prow { display: grid; grid-template-columns: minmax(0, 1fr) 13rem auto; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--surface-border); }
