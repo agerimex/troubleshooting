@@ -52,7 +52,9 @@ func getenv(key, def string) string {
 func initOpenTelemetry() {
 	// WithSQLArgs: this API's query parameters (run ids, trace ids, service
 	// names, never personal data) let the UI show its own queries readably.
-	opts := []sender.Option{sender.WithAddress(getenv("TRACE_RECEIVER_ADDR", "log-receiver-compose:50055")), sender.WithSQLArgs()}
+	// WithProcessResources: the host, process and memory figures of every
+	// request and background job (log-sender resources.go).
+	opts := []sender.Option{sender.WithAddress(getenv("TRACE_RECEIVER_ADDR", "log-receiver-compose:50055")), sender.WithSQLArgs(), sender.WithProcessResources()}
 	if run := os.Getenv("TROUBLESHOOTING_RUN"); run != "" {
 		opts = append(opts, sender.WithResourceAttributes(map[string]string{data.AttrRun: run}))
 	}

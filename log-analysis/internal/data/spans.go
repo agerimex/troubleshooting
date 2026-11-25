@@ -329,6 +329,14 @@ var pageScans = []int{2, 16}
 // a candidate starts at or after the last candidate time, so after every span
 // on the page.
 func selectSpans(ctx context.Context, filter SpanFilter) (SpanPage, error) {
+	page, err := selectSpanPage(ctx, filter)
+	if err == nil {
+		addQueryLogResources(ctx, filter.TimeFrom, filter.TimeTo, page.Spans)
+	}
+	return page, err
+}
+
+func selectSpanPage(ctx context.Context, filter SpanFilter) (SpanPage, error) {
 	conds, params := filter.conditions(true)
 	params = append(params, filter.windowParams()...)
 	want := filter.RowsPerPage + 1
