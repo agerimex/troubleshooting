@@ -52,7 +52,7 @@
           <PrimeButton type="button" icon="pi pi-refresh" text @click="onRefresh" data-testid="refresh"/>
         </template>
 
-        <Column field="humanTime" header="time" style="width: 11.5rem; white-space: nowrap" :expander="true">
+        <Column field="humanTime" header="time" style="width: 13.5rem; white-space: nowrap" :expander="true">
           <template #body="{ node }">
             <span class="row-key" :data-row-key="node.key"></span>
             <span v-if="node.data.kind === 'notice'" class="italic text-amber-500" data-testid="node-notice">{{ node.data.text }}</span>
