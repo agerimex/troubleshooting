@@ -44,6 +44,8 @@ type config struct {
 	token    string
 	resource map[string]string
 	redact   redaction // redact.go
+	// resources: WithProcessResources (resources.go).
+	resources bool
 }
 
 // Option configures NewTracer and NewCustomExporter.
@@ -111,6 +113,9 @@ type CustomExporter struct {
 	token  string
 	err    error
 	redact redaction
+	// resources holds the figures of ended entry calls (WithProcessResources);
+	// nil without it.
+	resources *resourceTracker
 }
 
 func NewCustomExporter(opts ...Option) *CustomExporter {
@@ -134,7 +139,13 @@ func (e *CustomExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadO
 
 	protoSpans := make([]*pb.OneSpan, 0, len(spans))
 	for _, span := range spans {
-		protoSpans = append(protoSpans, spanToProtoWith(span, e.redact))
+		protoSpan := spanToProtoWith(span, e.redact)
+		if e.resources != nil {
+			for key, value := range attributesToMap(e.resources.take(span.SpanContext().TraceID(), span.SpanContext().SpanID())) {
+				protoSpan.SpanAttributes[key] = value
+			}
+		}
+		protoSpans = append(protoSpans, protoSpan)
 	}
 
 	if e.token != "" {
@@ -255,6 +266,16 @@ func NewTracer(svcName string, opts ...Option) (trace.Tracer, error) {
 	batcher := sdktrace.NewBatchSpanProcessor(customExporter)
 
 	cfg := newConfig(opts)
+	providerOpts := []sdktrace.TracerProviderOption{sdktrace.WithSampler(sdktrace.AlwaysSample())}
+	var resourceAttrsExtra []attribute.KeyValue
+	if cfg.resources {
+		// Before the batcher: OnEnd of the tracker runs first, so a call's
+		// figures are ready when the exporter reads them.
+		tracker := newResourceTracker()
+		customExporter.resources = tracker
+		providerOpts = append(providerOpts, sdktrace.WithSpanProcessor(tracker))
+		resourceAttrsExtra = resourceAttributes()
+	}
 	resourceAttrs := []attribute.KeyValue{semconv.ServiceNameKey.String(svcName)}
 	if cfg.redact.sqlArgs {
 		// The choice shows in the application's log, not only in its code,
@@ -262,17 +283,17 @@ func NewTracer(svcName string, opts ...Option) (trace.Tracer, error) {
 		log.Printf("troubleshooting: SQL arguments are sent to %s", cfg.address)
 		resourceAttrs = append(resourceAttrs, attribute.String(AttrSQLArgs, "sent"))
 	}
+	resourceAttrs = append(resourceAttrs, resourceAttrsExtra...)
 	for key, value := range cfg.resource {
 		if key != string(semconv.ServiceNameKey) {
 			resourceAttrs = append(resourceAttrs, attribute.String(key, value))
 		}
 	}
 
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	tp := sdktrace.NewTracerProvider(append(providerOpts,
 		sdktrace.WithSpanProcessor(batcher),
 		sdktrace.WithResource(resource.NewWithAttributes(semconv.SchemaURL, resourceAttrs...)),
-	)
+	)...)
 
 	providerMu.Lock()
 	provider = tp

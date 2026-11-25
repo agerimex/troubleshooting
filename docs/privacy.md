@@ -28,6 +28,10 @@ queries readably). log-sender then logs once at startup
 "troubleshooting: SQL arguments are sent to <address>" and marks the resource
 with `troubleshooting.sql_args=sent`.
 
+`WithProcessResources()` (off by default) sends the host name, the process
+id and memory and CPU figures with every span: no personal data, but the host
+name names the machine (in a container, the container id).
+
 This changes what earlier log-sender versions sent: SQL arguments and query
 strings are no longer sent unless asked for.
 

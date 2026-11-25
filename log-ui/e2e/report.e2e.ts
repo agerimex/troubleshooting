@@ -321,3 +321,47 @@ test('M1-CMP-004/005: the report uses the window; widening regenerates with the 
   await expect(traceRows(page)).toHaveCount(1)
   expect(api.reportRequests).toHaveLength(2)
 })
+
+test('RES-001: the selected span shows the process it ran in and its resources; a query shows what the database measured', async ({ page }) => {
+  const processTags = [
+    { key: 'host.name', value: 'api-1' }, { key: 'process.pid', value: '1' }, { key: 'troubleshooting.host.cpu_count', value: '1' },
+    { key: 'troubleshooting.host.memory_bytes', value: String(1024 * 1024 * 1024) },
+    { key: 'troubleshooting.process.memory_limit_bytes', value: String(160 * 1024 * 1024) }
+  ]
+  const entry = span('/api/v1/stats/shapes', {
+    spanId: '00000000000000b0', service: 'LogAnalysis', spanKind: 'server', duration: 321294, childSpanCount: 1, serviceTags: processTags,
+    tags: [
+      { key: 'troubleshooting.call.overlapping_calls', value: '1' }, { key: 'troubleshooting.call.process_cpu_us', value: '9348' },
+      { key: 'troubleshooting.call.allocated_bytes', value: '1321072' }, { key: 'troubleshooting.call.container_memory_bytes', value: String(8 * 1024 * 1024) }
+    ]
+  })
+  const query = span('clickhouse SELECT shapes', {
+    spanId: '00000000000000b1', parentSpanId: '00000000000000b0', service: 'LogAnalysis', spanKind: 'client', duration: 300000, serviceTags: processTags,
+    tags: [
+      { key: 'db.system', value: 'clickhouse' }, { key: 'db.server.cpu_us', value: '118229' }, { key: 'db.server.memory_peak_bytes', value: '3036072' },
+      { key: 'db.server.read_rows', value: '156' }, { key: 'db.server.read_bytes', value: '40960' }, { key: 'db.server.result_rows', value: '3' },
+      { key: 'db.server.source', value: 'query_log' }
+    ]
+  })
+  await openReportFromLogAnalysis(page, () => ({ spans: { records: [entry, query] }, logs: { records: [] } }), [entry])
+  await expect(page.getByTestId('inspector-process')).toHaveText('host api-1 · process 1 · 1 CPU · 1.00 GB memory · process limit 160 MB')
+  const resources = page.getByTestId('span-resources')
+  await expect(resources).toHaveAttribute('data-kind', 'call')
+  await expect(page.getByTestId('resource-call-cpu')).toHaveText('9.3 ms')
+  await expect(page.getByTestId('resource-call-container')).toHaveText('8.00 MB of 160 MB (5%)')
+  await expect(page.getByTestId('span-resources-note')).toContainText('shared between them')
+
+  await selectSpan(page, 'clickhouse SELECT shapes')
+  await expect(resources).toHaveAttribute('data-kind', 'query')
+  await expect(page.getByTestId('resource-db-cpu')).toHaveText('118 ms')
+  await expect(page.getByTestId('resource-db-memory')).toHaveText('2.90 MB')
+  await expect(page.getByTestId('resource-db-read-rows')).toHaveText('156')
+  await expect(page.getByTestId('span-resources-note')).toContainText('for this query alone')
+})
+
+test('RES-002: a span without recorded resources shows no resource block', async ({ page }) => {
+  await openReportFromLogAnalysis(page, full)
+  await expect(page.getByTestId('inspector-span')).toBeVisible()
+  await expect(page.getByTestId('span-resources')).toHaveCount(0)
+  await expect(page.getByTestId('inspector-process')).toHaveCount(0)
+})

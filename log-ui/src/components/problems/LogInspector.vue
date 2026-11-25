@@ -6,6 +6,16 @@
       <div class="text-xs opacity-80" data-testid="inspector-span-meta">
         {{ span.service }}<template v-if="span.spanKind"> · {{ span.spanKind.toUpperCase() }}</template> · {{ durationText }} · {{ spanLogs.length }} log{{ spanLogs.length === 1 ? '' : 's' }} in this span · {{ (span.status || 'unset').toUpperCase() }} · <span data-testid="inspector-span-version">{{ spanVersion ? 'version ' + spanVersion : 'version unavailable' }}</span>
       </div>
+      <div v-if="processLine" class="text-xs opacity-80" data-testid="inspector-process">{{ processLine.text }}</div>
+      <div v-if="resources" class="resources mt-2" data-testid="span-resources" :data-kind="resources.kind">
+        <div class="text-xs opacity-80">{{ resources.kind === 'query' ? 'Resources of this query' : 'Resources during this call' }}</div>
+        <dl>
+          <template v-for="r in resources.rows" :key="r.testid">
+            <dt>{{ r.label }}</dt><dd :data-testid="r.testid">{{ r.value }}</dd>
+          </template>
+        </dl>
+        <div class="text-xs opacity-80" data-testid="span-resources-note">{{ resources.note }}</div>
+      </div>
     </template>
     <template v-else>
       <div class="text-xs opacity-80">No span selected</div>
@@ -103,6 +113,7 @@ import { computed, defineComponent, ref, watch, type PropType } from 'vue'
 import { isErrorSeverity, offsetMs, scopedLogs, spanInterval, taskLanes, traceStart, type LogScope } from '@/services/problems'
 import { durationMsText, formatNs } from '@/services/spanTree'
 import { serviceVersion } from '@/services/report'
+import { processInfo, spanResources } from '@/services/resources'
 import { type Span } from '@/types/filter'
 import { type LogRecord, type Report } from '@/types/report'
 
@@ -162,11 +173,13 @@ export default defineComponent({
     const shape = (sev: string) => isErrorSeverity(sev) ? '✕' : sev === 'WARN' ? '◆' : '●'
     const sevClass = (sev: string) => isErrorSeverity(sev) ? 'bad' : sev === 'WARN' ? 'warn' : 'info'
     const spanVersion = computed(() => props.span ? serviceVersion(props.span) : null)
+    const resources = computed(() => props.span ? spanResources(props.span) : null)
+    const processLine = computed(() => props.span ? processInfo(props.span) : null)
     const durationText = computed(() => props.span ? (props.span.duration < 0 ? 'duration invalid' : durationMsText(props.span.duration) + ' ms') : '')
     function pick (id: string) {
       selectedLog.value = id
     }
-    return { scope, view, selectedLog, spanVersion, spanLogs, traceLogs, lanes, laneFrom, laneTo, lanePct, pickedLog, offset, fmt, shape, sevClass, durationText, pick, formatNs }
+    return { scope, view, selectedLog, spanVersion, resources, processLine, spanLogs, traceLogs, lanes, laneFrom, laneTo, lanePct, pickedLog, offset, fmt, shape, sevClass, durationText, pick, formatNs }
   }
 })
 </script>
@@ -174,6 +187,10 @@ export default defineComponent({
 <style scoped>
 .inspector { background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 8px; padding: 14px; }
 .title { font-size: 16px; font-weight: 600; margin: 2px 0; }
+.resources { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; }
+.resources dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0; font-size: 13px; }
+.resources dt { opacity: .8; }
+.resources dd { margin: 0; font-variant-numeric: tabular-nums; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--surface-border); }
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text-color-secondary); padding: 6px 8px; cursor: pointer; font: inherit; font-size: 13px; }
 .tabs button.on { color: var(--text-color); border-bottom-color: var(--primary-color); font-weight: 600; }
