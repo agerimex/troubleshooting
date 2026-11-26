@@ -12,6 +12,8 @@ export interface SpanFilter {
   status?: string
   serviceName?: string
   methodName?: string
+  // Spans that lasted at least this many milliseconds (unset: any duration).
+  minDurationMs?: number
   // Cursor: the last row of the previous page.
   afterTime?: string
   afterTraceId?: string

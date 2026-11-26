@@ -491,6 +491,7 @@ Span API
 | `trace_id` | 32 hex digits: only this trace. |
 | `parent_id` | 16 hex digits: children of this span. Needs `trace_id`, because span ids are unique only within a trace. |
 | `status`, `service_name`, `method_name` | `unset`/`error`/`ok`; case-insensitive substrings of the service and span name. |
+| `min_duration_ms` | Spans that lasted at least this many milliseconds (fractions allowed; 0 or absent: any duration). A span without a valid duration never matches. |
 | `rows_per_page` | Default 25, at most 1000. `HasMore` says whether more rows follow (read with one extra row, not guessed). |
 | `after_time`, `after_trace_id`, `after_span_id` | Cursor: the last row of the previous page; all three or none. Rows are ordered by (start time, trace id, span id). |
 

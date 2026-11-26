@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,7 +39,10 @@ type SpanFilter struct {
 	Status      string `json:"status"`
 	ServiceName string `json:"service_name"`
 	MethodName  string `json:"method_name"`
-	RowsPerPage int    `json:"rows_per_page"`
+	// MinDurationMs keeps spans that lasted at least this long (0: any).
+	// Spans without a valid duration (stored as -1) never match it.
+	MinDurationMs float64 `json:"min_duration_ms"`
+	RowsPerPage   int     `json:"rows_per_page"`
 
 	AfterTime    string `json:"after_time"`
 	AfterTraceId string `json:"after_trace_id"`
@@ -69,6 +73,9 @@ var (
 	traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	spanIDPattern  = regexp.MustCompile(`^[0-9a-f]{16}$`)
 )
+
+// maxMinDurationMs bounds min_duration_ms (a week): larger values are typos.
+const maxMinDurationMs = 7 * 24 * 3600 * 1000.0
 
 func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidFilter, fmt.Sprintf(format, args...))
@@ -111,6 +118,9 @@ func (f *SpanFilter) Validate() error {
 
 	if f.Status != "" && StatusCodeFromString(f.Status) == "" {
 		return invalid("unknown status %q", f.Status)
+	}
+	if f.MinDurationMs < 0 || math.IsNaN(f.MinDurationMs) || math.IsInf(f.MinDurationMs, 0) || f.MinDurationMs > maxMinDurationMs {
+		return invalid("min_duration_ms must be a number of milliseconds from 0 to %d", int64(maxMinDurationMs))
 	}
 
 	if f.AfterTime != "" || f.AfterTraceId != "" || f.AfterSpanId != "" {
@@ -157,6 +167,11 @@ func (f *SpanFilter) conditions(withCursor bool) ([]string, []any) {
 	}
 	if f.MethodName != "" {
 		add(`"SpanName" ILIKE {spanName:String}`, clickhouse.Named("spanName", "%"+f.MethodName+"%"))
+	}
+	if f.MinDurationMs > 0 {
+		// Duration is stored in microseconds; round up, minus float noise
+		// (0.1 * 1000 is 100.00000000000001).
+		add(`"Duration" >= toInt64({minDuration:Int64})`, clickhouse.Named("minDuration", strconv.FormatInt(int64(math.Ceil(f.MinDurationMs*1000-1e-6)), 10)))
 	}
 	if withCursor && f.hasCursor() {
 		add(`("UnixTime", "TraceId", "SpanId") > (toInt64({afterTime:Int64}), {afterTraceId:String}, {afterSpanId:String})`,
