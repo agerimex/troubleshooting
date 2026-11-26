@@ -14,11 +14,15 @@
           filterDisplay="row"
           :loading="loading" v-model:expandedKeys="expandedKeys" @nodeExpand="onExpand" @page="onPage" :totalRecords="paginatorTotal">
         <template #header>
-          <div class="flex flex-wrap items-center gap-2">
-            <label for="window-from">From</label>
-            <Calendar inputId="window-from" v-model="windowFrom" @update:modelValue="onRefresh()" showTime hourFormat="24" :showSeconds="true" dateFormat="dd.mm.yy"/>
-            <label for="window-to">To</label>
-            <Calendar inputId="window-to" v-model="windowTo" @update:modelValue="onRefresh()" showTime hourFormat="24" :showSeconds="true" dateFormat="dd.mm.yy" showButtonBar placeholder="now"/>
+          <div class="flex flex-wrap items-center gap-2 la-toolbar">
+            <span class="la-pair">
+              <label for="window-from">From</label>
+              <Calendar inputId="window-from" v-model="windowFrom" @update:modelValue="onRefresh()" showTime hourFormat="24" :showSeconds="true" dateFormat="dd.mm.yy"/>
+            </span>
+            <span class="la-pair">
+              <label for="window-to">To</label>
+              <Calendar inputId="window-to" v-model="windowTo" @update:modelValue="onRefresh()" showTime hourFormat="24" :showSeconds="true" dateFormat="dd.mm.yy" showButtonBar placeholder="now"/>
+            </span>
             <SelectButton v-model="scope" :options="scopeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" @change="onScopeChange" data-testid="scope"/>
             <InputText v-model="traceIdInput" placeholder="Trace id" class="w-72" @keyup.enter="openTraceById" data-testid="trace-id-input"/>
             <PrimeButton type="button" label="Open timeline" size="small" @click="openTraceById" data-testid="open-trace-by-id"/>
@@ -48,7 +52,7 @@
           <PrimeButton type="button" icon="pi pi-refresh" text @click="onRefresh" data-testid="refresh"/>
         </template>
 
-        <Column field="humanTime" header="time" style="width: 12rem" :expander="true">
+        <Column field="humanTime" header="time" style="width: 13.5rem; white-space: nowrap" :expander="true">
           <template #body="{ node }">
             <span class="row-key" :data-row-key="node.key"></span>
             <span v-if="node.data.kind === 'notice'" class="italic text-amber-500" data-testid="node-notice">{{ node.data.text }}</span>
@@ -57,13 +61,13 @@
               <PrimeButton type="button" label="Retry" size="small" text @click="retryChildren(node.data.parentKey)" data-testid="retry-children"/>
             </span>
             <span v-else-if="node.data.kind === 'group'" class="text-sm font-semibold" data-testid="log-group">{{ node.data.text }}</span>
-            <span v-else class="whitespace-nowrap" :class="{ 'la-selected': node.key === selectedKey }" :data-selected="node.key === selectedKey">{{ node.data.humanTime }}</span>
+            <span v-else class="la-time" :class="{ 'la-selected': node.key === selectedKey }" :data-selected="node.key === selectedKey" :title="node.data.humanTime"><span>{{ clockOf(node.data.humanTime) }}</span><span class="la-date">{{ dayOf(node.data.humanTime) }}</span></span>
           </template>
         </Column>
-        <Column field="name" header="name" style="width: 12rem" :expander="false">
+        <Column field="name" header="name" style="min-width: 16rem" :expander="false">
           <template #body="{ node }">
             <template v-if="!node.data.kind">
-              <span data-testid="span-name">{{ node.data.name }}</span>
+              <span class="la-name" data-testid="span-name">{{ node.data.name }}</span>
               <Tag v-if="node.data.parentMissing" class="ml-2" severity="warning" :value="node.data.parentMissing" data-testid="parent-missing"/>
               <Tag v-else-if="node.data.parentSpanId !== ROOT_PARENT && isTopRow(node)" class="ml-2" severity="secondary" value="child span"/>
               <div class="text-xs opacity-70">{{ node.data.spanKind ? node.data.spanKind.toUpperCase() + ' · ' : '' }}span</div>
@@ -77,14 +81,14 @@
             <InputText v-model="filterByMethodName" placeholder="Filter by span name" type="text" class="p-column-filter" v-on:update:modelValue="filterChanged()" data-testid="filter-name"/>
           </template>
         </Column>
-        <Column field="status" header="status" style="width: 6.5rem">
+        <Column field="status" header="status" style="width: 9.5rem">
           <template #body="{ node }">
             <Tag v-if="!node.data.kind" :value="node.data.status" :severity="getSeverity(node.data.status)"/>
             <Tag v-else-if="node.data.kind === 'log'" :value="node.data.log.severity || 'not recorded'" :severity="logSeverity(node.data.log.severity)" data-testid="log-row-severity"/>
           </template>
           <template #filter>
             <div class="flex">
-              <Dropdown v-model="filterStatus" @change="filterChanged()" :options="statuses" placeholder="Any span status" class="p-column-filter" style="width: 9rem" :showClear="true" data-testid="filter-status">
+              <Dropdown v-model="filterStatus" @change="filterChanged()" :options="statuses" placeholder="Any" class="p-column-filter w-full" :showClear="true" data-testid="filter-status">
                 <template #option="slotProps">
                   <Tag :value="slotProps.option" :severity="getSeverity(slotProps.option)" />
                 </template>
@@ -92,7 +96,7 @@
             </div>
           </template>
         </Column>
-        <Column v-for="col of selectedColumns" :field="col.field" :header="col.header" :key="col.field" :style="col.field === 'msg' ? 'min-width: 16rem' : 'min-width: 8rem'">
+        <Column v-for="col of selectedColumns" :field="col.field" :header="col.header" :key="col.field" :style="col.field === 'msg' ? 'min-width: 10rem' : 'min-width: 8rem'">
           <template #body="{ node }">
             <div v-if="node.data.kind === 'log' && col.field === 'msg'" class="log-msg" data-testid="log-row-message">{{ node.data.log.message }}</div>
             <div v-else-if="!node.data.kind || node.data.kind === 'log'" @dblclick="showDetails(node.data[col.field])" class="multiline-cell" :title="JSON.stringify(node.data[col.field])">{{ node.data[col.field] }}</div>
@@ -104,8 +108,9 @@
           </template>
         </Column>
         <Column field="duration" header="duration, ms" headerStyle="width: 6rem; text-align: right" bodyStyle="text-align: right; overflow: visible"></Column>
-        <Column header="" style="width: 7rem">
+        <Column header="" style="width: 8.5rem">
           <template #body="{ node }">
+            <div class="la-actions">
             <template v-if="!node.data.kind">
               <PrimeButton type="button" icon="pi pi-sitemap" size="small" text title="Open timeline" aria-label="Open timeline" @click="openNode(node, 'timeline')" data-testid="open-trace"/>
               <PrimeButton type="button" icon="pi pi-info-circle" size="small" text :label="evidenceLabel(node.data)" title="Events and links" @click="showEvidence(node.data)" data-testid="evidence"/>
@@ -113,6 +118,7 @@
             <PrimeButton v-else-if="node.data.kind === 'log'" type="button" icon="pi pi-info-circle" size="small" text title="Record details" aria-label="Record details" @click="inspected = node.data.log" data-testid="log-details"/>
             <PrimeButton v-if="!node.data.kind || node.data.kind === 'log'" type="button" icon="pi pi-ellipsis-h" size="small" text title="Row actions" aria-label="Row actions"
               aria-haspopup="menu" @click="openMenu(node, $event)" data-testid="row-actions"/>
+            </div>
           </template>
         </Column>
       </TreeTable>
@@ -269,6 +275,9 @@ export default defineComponent({
 
     const rowsPerPage = ref(25)
     const statuses = ref(['unset', 'error', 'ok'])
+    // humanTime is "dd.mm.yy hh:mm:ss.micro"; the cell shows the time above the date.
+    const clockOf = (t: string) => t.includes(' ') ? t.slice(t.indexOf(' ') + 1) : t
+    const dayOf = (t: string) => t.includes(' ') ? t.slice(0, t.indexOf(' ')) : ''
     const filterStatus = ref()
     const firstRow = ref(0)
 
@@ -724,6 +733,8 @@ export default defineComponent({
     }
 
     return {
+      clockOf,
+      dayOf,
       ROOT_PARENT,
       nodes,
       expandedKeys,
@@ -815,6 +826,52 @@ export default defineComponent({
   color: var(--primary-color);
   cursor: pointer;
   padding: 0;
+}
+
+.la-name {
+  overflow-wrap: break-word;
+}
+
+/* Column filters fill their column instead of running under the next one. */
+.la-table :deep(.p-column-filter) {
+  width: 100%;
+  min-width: 0;
+}
+
+.la-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+/* The table header holds the toolbar; the theme makes it bold. */
+.la-table :deep(.p-treetable-header) {
+  font-weight: normal;
+}
+
+.la-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.la-toolbar label {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+/* Time first, the date under it: the column stays narrow enough for names. */
+.la-time {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  line-height: 1.3;
+}
+
+.la-date {
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .la-selected {

@@ -188,9 +188,9 @@ export default defineComponent({
 .inspector { background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 8px; padding: 14px; }
 .title { font-size: 16px; font-weight: 600; margin: 2px 0; }
 .resources { border: 1px solid var(--surface-border); border-radius: 6px; padding: 8px 10px; }
-.resources dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0; font-size: 13px; }
+.resources dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; margin: 4px 0; font-size: 13px; }
 .resources dt { opacity: .8; }
-.resources dd { margin: 0; font-variant-numeric: tabular-nums; }
+.resources dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--surface-border); }
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text-color-secondary); padding: 6px 8px; cursor: pointer; font: inherit; font-size: 13px; }
 .tabs button.on { color: var(--text-color); border-bottom-color: var(--primary-color); font-weight: 600; }
