@@ -25,7 +25,8 @@ func (c *checker) otlpLogs(ctx context.Context, otlp *otlpSender) error {
 	sum := sha256.Sum256([]byte("otlp-log-" + c.d.run))
 	traceID, spanID := sum[:16], sum[16:24]
 	start := c.d.at(-20 * time.Minute)
-	service := "fx" + c.d.run + "-otlp-logs"
+	// Not "fx"+run: the run's own checks count every span and log of that prefix.
+	service := "otlp-logs-" + c.d.run
 	resource := &resourcepb.Resource{Attributes: []*commonpb.KeyValue{{Key: "service.name", Value: strValue(service)}}}
 
 	span := &collectortracepb.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{
