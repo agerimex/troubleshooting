@@ -37,22 +37,22 @@
         <div v-if="activation" class="activation" :class="{ 'open-top': !activation.startsHere, 'open-bottom': !activation.endsHere }"
           :style="activationStyle" aria-hidden="true" data-testid="seq-activation"/>
         <div v-for="e in page.events" :key="e.id" class="row">
-          <button v-if="e.kind === 'call'" type="button" class="arrow" :class="{ sel: isSelected(e), rtl: col(e.target!) < col(e.participant) }"
-            :style="arrowStyle(e)" :aria-pressed="isSelected(e)" @click="pick(e)" data-testid="seq-call" :data-span-key="e.spanKey">
-            <span class="lbl">+{{ fmtMs(e.timeMs ?? 0) }} ms · Call<template v-if="repeatOf(e)"> {{ repeatOf(e) }}</template><br><b>{{ e.label }}</b><template v-if="!targetObserved(e)"> <i>(peer not instrumented)</i></template></span>
+          <button v-if="e.kind === 'call' || e.kind === 'message'" type="button" class="arrow" :class="{ sel: isSelected(e), rtl: col(e.target!) < col(e.participant), msg: e.kind === 'message' }"
+            :style="arrowStyle(e)" :aria-pressed="isSelected(e)" @click="pick(e)" :data-testid="e.kind === 'message' ? 'seq-message' : 'seq-call'" :data-span-key="e.spanKey">
+            <span class="lbl">+{{ fmtMs(e.timeMs ?? 0) }} ms · {{ e.kind === 'message' ? 'Message' : 'Call' }}<template v-if="repeatOf(e)"> {{ repeatOf(e) }}</template><br><b>{{ e.label }}</b><template v-if="!targetObserved(e)"> <i>(peer not instrumented)</i></template></span>
             <span class="line"/>
           </button>
           <button v-else type="button" class="mark" :class="[e.kind, statusClass(e), { sel: isSelected(e) }]" :style="markStyle(e)"
             :aria-pressed="isSelected(e)" @click="pick(e)" :data-testid="'seq-' + e.kind" :data-span-key="e.spanKey">
             <span class="t">{{ e.timeMs === null ? 'time unknown' : '+' + fmtMs(e.timeMs) + ' ms' }} · {{ kindWord(e) }}<template v-if="laneOf(laneSet, e.participant) === OTHER_LANE"> · {{ e.participant }}</template><template v-if="e.kind === 'end' && isSelected(e)"> · end of the selection</template></span>
-            <span class="d">{{ e.label }}<template v-if="e.kind === 'end' && durationOf(e) !== null"> · {{ fmtMs(durationOf(e)!) }} ms</template></span>
+            <span class="d">{{ e.label }}<template v-if="e.kind === 'end' && e.durationMs !== undefined"> · {{ fmtMs(e.durationMs) }} ms</template></span>
             <span v-if="e.note" class="n">{{ e.note }}</span>
           </button>
         </div>
       </div>
     </div>
     <p class="legend text-xs opacity-80">
-      Arrows = correlated client/server spans (or a client's recorded peer). End markers = span completion, not a response; the selected operation's bar runs on its lifeline from its start to its end. Vertical spacing shows order, not elapsed time; equal times are ordered by id, which is not causality.
+      Arrows = correlated client/server spans (or a client's recorded peer); dashed arrows = messages, a producer span and its one consumer span, one-way, with the consumer's processing in its own column. End markers = span completion, not a response; the selected operation's bar runs on its lifeline from its start to its end. Vertical spacing shows order, not elapsed time; equal times are ordered by id, which is not causality.
       <template v-if="model.links.length"> {{ model.links.length }} recorded link(s) are associations, not calls: see Span details.</template>
     </p>
   </div>
@@ -164,14 +164,21 @@ export default defineComponent({
       const c = col(e.participant)
       return { left: `calc(${c * w}% + 4px)`, width: `calc(${w}% - 8px)` }
     }
-    const kindWord = (e: SeqEvent) => e.kind === 'start' ? 'Started' : e.kind === 'end' ? 'Ended' : e.kind === 'log' ? `${e.severity} log` : 'Call'
-    const statusClass = (e: SeqEvent) => e.kind === 'log' ? 'bad' : (opOf(e)?.status === 'error' && e.kind === 'end' ? 'errspan' : '')
-    const durationOf = (e: SeqEvent) => { const o = opOf(e); return o && o.endMs !== null ? o.endMs - o.startMs : null }
+    const kindWord = (e: SeqEvent) => e.kind === 'start' ? 'Started' : e.kind === 'end' ? 'Ended' : e.kind === 'log' ? `${e.severity} log` : e.kind === 'message' ? 'Message' : 'Call'
+    // An end mark shows the status of the span it ends (a message's: the consumer's).
+    const statusClass = (e: SeqEvent) => {
+      if (e.kind === 'log') {
+        return 'bad'
+      }
+      const o = opOf(e)
+      const status = o?.kind === 'message' && e.spanKey !== o.id ? o.serverStatus : o?.status
+      return status === 'error' && e.kind === 'end' ? 'errspan' : ''
+    }
     const repeatOf = (e: SeqEvent) => { const r = opOf(e)?.repeat; return r ? `(repeat ${r.index} of ${r.count})` : '' }
     const targetObserved = (e: SeqEvent) => opOf(e)?.targetObserved ?? true
     return {
       root, narrow, showInternal, start, page, laneSet, lanesShown, col, hiddenErrors, locateSelection, isSelected, pick, arrowStyle, markStyle, activation, activationStyle,
-      kindWord, statusClass, durationOf, repeatOf, targetObserved, eventText, fmtMs, laneOf, OTHER_LANE
+      kindWord, statusClass, repeatOf, targetObserved, eventText, fmtMs, laneOf, OTHER_LANE
     }
   }
 })
@@ -217,6 +224,8 @@ export default defineComponent({
 .line::after { content: ''; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left: 7px solid #60a5fa; border-right: 0; }
 .arrow.rtl .line::after { right: auto; left: -1px; border-left: 0; border-right: 7px solid #60a5fa; }
 .arrow.sel .line { background: var(--primary-color); }
+.arrow.msg .line { background: repeating-linear-gradient(to right, #60a5fa 0 6px, transparent 6px 10px); }
+.arrow.msg.sel .line { background: repeating-linear-gradient(to right, var(--primary-color) 0 6px, transparent 6px 10px); }
 .list { list-style: none; padding: 0; margin: 10px 0 0; }
 .item { display: block; width: 100%; text-align: left; background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 6px; color: var(--text-color);
   padding: 8px; margin-bottom: 6px; font: inherit; font-size: 13px; cursor: pointer; min-height: 44px; }
