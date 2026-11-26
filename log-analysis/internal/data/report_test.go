@@ -91,6 +91,55 @@ func TestReportCombinesBothSourcesForOneTrace(t *testing.T) {
 	}
 }
 
+// Spans are read without child counts; the report fills them in: from its own
+// records when it holds the whole trace, from the database when truncated.
+func TestReportCountsChildren(t *testing.T) {
+	trace := func() []*Span {
+		return []*Span{
+			{TraceId: traceA, SpanId: "00000000000000a1", ParentSpanId: RootParentSpanID},
+			{TraceId: traceA, SpanId: "00000000000000a2", ParentSpanId: "00000000000000a1"},
+			{TraceId: traceA, SpanId: "00000000000000a3", ParentSpanId: "00000000000000a1"},
+			{TraceId: traceA, SpanId: "00000000000000a4", ParentSpanId: "00000000000000a3"},
+		}
+	}
+	for _, tc := range []struct {
+		name      string
+		hasMore   bool
+		dbErr     error
+		wantQuery bool
+		want      []int32
+	}{
+		{"whole trace", false, nil, false, []int32{2, 0, 0}},
+		{"truncated", true, nil, true, []int32{7, 7, 7}},
+		{"truncated, database count failed", true, errors.New("down"), true, []int32{2, 0, 0}},
+	} {
+		src := (&fakeSources{}).sources()
+		src.Spans = func(_ context.Context, f SpanFilter) (SpanPage, error) {
+			return SpanPage{Spans: trace()[:3], HasMore: tc.hasMore}, nil
+		}
+		queried := false
+		src.ChildCounts = func(_ context.Context, _ SpanFilter, spans []*Span) error {
+			queried = true
+			if tc.dbErr != nil {
+				return tc.dbErr
+			}
+			for _, s := range spans {
+				s.ChildSpanCount = 7
+			}
+			return nil
+		}
+		report := BuildReport(context.Background(), reportRequest(), src)
+		if queried != tc.wantQuery {
+			t.Errorf("%s: database queried = %v", tc.name, queried)
+		}
+		for i, s := range report.Spans.Records {
+			if s.ChildSpanCount != tc.want[i] {
+				t.Errorf("%s: span %s childSpanCount %d, want %d", tc.name, s.SpanId, s.ChildSpanCount, tc.want[i])
+			}
+		}
+	}
+}
+
 // M1-CMP-001: one failed source keeps the other's evidence and is never zero.
 func TestReportKeepsEvidenceWhenOneSourceFails(t *testing.T) {
 	unreachable := &net.OpError{Op: "dial", Err: errors.New("connection refused")}

@@ -6,6 +6,7 @@
       <div class="text-xs opacity-80" data-testid="inspector-span-meta">
         {{ span.service }}<template v-if="span.spanKind"> · {{ span.spanKind.toUpperCase() }}</template> · {{ durationText }} · {{ spanLogs.length }} log{{ spanLogs.length === 1 ? '' : 's' }} in this span · {{ (span.status || 'unset').toUpperCase() }} · <span data-testid="inspector-span-version">{{ spanVersion ? 'version ' + spanVersion : 'version unavailable' }}</span>
       </div>
+      <div v-if="span.statusMessage" class="state status-msg" :class="{ bad: span.status === 'error' }" data-testid="inspector-status-message">{{ span.statusMessage }}</div>
       <div v-if="processLine" class="text-xs opacity-80" data-testid="inspector-process">{{ processLine.text }}</div>
       <div v-if="resources" class="resources mt-2" data-testid="span-resources" :data-kind="resources.kind">
         <div class="text-xs opacity-80">{{ resources.kind === 'query' ? 'Resources of this query' : 'Resources during this call' }}</div>
@@ -198,6 +199,7 @@ export default defineComponent({
 .tabs button:focus-visible, .point:focus-visible, .link:focus-visible { outline: 2px solid var(--primary-color); }
 .state { margin-top: 8px; padding: 8px; border-radius: 6px; font-size: 13px; }
 .state.bad { background: rgba(248, 113, 113, 0.12); color: #fca5a5; }
+.status-msg { margin: 6px 0; overflow-wrap: anywhere; }
 .state.warn { background: rgba(251, 191, 36, 0.12); color: #fcd34d; }
 .axis { display: flex; justify-content: space-between; }
 .lane { margin-top: 8px; }
