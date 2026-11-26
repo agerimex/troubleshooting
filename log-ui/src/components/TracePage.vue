@@ -35,7 +35,7 @@
             <PrimeButton v-if="total.state === 'failed'" type="button" label="Retry total" size="small" text @click="retryTotal" data-testid="retry-total"/>
           </div>
           <div class="text-xs opacity-80 mt-1" data-testid="filter-scope">
-            Name, status and service filters select spans by their own recorded values; they never search log text. Logs appear under an expanded span by exact trace and span id, whatever their severity.
+            Name, status, service and minimum duration filters select spans by their own recorded values; they never search log text. Logs appear under an expanded span by exact trace and span id, whatever their severity.
           </div>
           <div v-if="notice" class="flex items-center gap-2 mt-2 text-red-600" data-testid="notice">
             <span>{{ notice }}</span>
@@ -107,7 +107,12 @@
             </div>
           </template>
         </Column>
-        <Column field="duration" header="duration, ms" headerStyle="width: 6rem; text-align: right" bodyStyle="text-align: right; overflow: visible"></Column>
+        <Column field="duration" header="duration, ms" headerStyle="width: 7.5rem; text-align: right" bodyStyle="text-align: right; overflow: visible">
+          <template #filter>
+            <InputText v-model="filterMinDuration" type="number" min="0" step="any" inputmode="decimal" class="p-column-filter la-min-duration" placeholder="min ms"
+              aria-label="Minimum duration, ms" title="Spans that lasted at least this many milliseconds" v-on:update:modelValue="filterChanged()" data-testid="filter-min-duration"/>
+          </template>
+        </Column>
         <Column header="" style="width: 8.5rem">
           <template #body="{ node }">
             <div class="la-actions">
@@ -228,6 +233,12 @@ export default defineComponent({
     const inspected = ref<LogRecord | null>(null)
 
     const filterByMethodName = ref('')
+    // Minimum duration in ms, as typed; empty, 0 or not a number: any duration.
+    const filterMinDuration = ref('')
+    const minDurationMs = () => {
+      const v = Number(String(filterMinDuration.value ?? '').replace(',', '.'))
+      return Number.isFinite(v) && v > 0 ? v : undefined
+    }
 
     logsApi.init(new Logs())
     spansApi.init(new Spans()).then(() => { onRefresh() })
@@ -334,7 +345,8 @@ export default defineComponent({
         rowsPerPage: rowsPerPage.value,
         status: filterStatus.value || undefined,
         serviceName: filters.value['service'] || undefined,
-        methodName: filterByMethodName.value || undefined
+        methodName: filterByMethodName.value || undefined,
+        minDurationMs: minDurationMs()
       }
       if (withCursor && cursor.value !== null) {
         filter.afterTime = cursor.value.timeStamp
@@ -547,7 +559,7 @@ export default defineComponent({
     }
 
     function filterChanged () {
-      const searching = !!(filterStatus.value || filterByMethodName.value || filters.value['service'])
+      const searching = !!(filterStatus.value || filterByMethodName.value || filters.value['service'] || minDurationMs())
       if (searching && !scopeChosen) {
         scope.value = 'all'
       }
@@ -788,7 +800,8 @@ export default defineComponent({
       inspected,
       evidenceLabel,
       showEvidence,
-      filterByMethodName
+      filterByMethodName,
+      filterMinDuration
     }
   }
 })
@@ -838,6 +851,9 @@ export default defineComponent({
   min-width: 0;
 }
 
+.la-table :deep(.la-min-duration) {
+  text-align: right;
+}
 .la-actions {
   display: flex;
   align-items: center;

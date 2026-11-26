@@ -238,3 +238,30 @@ test('opening a trace by id validates it', async ({ page }) => {
   await page.getByTestId('return-origin').click()
   await expect(page.getByTestId('trace-id-input')).toBeVisible()
 })
+
+test('a minimum duration finds slow spans at any depth; the count uses the same filter; clearing it restores the list', async ({ page }) => {
+  const root = span('POST /recordings', { spanId: '00000000000000b0', status: 'ok', duration: 40000 })
+  const slow = span('SELECT recordings', { spanId: '00000000000000b2', parentSpanId: '00000000000000b1', duration: 1250000 })
+  const api = await mockApi(page, (body) => {
+    if (body.min_duration_ms !== undefined) {
+      // The backend's answer for duration >= 1000 ms at any depth.
+      return { spans: body.min_duration_ms === 1000 && body.scope === 'all' ? [slow] : [] }
+    }
+    return { spans: [root] }
+  }, () => ({ count: 1 }))
+
+  await page.goto('/')
+  await expect(rows(page)).toHaveText(['POST /recordings'])
+  expect(api.spanRequests.at(-1)!.min_duration_ms).toBeUndefined()
+
+  await page.getByTestId('filter-min-duration').fill('1000')
+  await expect(rows(page)).toHaveText(['SELECT recordings'])
+  const search = api.spanRequests.at(-1)!
+  expect(search.min_duration_ms).toBe(1000)
+  expect(search.scope).toBe('all')
+  expect(api.countRequests.at(-1)!.min_duration_ms).toBe(1000)
+
+  await page.getByTestId('filter-min-duration').fill('')
+  await expect(rows(page)).toHaveText(['POST /recordings'])
+  expect(api.spanRequests.at(-1)!.min_duration_ms).toBeUndefined()
+})

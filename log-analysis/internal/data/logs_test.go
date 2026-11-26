@@ -58,6 +58,9 @@ func TestValidate(t *testing.T) {
 		{"non-hex parent", func(f *SpanFilter) { f.TraceId = traceA; f.ParentId = "zzzzzzzzzzzzzzzz" }, "parent_id"},
 		{"bad scope", func(f *SpanFilter) { f.Scope = "children" }, "scope"},
 		{"bad status", func(f *SpanFilter) { f.Status = "failed" }, "status"},
+		{"minimum duration", func(f *SpanFilter) { f.MinDurationMs = 2.5 }, ""},
+		{"negative minimum duration", func(f *SpanFilter) { f.MinDurationMs = -1 }, "min_duration_ms"},
+		{"minimum duration over a week", func(f *SpanFilter) { f.MinDurationMs = 8 * 24 * 3600 * 1000 }, "min_duration_ms"},
 		{"partial cursor", func(f *SpanFilter) { f.AfterTime = "1500" }, "cursor"},
 		{"cursor without time", func(f *SpanFilter) { f.AfterTraceId = traceA; f.AfterSpanId = spanA }, "after_time"},
 		{"full cursor", func(f *SpanFilter) { f.AfterTime = "1500"; f.AfterTraceId = traceA; f.AfterSpanId = spanA }, ""},
@@ -135,6 +138,16 @@ func TestConditions(t *testing.T) {
 			notWant: []string{"afterTime"},
 		},
 		{
+			name:   "a minimum duration compares the stored microseconds",
+			filter: SpanFilter{Scope: ScopeAll, MinDurationMs: 250},
+			want:   []string{`"Duration" >= toInt64({minDuration:Int64})`},
+		},
+		{
+			name:    "no minimum duration, no condition",
+			filter:  SpanFilter{Scope: ScopeAll},
+			notWant: []string{"Duration"},
+		},
+		{
 			name:   "service and method filters",
 			filter: SpanFilter{Scope: ScopeAll, ServiceName: "bill", MethodName: "GET"},
 			want:   []string{`"ServiceName" ILIKE {serviceName:String}`, `"SpanName" ILIKE {spanName:String}`},
@@ -161,7 +174,7 @@ func TestConditions(t *testing.T) {
 // Every placeholder in a query must be bound, or ClickHouse rejects it.
 func TestEveryPlaceholderIsBound(t *testing.T) {
 	filter := SpanFilter{TimeFrom: "1", TimeTo: "2", TraceId: traceA, ParentId: spanA, Status: "ok",
-		ServiceName: "s", MethodName: "m", AfterTime: "1", AfterTraceId: traceA, AfterSpanId: spanA}
+		ServiceName: "s", MethodName: "m", MinDurationMs: 1, AfterTime: "1", AfterTraceId: traceA, AfterSpanId: spanA}
 	conds, params := filter.conditions(true)
 	params = append(params, filter.windowParams()...)
 	query := canonicalSpans(conds) + whereClause(conds)
@@ -534,6 +547,24 @@ func TestWindowIsHalfOpen(t *testing.T) {
 	for _, q := range []string{canonicalSpans(nil), canonicalLogs(nil)} {
 		if !strings.Contains(q, want) || strings.Contains(q, "BETWEEN") {
 			t.Errorf("query does not use the half-open window:\n%s", q)
+		}
+	}
+}
+
+// min_duration_ms is milliseconds; the stored Duration is microseconds, and a
+// fractional value rounds up, so a span never matches below the minimum.
+func TestMinDurationParameter(t *testing.T) {
+	for ms, want := range map[float64]string{250: "250000", 0.5: "500", 1.0004: "1001", 0.1: "100", 2.3: "2300"} {
+		f := SpanFilter{Scope: ScopeAll, MinDurationMs: ms}
+		_, params := f.conditions(false)
+		var got string
+		for _, p := range params {
+			if nv := p.(driver.NamedValue); nv.Name == "minDuration" {
+				got = nv.Value.(string)
+			}
+		}
+		if got != want {
+			t.Errorf("min_duration_ms %v: minDuration = %q, want %q", ms, got, want)
 		}
 	}
 }

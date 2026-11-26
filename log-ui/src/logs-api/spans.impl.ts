@@ -13,7 +13,8 @@ function payloadOf (filter: SpanFilter, withCursor: boolean) {
     rows_per_page: filter.rowsPerPage,
     status: filter.status,
     service_name: filter.serviceName,
-    method_name: filter.methodName
+    method_name: filter.methodName,
+    min_duration_ms: filter.minDurationMs
   }
   if (withCursor) {
     payload.after_time = filter.afterTime
