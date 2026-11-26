@@ -128,7 +128,7 @@ func scanPrivacy(ctx context.Context, name, source, query string, params []any) 
 	for i := 0; i < n; i++ {
 		dest = append(dest, &counts[i], &examples[i])
 	}
-	if err = clickhouseDB.QueryRow(withLimits(ctx), query, params...).Scan(dest...); err != nil {
+	if err = dbFor(ctx).QueryRow(withLimits(ctx), query, params...).Scan(dest...); err != nil {
 		return 0, nil, err
 	}
 	var out []PrivacyFinding

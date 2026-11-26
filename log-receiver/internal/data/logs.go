@@ -122,7 +122,7 @@ func (l *Log) InsertLogRecords(ctx context.Context, records []LogRecord) error {
 		return nil
 	}
 	received := time.Now().UnixNano()
-	batch, err := clickhouseDB.PrepareBatch(ctx, "INSERT INTO log_records (UnixTime, RecordId, TraceId, SpanId, Severity, ServiceName, Body, Attributes, ReceivedTime)")
+	batch, err := clickhouseDB.PrepareBatch(insertContext(ctx), "INSERT INTO log_records (UnixTime, RecordId, TraceId, SpanId, Severity, ServiceName, Body, Attributes, ReceivedTime)")
 	if err != nil {
 		return err
 	}

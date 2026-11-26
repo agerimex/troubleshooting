@@ -17,6 +17,26 @@ func New(clickhousePool driver.Conn) Models {
 	}
 }
 
+// AsyncInsert makes ClickHouse collect the inserts of many requests into one
+// part (async_insert) instead of writing a part per request, which under a
+// steady stream of small requests saves the merges that cost memory and CPU.
+// wait_for_async_insert keeps the contract: an insert returns only after its
+// rows are written, so nothing is confirmed before it is stored. The receiver
+// turns it off with CLICKHOUSE_ASYNC_INSERT=off.
+var AsyncInsert = true
+
+// insertContext carries the insert settings to the driver.
+func insertContext(ctx context.Context) context.Context {
+	return clickhouse.Context(ctx, clickhouse.WithSettings(insertSettings()))
+}
+
+func insertSettings() clickhouse.Settings {
+	if !AsyncInsert {
+		return clickhouse.Settings{}
+	}
+	return clickhouse.Settings{"async_insert": 1, "wait_for_async_insert": 1}
+}
+
 type Models struct {
 	Log Log
 }

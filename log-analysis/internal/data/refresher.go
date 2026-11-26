@@ -107,6 +107,7 @@ func (r *Refresher) failure(bucket int64) string {
 
 // Run refreshes the rebuildable range every interval until ctx ends.
 func (r *Refresher) Run(ctx context.Context, interval time.Duration) {
+	ctx = Background(ctx)
 	for {
 		pol, err := LoadPolicy(ctx)
 		if err != nil {
@@ -151,6 +152,9 @@ func rebuildableFrom(now time.Time, p EffectivePolicy) (int64, bool) {
 // haven't ended (by real time, since no record can have arrived for the
 // future) are left open.
 func (r *Refresher) RefreshRange(ctx context.Context, from, to int64, trigger string) ([]BucketOutcome, error) {
+	// A refresh, also one a rebuild request asks for, is background work: its
+	// own connection pool and a priority below every interactive request.
+	ctx = Background(ctx)
 	r.running.Lock()
 	defer r.running.Unlock()
 
@@ -255,12 +259,12 @@ func (r *Refresher) refreshBucket(ctx context.Context, start int64, published Re
 	insertShapes := `INSERT INTO stat_shapes SELECT "BucketStart", ` + num(revision) + ` AS "Revision", ` + shapeColumns + `
 		FROM (` + bucketShapes(parts, cutoff, lateness) + `)`
 	for _, q := range []string{insertCalls, insertErrors, insertShapes} {
-		if err := clickhouseDB.Exec(withRefreshLimits(ctx), q); err != nil {
+		if err := dbFor(ctx).Exec(withRefreshLimits(ctx), q); err != nil {
 			return r.failed(out, start, err)
 		}
 	}
 	var calls, errorEvents uint64
-	err := clickhouseDB.QueryRow(ctx, `SELECT (SELECT sum("Calls") FROM stat_calls WHERE "BucketStart" = toDateTime(`+num(start/1e9)+`, 'UTC') AND "Revision" = `+num(revision)+`),
+	err := dbFor(ctx).QueryRow(ctx, `SELECT (SELECT sum("Calls") FROM stat_calls WHERE "BucketStart" = toDateTime(`+num(start/1e9)+`, 'UTC') AND "Revision" = `+num(revision)+`),
 		(SELECT sum("Occurrences") FROM stat_errors WHERE "BucketStart" = toDateTime(`+num(start/1e9)+`, 'UTC') AND "Revision" = `+num(revision)+`)`).Scan(&calls, &errorEvents)
 	if err != nil {
 		return r.failed(out, start, err)
@@ -287,7 +291,7 @@ func rawFingerprint(ctx context.Context, start int64) (fp rawFingerprintValue, e
 	logs := windowsCondition(`"UnixTime"`, []interval{{start, start + hourNs}})
 	query := `SELECT (SELECT toInt64(count()) FROM otel_traces WHERE ` + spans + `), (SELECT max("ReceivedTime") FROM otel_traces WHERE ` + spans + `),
 		(SELECT toInt64(count()) FROM log_records WHERE ` + logs + `), (SELECT max("ReceivedTime") FROM log_records WHERE ` + logs + `)`
-	err = clickhouseDB.QueryRow(withRefreshLimits(ctx), query).Scan(&fp[0], &fp[1], &fp[2], &fp[3])
+	err = dbFor(ctx).QueryRow(withRefreshLimits(ctx), query).Scan(&fp[0], &fp[1], &fp[2], &fp[3])
 	return fp, err
 }
 
@@ -311,7 +315,7 @@ func (r *Refresher) fingerprint(start int64) rawFingerprintValue {
 func (r *Refresher) addShapes(ctx context.Context, out BucketOutcome, start int64, published Revision, trigger string) BucketOutcome {
 	insert := `INSERT INTO stat_shapes SELECT "BucketStart", ` + num(published.Revision) + ` AS "Revision", ` + shapeColumns + `
 		FROM (` + bucketShapes([]interval{{start, start + hourNs}}, published.ReceiptCutoff, statsConfig.AllowedLateness) + `)`
-	if err := clickhouseDB.Exec(withRefreshLimits(ctx), insert); err != nil {
+	if err := dbFor(ctx).Exec(withRefreshLimits(ctx), insert); err != nil {
 		return r.failed(out, start, err)
 	}
 	if err := commitRevision(ctx, start, published.Revision, StateFinal, published.ReceiptCutoff, published.ContentHash,
@@ -349,7 +353,7 @@ func (r *Refresher) succeeded(start int64) {
 }
 
 func commitRevision(ctx context.Context, start, revision int64, state string, cutoff int64, hash uint64, calls, errorEvents uint64, trigger string) error {
-	return clickhouseDB.Exec(ctx, `INSERT INTO stat_revisions ("BucketStart", "Revision", "State", "Definitions", "GeneratedAt", "ReceiptCutoff",
+	return dbFor(ctx).Exec(ctx, `INSERT INTO stat_revisions ("BucketStart", "Revision", "State", "Definitions", "GeneratedAt", "ReceiptCutoff",
 		"ContentHash", "Calls", "ErrorEvents", "UnknownReceipt", "Unassignable", "Trigger")
 		VALUES (toDateTime(`+num(start/1e9)+`, 'UTC'), `+num(revision)+`, '`+state+`', '`+Definitions+`', `+num(time.Now().UnixNano())+`, `+num(cutoff)+`,
 		`+strconv.FormatUint(hash, 10)+`, `+strconv.FormatUint(calls, 10)+`, `+strconv.FormatUint(errorEvents, 10)+`, 0, 0, '`+trigger+`')`)
@@ -368,7 +372,7 @@ func contentHash(ctx context.Context, start, cutoff int64) (uint64, error) {
 		(SELECT tuple(count(), sum(cityHash64("RecordId", "UnixTime", "TraceId", "Severity", "ServiceName", "Body", mapSort("Attributes"), "Payloads"))) FROM (` + logs + `) WHERE "Eligible"),
 		'` + Definitions + `', ` + num(int64(lateness)) + `)`
 	var hash uint64
-	err := clickhouseDB.QueryRow(withRefreshLimits(ctx), query).Scan(&hash)
+	err := dbFor(ctx).QueryRow(withRefreshLimits(ctx), query).Scan(&hash)
 	return hash, err
 }
 
@@ -384,11 +388,16 @@ const refreshTimeout = time.Minute
 // continue on disk instead of failing (an hour's traces are grouped per trace
 // for execution shapes).
 func withRefreshLimits(ctx context.Context) context.Context {
+	return clickhouse.Context(ctx, clickhouse.WithSettings(refreshSettings(ctx)))
+}
+
+func refreshSettings(ctx context.Context) clickhouse.Settings {
 	q := limits
 	if q.Timeout < refreshTimeout {
 		q.Timeout = refreshTimeout
 	}
 	settings := q.settings()
 	settings["max_bytes_before_external_group_by"] = q.MaxMemoryBytes / 2
-	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+	settings["priority"] = priorityOf(ctx)
+	return settings
 }

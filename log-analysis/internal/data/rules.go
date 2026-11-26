@@ -107,7 +107,7 @@ func (r DetectionRules) Validate() []FieldError {
 func LoadDetectionRules(ctx context.Context) (DetectionRules, error) {
 	var body string
 	var revision, savedAt, effectiveAt int64
-	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body", "Revision", "SavedAt", "EffectiveAt" FROM detection_rules
+	err := dbFor(ctx).QueryRow(withLimits(ctx), `SELECT "Body", "Revision", "SavedAt", "EffectiveAt" FROM detection_rules
 		WHERE "Scope" = {scope:String} ORDER BY "Revision" DESC LIMIT 1`, clickhouse.Named("scope", RulesScope)).
 		Scan(&body, &revision, &savedAt, &effectiveAt)
 	if errors.Is(err, errNoRows) {
@@ -152,7 +152,7 @@ func SaveDetectionRules(ctx context.Context, r DetectionRules, expected int64) (
 	if err != nil {
 		return DetectionRules{}, err
 	}
-	err = clickhouseDB.Exec(ctx, `INSERT INTO detection_rules ("Scope", "Revision", "SavedAt", "EffectiveAt", "Body")
+	err = dbFor(ctx).Exec(ctx, `INSERT INTO detection_rules ("Scope", "Revision", "SavedAt", "EffectiveAt", "Body")
 		VALUES ({scope:String}, {revision:Int64}, {at:Int64}, {at:Int64}, {body:String})`,
 		clickhouse.Named("scope", RulesScope), clickhouse.Named("revision", strconv.FormatInt(r.Revision, 10)),
 		clickhouse.Named("at", strconv.FormatInt(now, 10)), clickhouse.Named("body", string(body)))

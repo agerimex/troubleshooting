@@ -457,7 +457,9 @@ All settings are environment variables; docker-compose reads them from the shell
 | `UI_AUTH`, `UI_USER`, `UI_PASSWORD_HASH` | UI (Caddy) | `off` |
 | `QUERY_TIMEOUT` | analysis: ClickHouse `max_execution_time` per query (a request runs at most two) | `10s` |
 | `QUERY_MAX_ROWS_TO_READ` | analysis: ClickHouse `max_rows_to_read` per query | `50000000` |
-| `QUERY_MAX_MEMORY_BYTES` | analysis: ClickHouse `max_memory_usage` per query | `1073741824` (1 GiB) |
+| `QUERY_MAX_MEMORY_BYTES` | analysis: ClickHouse `max_memory_usage` per query | unset: an equal share of the server's memory limit per possible concurrent query (`CLICKHOUSE_MAX_QUERIES` + 1 background), at most 1 GiB and at least 32 MiB |
+| `CLICKHOUSE_MAX_QUERIES` | analysis: how many queries interactive requests run at once (their connection pool); more wait, and a request that can't get a connection in time answers 503 "busy; retry". The statistics refresh has its own pool and a lower ClickHouse priority | `4` |
+| `CLICKHOUSE_ASYNC_INSERT` | receiver: `off` writes one part per request; otherwise ClickHouse collects concurrent inserts into one part (`async_insert`) and still confirms each only after it is written | on |
 | `MAX_SEARCH_WINDOW` | analysis: widest allowed `time_from`..`time_to` | `96h` (the 3-day retention plus a day) |
 | `TRACE_RETENTION`, `LOG_RETENTION` | receiver: raw retention of spans and logs (Go duration or `7d`), applied to existing tables on startup; it must be longer than 1 h bucket + allowed lateness + 1 h rebuild margin, or the receiver refuses to start | `72h` |
 | `STATS_RETENTION` | receiver: retention of statistics, coverage records and saved comparisons | `720h` (30 days) |
@@ -465,6 +467,8 @@ All settings are environment variables; docker-compose reads them from the shell
 | `STATS_REFRESH_INTERVAL`, `STATS_REFRESH` | analysis: how often completed buckets are rebuilt; `off` disables the refresher | `1m`, on |
 | `SAMPLING_POLICY_DEFAULT` | analysis: sampling policy of spans that declare none (`unsampled`, `head:0.2`); empty = unknown, which withholds change signals | empty |
 | `TEST_CLOCK_CONTROL` | analysis: `1` enables the test clock and failure controls of the regression fixture; never on a real installation | off |
+
+One heavy query must not stop the others. Every query carries a time limit, a row limit and a memory limit (a share of the server's, so all queries at their limits still fit); interactive requests and the background statistics refresh use separate connection pools; and requests run at a higher ClickHouse priority, so a running request pauses refresh queries instead of waiting behind them. `make fixture-overload` checks this against the test stack (heavy low-priority queries while light requests must still answer quickly).
 
 The API reads the retention ClickHouse really applies from the table definitions (`GET /api/v1/retention`), so report warnings and statistics can't disagree with it. Expired data is removed by ClickHouse in the background, whole parts at a time; a longer retention can't restore what was already deleted.
 

@@ -13,6 +13,7 @@ From the repository root, with Docker and Go 1.21+:
 make images            # build the three service images
 make test-stack-up     # isolated stack: own project, ports, network and volume
 make fixture-load      # a fresh run: new base time and ids
+make fixture-overload  # heavy queries vs light requests (OVL-001/002); writes results/overload.md
 make fixture-check     # all checks; writes results/report.md
 make test-stack-reset  # removes the test stack and its volume only
 ```
@@ -22,6 +23,8 @@ ports 29000 (ClickHouse), 24317 (OTLP), 20055 (log-sender), 28094 (API),
 28096 (API with a 10-row read limit) and 28095 (UI), all on 127.0.0.1, and the
 volume `troubleshooting-test-clickhouse-data`. Nothing here touches the
 development stack in `docker-compose.yml` or its data.
+
+`fixture-overload` reads the loaded run and changes nothing: it keeps the test ClickHouse busy with heavy low-priority queries (priority 10, like the API's background work) and checks that light Log Analysis requests still answer within 3 × their unloaded p95 + 250 ms (OVL-001), and that a burst of three times the API's connection pool gets results or 503 "busy; retry", never another failure (OVL-002). Run it before `fixture-check`, whose retention phase expires the raw data.
 
 `fixture-check` runs, in order:
 

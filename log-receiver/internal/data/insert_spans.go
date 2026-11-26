@@ -25,7 +25,7 @@ const spanColumns = "UnixTime, TraceId, SpanId, ParentSpanId, TraceState, SpanNa
 // time for its bucket.
 func (l *Log) InsertTraceData(ctx context.Context, data []*pb.OneSpan) error {
 	received := time.Now().UnixNano()
-	batch, err := clickhouseDB.PrepareBatch(ctx, "INSERT INTO otel_traces ("+spanColumns+")")
+	batch, err := clickhouseDB.PrepareBatch(insertContext(ctx), "INSERT INTO otel_traces ("+spanColumns+")")
 	if err != nil {
 		return err
 	}

@@ -15,6 +15,7 @@ import (
 	"logs-backend/internal/data"
 	"logs-backend/internal/driver"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	sender "github.com/agerimex/troubleshooting/log-sender"
 )
 
@@ -66,7 +67,8 @@ func initOpenTelemetry() {
 
 // queryLimitsFromEnv reads QUERY_TIMEOUT (a Go duration), QUERY_MAX_ROWS_TO_READ,
 // QUERY_MAX_MEMORY_BYTES and MAX_SEARCH_WINDOW (a Go duration); unset ones keep
-// data.DefaultQueryLimits.
+// data.DefaultQueryLimits. Without QUERY_MAX_MEMORY_BYTES, main derives the
+// memory limit from the server's (applyMemoryShare).
 func queryLimitsFromEnv() (data.QueryLimits, error) {
 	limits := data.DefaultQueryLimits
 	for _, d := range []struct {
@@ -111,14 +113,28 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	infoLog.Printf("query limits: timeout %s, %d rows read, %d MiB memory, window %s",
-		queryLimits.Timeout, queryLimits.MaxRowsToRead, queryLimits.MaxMemoryBytes>>20, queryLimits.MaxWindow)
-
-	db, err := driver.Connect(driver.ConfigFromEnv())
-
+	maxQueries, err := positiveIntEnv("CLICKHOUSE_MAX_QUERIES", defaultMaxQueries)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Interactive requests and the background statistics refresh get their own
+	// connection pools (data/workload.go): a refresh can't take the connections
+	// requests need, and requests run at a higher ClickHouse priority.
+	db, err := driver.Connect(driver.ConfigFromEnv(), maxQueries)
+	if err != nil {
+		log.Fatal(err)
+	}
+	background, err := driver.Connect(driver.ConfigFromEnv(), backgroundConns)
+	if err != nil {
+		log.Fatal(err)
+	}
+	data.SetBackgroundConn(background)
+	if os.Getenv("QUERY_MAX_MEMORY_BYTES") == "" {
+		applyMemoryShare(db, &queryLimits, maxQueries, infoLog, errorLog)
+	}
+	infoLog.Printf("query limits: timeout %s, %d rows read, %d MiB memory, window %s; at most %d interactive queries at once",
+		queryLimits.Timeout, queryLimits.MaxRowsToRead, queryLimits.MaxMemoryBytes>>20, queryLimits.MaxWindow, maxQueries)
 
 	initOpenTelemetry()
 
@@ -219,4 +235,41 @@ func statsConfigFromEnv() (data.StatsConfig, error) {
 	}
 	c.DefaultSampling = os.Getenv("SAMPLING_POLICY_DEFAULT")
 	return c, nil
+}
+
+// defaultMaxQueries is how many queries interactive requests may run at once
+// (CLICKHOUSE_MAX_QUERIES); more wait for a free connection.
+const defaultMaxQueries = 4
+
+// backgroundConns is the background pool: the refresh runs one query at a
+// time, the second connection is a margin.
+const backgroundConns = 2
+
+func positiveIntEnv(key string, def int) (int, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s=%q: want a positive number", key, value)
+	}
+	return n, nil
+}
+
+// applyMemoryShare sets the per-query memory limit to an equal share of the
+// server's limit (data.MemoryShare), so even every interactive query plus a
+// background one at their limits can't take all of the server's memory and
+// stop each other. The configured default stays the upper bound; if the
+// server's limit can't be read, the default is kept and logged.
+func applyMemoryShare(db chdriver.Conn, limits *data.QueryLimits, maxQueries int, infoLog, errorLog *log.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	server, err := data.ServerMemoryLimit(ctx, db)
+	if err != nil {
+		errorLog.Printf("%v; the per-query memory limit stays %d MiB (set QUERY_MAX_MEMORY_BYTES to choose one)", err, limits.MaxMemoryBytes>>20)
+		return
+	}
+	limits.MaxMemoryBytes = data.MemoryShare(server, maxQueries, limits.MaxMemoryBytes)
+	infoLog.Printf("server memory limit %d MiB: %d MiB per query (%d interactive + 1 background)", server>>20, limits.MaxMemoryBytes>>20, maxQueries)
 }

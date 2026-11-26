@@ -217,7 +217,7 @@ func logPageRange(ctx context.Context, conds []string, params []any) (first, las
 	ctx, dbSpan := startQuerySpan(ctx, "SELECT page log_records", query, params)
 	defer func() { endQuerySpan(dbSpan, err) }()
 
-	err = clickhouseDB.QueryRow(withLimits(ctx), query, params...).Scan(&first, &last, &candidates)
+	err = dbFor(ctx).QueryRow(withLimits(ctx), query, params...).Scan(&first, &last, &candidates)
 	return first, last, candidates, err
 }
 
@@ -233,7 +233,7 @@ func queryLogPage(ctx context.Context, filter LogFilter, source string, conds []
 	ctx, dbSpan := startQuerySpan(ctx, "SELECT log_records", query, params)
 	defer func() { endQuerySpan(dbSpan, err) }()
 
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return LogPage{}, 0, err
 	}

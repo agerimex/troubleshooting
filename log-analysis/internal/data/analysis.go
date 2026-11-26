@@ -239,7 +239,7 @@ func storeAnalysis(ctx context.Context, a Analysis) error {
 	if err != nil {
 		return err
 	}
-	return clickhouseDB.Exec(ctx, `INSERT INTO analyses ("Id", "Kind", "CreatedAt", "Title", "Body") VALUES ({id:String}, {kind:String}, {at:Int64}, {title:String}, {body:String})`,
+	return dbFor(ctx).Exec(ctx, `INSERT INTO analyses ("Id", "Kind", "CreatedAt", "Title", "Body") VALUES ({id:String}, {kind:String}, {at:Int64}, {title:String}, {body:String})`,
 		clickhouse.Named("id", a.Id), clickhouse.Named("kind", a.Kind),
 		clickhouse.Named("at", strconv.FormatInt(time.Now().UnixNano(), 10)),
 		clickhouse.Named("title", a.Title), clickhouse.Named("body", string(body)))
@@ -248,7 +248,7 @@ func storeAnalysis(ctx context.Context, a Analysis) error {
 // LoadAnalysis returns a stored analysis exactly as generated.
 func LoadAnalysis(ctx context.Context, id string) (json.RawMessage, error) {
 	var body string
-	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body" FROM analyses WHERE "Id" = {id:String} LIMIT 1`, clickhouse.Named("id", id)).Scan(&body)
+	err := dbFor(ctx).QueryRow(withLimits(ctx), `SELECT "Body" FROM analyses WHERE "Id" = {id:String} LIMIT 1`, clickhouse.Named("id", id)).Scan(&body)
 	if err != nil {
 		if errors.Is(err, errNoRows) {
 			return nil, ErrAnalysisNotFound
@@ -268,7 +268,7 @@ type AnalysisSummary struct {
 
 // ListAnalyses returns the most recent analyses.
 func ListAnalyses(ctx context.Context, limit int) ([]AnalysisSummary, error) {
-	rows, err := clickhouseDB.Query(withLimits(ctx), `SELECT "Id", "Kind", "Title", toString("CreatedAt") FROM analyses ORDER BY "CreatedAt" DESC LIMIT `+strconv.Itoa(limit))
+	rows, err := dbFor(ctx).Query(withLimits(ctx), `SELECT "Id", "Kind", "Title", toString("CreatedAt") FROM analyses ORDER BY "CreatedAt" DESC LIMIT `+strconv.Itoa(limit))
 	if err != nil {
 		return nil, err
 	}

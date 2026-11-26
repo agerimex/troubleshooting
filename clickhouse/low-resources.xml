@@ -43,8 +43,9 @@
          containers exhausted the VM and Docker killed every container.
          Measured with the regression fixture (load and check): the server
          peaks near 500 MB, its largest query near 60 MB, so these caps leave
-         room. The API's own per-query limit (QUERY_MAX_MEMORY_BYTES, 1 GiB)
-         stays below the server cap. Background pools are left at their
+         room. The API's own per-query limit is a share of this cap (one per
+         possible concurrent query, log-analysis data/workload.go), so its
+         queries together stay below it. Background pools are left at their
          defaults: smaller ones crash-loop the server (merge_tree's
          number_of_free_entries_in_pool_* must fit in them). -->
     <max_server_memory_usage_to_ram_ratio>0.4</max_server_memory_usage_to_ram_ratio>

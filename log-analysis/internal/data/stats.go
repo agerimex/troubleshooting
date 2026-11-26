@@ -172,7 +172,7 @@ func selectCalls(ctx context.Context, pop Population, plan []PlanPart, cutoff in
 
 	ctx, span := startQuerySpan(ctx, "SELECT call statistics", query, params)
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +509,7 @@ func receiptNotices(ctx context.Context, pop Population, plan []PlanPart, revisi
 	ctx, span := startQuerySpan(ctx, "SELECT late calls", query, params)
 	defer func() { endQuerySpan(span, err) }()
 	var late, unknown uint64
-	err = clickhouseDB.QueryRow(withLimits(ctx), query, params...).Scan(&late, &unknown)
+	err = dbFor(ctx).QueryRow(withLimits(ctx), query, params...).Scan(&late, &unknown)
 	return late, unknown, err
 }
 

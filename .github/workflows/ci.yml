@@ -131,6 +131,7 @@ jobs:
       - run: make images
       - run: make test-stack-up
       - run: make fixture-load
+      - run: make fixture-overload
       - run: make fixture-check
       # This repository is the quality gate's first user: the API must not
       # add database queries per request (docs/quality-gate.md).
@@ -147,7 +148,9 @@ jobs:
         if: always()
         with:
           name: fixture-report
-          path: fixtures/regression/results/report.md
+          path: |
+            fixtures/regression/results/report.md
+            fixtures/regression/results/overload.md
       - name: Test stack logs
         if: failure()
         run: docker compose -p troubleshooting-test -f docker-compose.test.yml logs --no-color --tail 200
