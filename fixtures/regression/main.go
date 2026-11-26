@@ -239,6 +239,7 @@ func check(ctx context.Context, o options) error {
 	r.run(ctx, "initial", c.m2Checks(o))
 	r.run(ctx, "initial", []namedCheck{
 		{"PARITY", "log-sender and OTLP paths store the same span", c.parity},
+		{"OTLP-LOG", "Logs over OTLP land under their span; retry read once; bad ids rejected", func(ctx context.Context) error { return c.otlpLogs(ctx, otlp) }},
 		{"IDS", "Invalid ids are rejected, valid span kept", func(ctx context.Context) error {
 			err := c.invalidIDs(ctx, otlp)
 			if err == nil && !st.InvalidSent {

@@ -314,19 +314,43 @@ logger.Error().Ctx(ctx).Msg("Storage returned 403 AccessDenied") // ctx holds th
 * Without zerolog: `exporter.Send(ctx, []sender.LogRecord{sender.NewLogRecord(ctx, "ERROR", "...")})` returns nil only after the receiver stored them; on an error, send the same records again.
 * Older senders that only set a message and a time still work; their records have no correlation and no severity.
 
-Send traces from any language (OTLP)
+Send traces and logs from any language (OTLP)
 ------
-The receiver also accepts the standard OpenTelemetry protocol (OTLP over gRPC) on port 4317, so any application instrumented with an OpenTelemetry SDK (Go, Java, Python, Node.js, .NET, …) or an OpenTelemetry Collector can send traces without log-sender. Usually environment variables are enough:
+The receiver also accepts the standard OpenTelemetry protocol (OTLP over gRPC) on port 4317, so any application instrumented with an OpenTelemetry SDK (Go, Java, Python, Node.js, .NET, …) or an OpenTelemetry Collector can send traces and logs without log-sender. Logs that carry the trace and span ids of the active span (OpenTelemetry SDKs add them) appear under that span in Log Analysis and the execution report. Usually environment variables are enough:
 
 ```
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+# or per signal: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+# OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=grpc / OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=grpc
 OTEL_SERVICE_NAME=orders-api
 # if the receiver requires a token:
 OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <token>"
 ```
 
-Only traces over gRPC are supported for now (not OTLP/HTTP on port 4318, not logs or metrics). Some SDKs, e.g. Node.js, default to HTTP, so set the protocol explicitly.
+Traces and logs over gRPC are supported (not OTLP/HTTP on port 4318, not metrics). Some SDKs, e.g. Node.js, default to HTTP, so set the protocol explicitly. With Serilog, the OpenTelemetry sink sends logs the same way:
+
+```csharp
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.OpenTelemetry(o =>
+    {
+        o.Endpoint = "http://127.0.0.1:4317";
+        o.Protocol = OtlpProtocol.Grpc;
+        o.ResourceAttributes = new Dictionary<string, object> { ["service.name"] = "orders-api" };
+    })
+    .CreateLogger();
+```
+
+How an OTLP log record is stored, one rule per field:
+
+* **Time:** the record's time, or its observed time when the time is 0; a record with neither is rejected.
+* **Trace and span ids:** as lower-case hex; empty or all-zero ids (a record written outside a span) are stored as not recorded; any other wrong length is rejected.
+* **Service:** the resource's `service.name`, the same value its spans get.
+* **Severity:** the level name normalized like log-sender's (`Information` → `INFO`, `Verbose` → `TRACE`, `Warning` → `WARN`, `Critical` → `FATAL`); without a name, from the severity number by the OTLP ranges (1–4 TRACE … 21–24 FATAL).
+* **Message and attributes:** a string body as is, other values as text (maps and arrays as JSON); the record's attributes as strings. Resource attributes other than `service.name` are not added.
+* **Record id:** the `log.record.uid` attribute if present, otherwise a hash of the record (service, time, ids, severity, body and attributes), so an exporter's retry of the same batch is read once. Two truly identical records with the same nanosecond timestamp are therefore read as one.
+
+Rejected records are reported as a partial success (`rejected_log_records`) while the valid records of the same request are stored; a failed insert answers `Unavailable`, which exporters retry. Logs are redacted like log-sender's (`docs/privacy.md`).
 
 ### Example: a Windows .NET 8 desktop or CLI app
 
@@ -376,7 +400,7 @@ if (!string.IsNullOrEmpty(endpoint))
         .AddOtlpExporter(o =>
         {
             o.Endpoint = new Uri(endpoint);       // http:// = plaintext gRPC
-            o.Protocol = OtlpExportProtocol.Grpc; // traces only; don't point log or metric exporters here
+            o.Protocol = OtlpExportProtocol.Grpc; // traces and logs; don't point metric exporters here
         })
         .Build();
 }

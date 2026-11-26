@@ -25,18 +25,21 @@ type LogRecord struct {
 }
 
 // severityAliases maps the level names of common loggers (zerolog, slog,
-// logrus) to the stored severities.
+// logrus; Serilog's Verbose and Information, .NET's Critical) to the stored
+// severities.
 var severityAliases = map[string]string{
-	"TRACE":    "TRACE",
-	"DEBUG":    "DEBUG",
-	"INFO":     "INFO",
-	"WARN":     "WARN",
-	"WARNING":  "WARN",
-	"ERROR":    "ERROR",
-	"ERR":      "ERROR",
-	"FATAL":    "FATAL",
-	"PANIC":    "FATAL",
-	"CRITICAL": "FATAL",
+	"TRACE":       "TRACE",
+	"VERBOSE":     "TRACE",
+	"DEBUG":       "DEBUG",
+	"INFO":        "INFO",
+	"INFORMATION": "INFO",
+	"WARN":        "WARN",
+	"WARNING":     "WARN",
+	"ERROR":       "ERROR",
+	"ERR":         "ERROR",
+	"FATAL":       "FATAL",
+	"PANIC":       "FATAL",
+	"CRITICAL":    "FATAL",
 }
 
 // NormalizeSeverity upper-cases a level name and maps known aliases. An empty

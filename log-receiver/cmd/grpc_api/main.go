@@ -15,6 +15,7 @@ import (
 
 	pb "github.com/agerimex/troubleshooting/protos/logs"
 
+	collectorlogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectortracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -145,6 +146,7 @@ func main() {
 	})
 	pb.RegisterLogServiceServer(grpcServer, &logServiceServer{models: models, logs: logs})
 	collectortracepb.RegisterTraceServiceServer(grpcServer, &otlpTraceServer{models: models})
+	collectorlogspb.RegisterLogsServiceServer(grpcServer, &otlpLogsServer{models: models})
 
 	go func() {
 		stop, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -155,7 +157,7 @@ func main() {
 	}()
 
 	go func() {
-		log.Printf("OTLP trace receiver listening on %s", otlpListenAddr)
+		log.Printf("OTLP receiver (traces and logs) listening on %s", otlpListenAddr)
 		if err := grpcServer.Serve(otlpLis); err != nil {
 			log.Fatalf("Failed to serve OTLP: %v", err)
 		}

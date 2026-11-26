@@ -92,6 +92,7 @@ in `log-ui/e2e` and run with `make ui-e2e`; they use a mocked API.
 | RF15 | ClickHouse container recreated with its volume | All scenario checks pass again on the new container |
 | RF16 | `TranscodeRecording`, 20 calls of `service.version` 1.0.0 (100–195 ms in 5 ms steps) and 20 of 2.0.0 (exactly twice as long) | Both populations of 20 with exactly those durations (µs) and versions; the report lists count, range and mean per version |
 | PARITY | The same two spans (error status, exception event, link, typed attributes) sent through log-sender (`SendSpans`) and the OTel SDK's OTLP exporter | Same parent structure, status, message, duration (µs), attributes, events and links on both paths. `otel.scope.*` attributes are ignored: only the OTLP path stores the instrumentation scope |
+| OTLP-LOG | A span and a log record with that span's ids, both over OTLP (the log as an SDK such as Serilog sends it: level `Information`), the log request sent twice, plus a record with a malformed span id | The report shows exactly one log, under the span, as INFO with its attribute; the malformed record is rejected as a partial success on both attempts |
 | IDS | One valid span and three with a zero trace id, a zero span id and a 3-byte parent | 3 rejected (OTLP partial success), the valid one stored |
 | LIMIT | Any-depth search over the run on the API with `QUERY_MAX_ROWS_TO_READ=10` | HTTP 504 naming the limit, no rows |
 

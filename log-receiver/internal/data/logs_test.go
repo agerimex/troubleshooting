@@ -82,6 +82,8 @@ func TestLogRecordFromProtoRejectsInvalid(t *testing.T) {
 func TestNormalizeSeverity(t *testing.T) {
 	for in, want := range map[string]string{
 		"warn": "WARN", "warning": "WARN", "Error": "ERROR", "panic": "FATAL", "": "", "notice": "NOTICE",
+		// Serilog and .NET (Microsoft.Extensions.Logging) level names.
+		"Information": "INFO", "Verbose": "TRACE", "Critical": "FATAL",
 	} {
 		if got := NormalizeSeverity(in); got != want {
 			t.Errorf("NormalizeSeverity(%q) = %q, want %q", in, got, want)
