@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -131,19 +132,22 @@ func SetRetention(r RetentionPolicy) { retention = r }
 type ReportSources struct {
 	Spans      func(context.Context, SpanFilter) (SpanPage, error)
 	CountSpans func(context.Context, SpanFilter) (uint64, error)
-	Logs       func(context.Context, LogFilter) (LogPage, error)
-	CountLogs  func(context.Context, LogFilter) (uint64, error)
-	Now        func() time.Time
+	// ChildCounts counts children in the database, for a truncated report.
+	ChildCounts func(context.Context, SpanFilter, []*Span) error
+	Logs        func(context.Context, LogFilter) (LogPage, error)
+	CountLogs   func(context.Context, LogFilter) (uint64, error)
+	Now         func() time.Time
 }
 
 // Sources returns the ClickHouse queries.
 func (l *Log) Sources() ReportSources {
 	return ReportSources{
-		Spans:      selectSpans,
-		CountSpans: l.SelectCountSpans,
-		Logs:       l.SelectLogs,
-		CountLogs:  l.SelectCountLogs,
-		Now:        time.Now,
+		Spans:       selectSpans,
+		CountSpans:  l.SelectCountSpans,
+		ChildCounts: fillChildSpanCounts,
+		Logs:        l.SelectLogs,
+		CountLogs:   l.SelectCountLogs,
+		Now:         time.Now,
 	}
 }
 
@@ -170,6 +174,7 @@ func BuildReport(ctx context.Context, req ReportRequest, src ReportSources) Repo
 			if err == nil {
 				section.Records = nonNil(page.Spans)
 				section.Truncated = page.HasMore
+				reportChildCounts(ctx, filter, section.Records, section.Truncated, src.ChildCounts)
 				var total uint64
 				total, err = src.CountSpans(ctx, filter)
 				section.setTotal(ctx, total, err)
@@ -203,6 +208,30 @@ func BuildReport(ctx context.Context, req ReportRequest, src ReportSources) Repo
 	report.Warnings = retentionWarnings(req, now)
 	report.Complete = (report.Spans == nil || report.Spans.complete()) && (report.Logs == nil || report.Logs.complete())
 	return report
+}
+
+// reportChildCounts sets ChildSpanCount of the report's spans to their
+// children in the window, as Log Analysis counts them (fillChildSpanCounts;
+// spans are read without it). A report that holds all of the trace's spans
+// counts among its own records, which are the canonical ones; a truncated one
+// asks the database, and if that fails the counts are among the shown spans
+// (logged).
+func reportChildCounts(ctx context.Context, filter SpanFilter, spans []*Span, truncated bool, query func(context.Context, SpanFilter, []*Span) error) {
+	counts := make(map[[2]string]int32, len(spans))
+	for _, s := range spans {
+		if s.ParentSpanId != RootParentSpanID {
+			counts[[2]string{s.TraceId, s.ParentSpanId}]++
+		}
+	}
+	for _, s := range spans {
+		s.ChildSpanCount = counts[[2]string{s.TraceId, s.SpanId}]
+	}
+	if !truncated || query == nil {
+		return
+	}
+	if err := query(ctx, filter, spans); err != nil {
+		log.Printf("child counts of a truncated report: %v", err)
+	}
 }
 
 func nonNil[T any](records []T) []T {

@@ -365,3 +365,18 @@ test('RES-002: a span without recorded resources shows no resource block', async
   await expect(page.getByTestId('span-resources')).toHaveCount(0)
   await expect(page.getByTestId('inspector-process')).toHaveCount(0)
 })
+
+test('M1-RPT-001: a failed span shows its status message under its name, not only inside the details', async ({ page }) => {
+  const entry = span('/api/v1/trace-report', { spanId: '00000000000000c0', service: 'LogAnalysis', status: 'ok', statusCode: 2, duration: 2000, childSpanCount: 1 })
+  const failed = span('clickhouse SELECT query_log', {
+    spanId: '00000000000000c1', parentSpanId: '00000000000000c0', service: 'LogAnalysis', spanKind: 'client', status: 'error', statusCode: 1,
+    statusMessage: 'converting UInt64 to *int64 is unsupported'
+  })
+  await openReportFromLogAnalysis(page, () => ({ spans: { records: [entry, failed] }, logs: { records: [] } }), [entry])
+  await expect(page.getByTestId('inspector-status-message')).toHaveCount(0)
+  await selectSpan(page, 'clickhouse SELECT query_log')
+  const message = page.getByTestId('inspector-status-message')
+  await expect(message).toBeVisible()
+  await expect(message).toHaveText('converting UInt64 to *int64 is unsupported')
+  await expect(message).toHaveClass(/bad/)
+})
