@@ -8,7 +8,10 @@ import { type LogRecord, type Report } from '@/types/report'
 // troubleshooting-sequence-agent package). It is derived from recorded
 // evidence only: participants are recorded services, a CLIENT span and its
 // single directly parented SERVER span of another service are one correlated
-// operation (both spans stay selectable), every other span is its own
+// operation (a call), a PRODUCER span and its single directly parented
+// CONSUMER span of another service are one message (one-way: an arrow at the
+// send, then the consumer's processing in its own column, no end of the send);
+// both spans of a pair stay selectable, every other span is its own
 // operation. Completion markers are span ends, never responses. Nothing is
 // inferred from names, arrival order or timestamps alone.
 
@@ -20,27 +23,28 @@ export const NO_SERVICE = 'service not recorded'
 // captured; the peer is shown as unobserved, never as an instrumented service.
 const PEER_ATTRIBUTES = ['peer.service', 'server.address', 'net.peer.name', 'db.system', 'messaging.system', 'rpc.service']
 
-export type OperationKind = 'call' | 'client' | 'server' | 'local' | 'producer' | 'consumer'
+export type OperationKind = 'call' | 'message' | 'client' | 'server' | 'local' | 'producer' | 'consumer'
 
 export interface SeqOperation {
-  id: string // the key of its first span (the CLIENT for a pair)
+  id: string // the key of its first span (the CLIENT or PRODUCER of a pair)
   name: string
   kind: OperationKind
   spanKind: string // recorded kind of the first span ('' when not recorded)
   source: string // participant where it starts
   target: string // participant it reaches (= source for local operations)
   targetObserved: boolean // false: a peer recorded only by the client's attributes, or unknown
-  spanKeys: string[] // CLIENT first, then SERVER for a pair
+  spanKeys: string[] // CLIENT then SERVER of a call, PRODUCER then CONSUMER of a message
   startMs: number
-  endMs: number | null // null: no valid end (never a zero duration)
-  serverName?: string
+  endMs: number | null // null: no valid end (never a zero duration); a message: the consumer's end
+  serverName?: string // the SERVER of a call, or the CONSUMER of a message
   status: string
   serverStatus?: string
+  consumerStartMs?: number // a message: the consumer's processing, in the target's column
   missingParent: boolean
   repeat?: { index: number, count: number } // same name, source and target: repeated calls, not retries
 }
 
-export type EventKind = 'call' | 'start' | 'end' | 'log'
+export type EventKind = 'call' | 'message' | 'start' | 'end' | 'log'
 
 export interface SeqEvent {
   id: string
@@ -49,8 +53,9 @@ export interface SeqEvent {
   operationId: string
   spanKey: string
   participant: string
-  target?: string // for calls
+  target?: string // for calls and messages
   label: string
+  durationMs?: number // an end mark: the duration of the span it ends
   logId?: string
   severity?: string
   note?: string // a timing limitation, e.g. a log outside its span's interval
@@ -86,7 +91,7 @@ export interface SequenceModel {
   links: SeqLink[]
   traceLevelLogs: number // logs of the trace without a SpanId
   missingSpanLogs: number // logs whose SpanId isn't among the report's spans
-  clockUncertain: string[] // pairs whose server interval lies outside its client's
+  clockUncertain: string[] // calls whose server interval lies outside its client's; messages consumed before they were produced
   limitations: string[]
   totalMs: number
   spanCount: number
@@ -129,16 +134,20 @@ export function buildSequence (report: Report, maxOverlaps = 50): SequenceModel 
 
   // Pairs: a CLIENT with exactly one directly parented SERVER child of
   // another service. Several candidates stay separate (no guessing).
-  const pairOf = new Map<string, Span>() // client key -> server
-  const paired = new Set<string>() // server keys consumed by a pair
+  // Messages: a PRODUCER with exactly one directly parented CONSUMER child of
+  // another service, by the same rule (fan-out or none: no pairing).
+  const pairOf = new Map<string, Span>() // client or producer key -> server or consumer
+  const paired = new Set<string>() // server and consumer keys consumed by a pair
+  const peerKind: Record<string, string> = { client: 'server', producer: 'consumer' }
   for (const s of spans) {
-    if (kindOf(s) !== 'client') {
+    const want = peerKind[kindOf(s)]
+    if (!want) {
       continue
     }
-    const servers = (children.get(spanKey(s)) ?? []).filter((c) => kindOf(c) === 'server' && serviceOf(c) !== serviceOf(s))
-    if (servers.length === 1) {
-      pairOf.set(spanKey(s), servers[0])
-      paired.add(spanKey(servers[0]))
+    const peers = (children.get(spanKey(s)) ?? []).filter((c) => kindOf(c) === want && serviceOf(c) !== serviceOf(s))
+    if (peers.length === 1) {
+      pairOf.set(spanKey(s), peers[0])
+      paired.add(spanKey(peers[0]))
     }
   }
 
@@ -173,7 +182,22 @@ export function buildSequence (report: Report, maxOverlaps = 50): SequenceModel 
       startMs: startOf(s), endMs: endOf(s), status: s.status || 'unset', missingParent: parentMissing
     }
     const server = pairOf.get(key)
-    if (server) {
+    if (server && kind === 'producer') {
+      // One-way: the arrow is the send; what follows is the consumer's own
+      // processing. Delivery may come after the send ended (async), so only a
+      // consumer starting before its producer is a clock doubt.
+      op.kind = 'message'
+      op.target = serviceOf(server)
+      op.spanKeys.push(spanKey(server))
+      op.serverName = server.name
+      op.serverStatus = server.status || 'unset'
+      op.consumerStartMs = startOf(server)
+      op.endMs = endOf(server)
+      addParticipant(op.target)
+      if (op.consumerStartMs < op.startMs) {
+        clockUncertain.push(key)
+      }
+    } else if (server) {
       op.kind = 'call'
       op.target = serviceOf(server)
       op.spanKeys.push(spanKey(server))
@@ -216,10 +240,22 @@ export function buildSequence (report: Report, maxOverlaps = 50): SequenceModel 
 
   const events: SeqEvent[] = []
   for (const op of operations) {
+    if (op.kind === 'message') {
+      // The send (no end of its own: a message has no response), then the
+      // consumer's processing in its column. :start/:end are the consumer's,
+      // so the activation bar spans the processing.
+      const consumer = op.spanKeys[1]
+      events.push({ id: op.id + ':send', kind: 'message', timeMs: op.startMs, operationId: op.id, spanKey: op.id, participant: op.source, target: op.target, label: op.name })
+      events.push({ id: op.id + ':start', kind: 'start', timeMs: op.consumerStartMs!, operationId: op.id, spanKey: consumer, participant: op.target, label: op.serverName! })
+      if (op.endMs !== null) {
+        events.push({ id: op.id + ':end', kind: 'end', timeMs: op.endMs, operationId: op.id, spanKey: consumer, participant: op.target, label: op.serverName!, durationMs: op.endMs - op.consumerStartMs! })
+      }
+      continue
+    }
     const startKind: EventKind = op.kind === 'call' || op.kind === 'client' ? 'call' : 'start'
     events.push({ id: op.id + ':start', kind: startKind, timeMs: op.startMs, operationId: op.id, spanKey: op.id, participant: op.source, target: startKind === 'call' ? op.target : undefined, label: op.name })
     if (op.endMs !== null) {
-      events.push({ id: op.id + ':end', kind: 'end', timeMs: op.endMs, operationId: op.id, spanKey: op.id, participant: op.source, label: op.name })
+      events.push({ id: op.id + ':end', kind: 'end', timeMs: op.endMs, operationId: op.id, spanKey: op.id, participant: op.source, label: op.name, durationMs: op.endMs - op.startMs })
     }
   }
 
@@ -274,8 +310,14 @@ export function buildSequence (report: Report, maxOverlaps = 50): SequenceModel 
   } else if (report.logs.truncated) {
     limitations.push(`Logs are truncated: ${report.logs.shown} of ${report.logs.total ?? 'more'} loaded.`)
   }
+  const uncertainCalls = clockUncertain.filter((k) => operationOfSpan.get(k)?.kind === 'call').length
+  const uncertainMessages = clockUncertain.length - uncertainCalls
   if (clockUncertain.length) {
-    limitations.push(`${clockUncertain.length} server span(s) start before or end after their client span: clocks of those services may differ, so cross-service overlaps are not claimed.`)
+    const what = [
+      uncertainCalls ? `${uncertainCalls} server span(s) start before or end after their client span` : '',
+      uncertainMessages ? `${uncertainMessages} consumer span(s) start before their producer span` : ''
+    ].filter(Boolean).join(' and ')
+    limitations.push(`${what}: clocks of those services may differ, so cross-service overlaps are not claimed.`)
   }
   const missingParents = operations.filter((o) => o.missingParent).length
   if (missingParents) {
@@ -432,10 +474,12 @@ export function eventText (e: SeqEvent, model: SequenceModel): string {
   switch (e.kind) {
     case 'call':
       return `${at} · ${e.participant} → ${e.target} · call ${e.label}${op?.serverName && op.serverName !== e.label ? ` (server span ${op.serverName})` : ''}`
+    case 'message':
+      return `${at} · ${e.participant} → ${e.target} · message ${e.label}${op?.serverName && op.serverName !== e.label ? ` (consumer span ${op.serverName})` : ''}`
     case 'start':
       return `${at} · ${e.participant} · started ${e.label}`
     case 'end':
-      return `${at} · ${e.participant} · ended ${e.label}${op && op.endMs !== null ? ` · ${fmtMs(op.endMs - op.startMs)} ms` : ''}`
+      return `${at} · ${e.participant} · ended ${e.label}${e.durationMs !== undefined ? ` · ${fmtMs(e.durationMs)} ms` : ''}`
     case 'log':
       return `${at} · ${e.participant} · ${e.severity} log: ${e.label}${e.note ? ` (${e.note})` : ''}`
   }
@@ -446,13 +490,20 @@ export function fmtMs (v: number): string {
   return Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1)
 }
 
-// pairEndpoints are the selectable endpoints of the operation holding key.
+// pairEndpoints are the selectable endpoints of the operation holding key: a
+// call's CLIENT and SERVER, or a message's PRODUCER and CONSUMER (client and
+// server hold its first and second span; endpointLabels names their kinds).
 export function pairEndpoints (model: SequenceModel, key: string | null): { client: string, server: string } | null {
   if (!key) {
     return null
   }
   const op = model.operations.find((o) => o.spanKeys.includes(key))
-  return op && op.kind === 'call' ? { client: op.spanKeys[0], server: op.spanKeys[1] } : null
+  return op && (op.kind === 'call' || op.kind === 'message') ? { client: op.spanKeys[0], server: op.spanKeys[1] } : null
+}
+
+export function endpointLabels (model: SequenceModel, key: string | null): [string, string] {
+  const op = key ? model.operations.find((o) => o.spanKeys.includes(key)) : undefined
+  return op?.kind === 'message' ? ['PRODUCER', 'CONSUMER'] : ['CLIENT', 'SERVER']
 }
 
 // logsWithAssociation is every log of the report with its association, for
@@ -480,7 +531,7 @@ export function exportSequenceHtml (report: Report, model: SequenceModel, view: 
   const items = model.events.map((ev) => `<li>${e(eventText(ev, model))}</li>`).join('')
   const ops = model.operations.map((o) => `<tr><td>${e(o.name)}</td><td>${e(o.kind)}</td><td>${e(o.source)}</td><td>${e(o.target)}${o.targetObserved ? '' : ' (not observed)'}</td><td>${e(o.spanKeys.join(', '))}</td><td>${e(o.status)}${o.serverStatus ? ' / server ' + e(o.serverStatus) : ''}</td></tr>`).join('')
   const section = `<h2>Sequence (${e(model.renderer)})</h2>
-<p>A presentation of the recorded spans and logs above, not a recovered execution. Arrows are correlated CLIENT/SERVER spans; end markers are span completions, not responses; order within equal times is by id, not causality.
+<p>A presentation of the recorded spans and logs above, not a recovered execution. Arrows are correlated CLIENT/SERVER spans (calls) or a PRODUCER and its one CONSUMER (messages, one-way); end markers are span completions, not responses; order within equal times is by id, not causality.
 View on screen: ${e(view.view)}, selected span ${e(view.selected ?? 'none')}, internal operations ${view.showInternal ? 'shown' : 'hidden'}, log scope ${e(view.logScope)}. Hidden operations are still listed here.</p>
 ${model.limitations.length ? '<ul>' + model.limitations.map((l) => `<li>${e(l)}</li>`).join('') + '</ul>' : ''}
 <p>Participants: ${e(model.participants.join(', '))}</p>

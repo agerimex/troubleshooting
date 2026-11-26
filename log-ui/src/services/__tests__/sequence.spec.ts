@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activationOf, buildSequence, eventText, lanes, locate, pageOf, pairEndpoints, visibleEvents, OTHER_LANE, type SeqEvent } from '@/services/sequence'
+import { activationOf, buildSequence, endpointLabels, eventText, lanes, locate, pageOf, pairEndpoints, sequenceExport, visibleEvents, OTHER_LANE, type SeqEvent } from '@/services/sequence'
 import { timeline } from '@/services/problems'
 import { type Report } from '@/types/report'
 import { type Span } from '@/types/filter'
@@ -184,5 +184,94 @@ describe('activation bar of the selected operation', () => {
     const noEnd = events.filter((e) => e.id !== 'a:end')
     expect(activationOf(noEnd, pageOf(noEnd, 0, 80), 'a')).toBeNull()
     expect(activationOf(events, pageOf(events, 5, 1), 'a')).toBeNull()
+  })
+})
+
+describe('messages: PRODUCER → CONSUMER', () => {
+  const TRACE = 'abcdef00000000000000000000000001'
+  const T0 = 1791792000000000000n
+  // at and dur in ms from T0
+  const s = (id: string, parent: string, service: string, kind: string, name: string, at: number, dur: number): Span => ({
+    timeStamp: (T0 + BigInt(at * 1_000_000)).toString(), name, spanKind: kind, service, traceId: TRACE, spanId: id.padStart(16, '0'), parentSpanId: parent.padStart(16, '0'),
+    msg: '', tags: [], serviceTags: [], childSpanCount: 0, statusCode: 0, status: 'unset', statusMessage: '', duration: dur * 1000, events: [], links: []
+  })
+  const rep = (spans: Span[]): Report => {
+    const section = <T>(records: T[]) => ({ status: 'ok' as const, records, limit: 1000, shown: records.length, truncated: false, total: records.length, totalStatus: 'ok' as const, retrievedAt: '1' })
+    return { traceId: TRACE, timeFrom: '0', timeTo: '9', generatedAt: '1', spans: section(spans), logs: section([]), warnings: [] }
+  }
+  const k = (id: string) => TRACE + ':' + id.padStart(16, '0')
+  const root = s('1', '0', 'api', 'server', 'POST /jobs', 0, 100)
+  const producer = s('2', '1', 'api', 'producer', 'publish jobs', 10, 2)
+
+  it('a PRODUCER with one CONSUMER of another service is one message: an arrow, then the consumer\'s processing; no end of the send', () => {
+    const m = buildSequence(rep([root, producer, s('3', '2', 'worker', 'consumer', 'process jobs', 15, 40)]))
+    const msg = m.operations.find((o) => o.kind === 'message')!
+    expect(msg).toMatchObject({ id: k('2'), name: 'publish jobs', source: 'api', target: 'worker', spanKeys: [k('2'), k('3')], serverName: 'process jobs', startMs: 10, consumerStartMs: 15, endMs: 55 })
+    expect(m.operations).toHaveLength(2)
+    const evs = m.events.filter((e) => e.operationId === msg.id)
+    expect(evs.map((e) => [e.kind, e.participant, e.timeMs, e.spanKey])).toEqual([
+      ['message', 'api', 10, k('2')], ['start', 'worker', 15, k('3')], ['end', 'worker', 55, k('3')]
+    ])
+    expect(evs.find((e) => e.kind === 'end')!.durationMs).toBe(40)
+    expect(eventText(evs[0], m)).toBe('+10 ms · api → worker · message publish jobs (consumer span process jobs)')
+    expect(m.participants).toEqual(['api', 'worker'])
+  })
+
+  it('fan-out (two CONSUMERs of other services) is not paired', () => {
+    const m = buildSequence(rep([root, producer, s('3', '2', 'worker', 'consumer', 'process jobs', 15, 40), s('4', '2', 'audit', 'consumer', 'audit jobs', 16, 5)]))
+    expect(m.operations.map((o) => o.kind).sort()).toEqual(['consumer', 'consumer', 'producer', 'server'])
+    expect(m.events.some((e) => e.kind === 'message')).toBe(false)
+  })
+
+  it('a CONSUMER of the same service is not paired', () => {
+    const m = buildSequence(rep([root, producer, s('3', '2', 'api', 'consumer', 'process jobs', 15, 40)]))
+    expect(m.operations.map((o) => o.kind).sort()).toEqual(['consumer', 'producer', 'server'])
+  })
+
+  it('a CONSUMER that starts after the producer ended is normal async delivery, not a clock doubt', () => {
+    const m = buildSequence(rep([root, producer, s('3', '2', 'worker', 'consumer', 'process jobs', 500, 40)]))
+    expect(m.operations.find((o) => o.kind === 'message')).toBeDefined()
+    expect(m.clockUncertain).toEqual([])
+    expect(m.limitations.join(' ')).not.toContain('clock')
+  })
+
+  it('a CONSUMER that starts before its producer is paired and flagged as a clock doubt', () => {
+    const m = buildSequence(rep([root, producer, s('3', '2', 'worker', 'consumer', 'process jobs', 8, 40)]))
+    expect(m.operations.find((o) => o.kind === 'message')).toBeDefined()
+    expect(m.clockUncertain).toEqual([k('2')])
+    expect(m.limitations.join(' ')).toContain('1 consumer span(s) start before their producer span')
+  })
+
+  it('an RPC over a broker: one call arrow, the reply and an event as two message arrows; both message spans selectable', () => {
+    const spans = [
+      s('a1', '0', 'api', 'server', 'POST /producers', 0, 300),
+      s('a2', 'a1', 'api', 'client', 'API_TO_WORKER.req', 5, 200),
+      s('b1', 'a2', 'worker', 'server', 'handle WORKER_PRODUCE', 20, 60),
+      s('b2', 'b1', 'worker', 'producer', 'publish <default>', 70, 1),
+      s('a3', 'b2', 'api', 'consumer', 'Receive RPC_REPLY_QUEUE', 72, 3),
+      s('b3', 'b1', 'worker', 'producer', 'publish <default>', 75, 1),
+      s('a4', 'b3', 'api', 'consumer', 'Process API_TO_API', 90, 50),
+      s('a5', 'a4', 'api', 'internal', 'save producer', 95, 30)
+    ]
+    const m = buildSequence(rep(spans))
+    expect(m.operations.filter((o) => o.kind === 'call').map((o) => [o.source, o.target, o.name])).toEqual([['api', 'worker', 'API_TO_WORKER.req']])
+    expect(m.operations.filter((o) => o.kind === 'message').map((o) => [o.source, o.target, o.serverName])).toEqual([
+      ['worker', 'api', 'Receive RPC_REPLY_QUEUE'], ['worker', 'api', 'Process API_TO_API']
+    ])
+    expect(m.events.filter((e) => e.kind === 'message')).toHaveLength(2)
+    expect(m.operations.find((o) => o.name === 'save producer')).toMatchObject({ kind: 'local', source: 'api' })
+    expect(m.clockUncertain).toEqual([])
+    expect(pairEndpoints(m, k('a4'))).toEqual({ client: k('b3'), server: k('a4') })
+    expect(endpointLabels(m, k('a4'))).toEqual(['PRODUCER', 'CONSUMER'])
+    expect(endpointLabels(m, k('b1'))).toEqual(['CLIENT', 'SERVER'])
+    // The activation bar of a selected message runs over the consumer's processing.
+    const msg = m.operations.find((o) => o.serverName === 'Process API_TO_API')!
+    const a = activationOf(m.events, pageOf(m.events, 0, 80), msg.id)!
+    expect(a.participant).toBe('api')
+    expect(m.events[a.from].spanKey).toBe(k('a4'))
+    // Exports carry messages as they carry calls.
+    const out = sequenceExport(m, rep(spans), { view: 'sequence', selected: null, showInternal: true, logScope: 'span' })
+    expect(out.operations.filter((o) => o.kind === 'message')).toHaveLength(2)
+    expect(out.events.filter((e) => e.text.includes('worker → api · message publish <default>'))).toHaveLength(2)
   })
 })

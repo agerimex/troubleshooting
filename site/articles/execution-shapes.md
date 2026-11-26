@@ -31,7 +31,7 @@ Expand **Calls** to see which caller calls which callee. Filter by service, entr
 
 ![Sequence with client/server arrows](/screenshots/exec-sequence-clientserver.png)
 
-A CLIENT span with exactly one SERVER child in another service is drawn as one arrow. A client whose peer sends no spans points to an “unknown peer”, so missing instrumentation is visible rather than silently dropped.
+A CLIENT span with exactly one SERVER child in another service is drawn as one arrow, and a PRODUCER span with exactly one CONSUMER child in another service as a dashed one-way message arrow. A client whose peer sends no spans points to an “unknown peer”, so missing instrumentation is visible rather than silently dropped.
 
 ## Why it helps
 

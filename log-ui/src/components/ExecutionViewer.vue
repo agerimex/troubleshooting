@@ -137,8 +137,8 @@
         </div>
         <div>
           <div v-if="endpoints" class="seg pair mb-2" role="group" aria-label="Endpoint of the correlated operation" data-testid="pair-switch">
-            <button type="button" :aria-pressed="selected === endpoints.client" :class="{ on: selected === endpoints.client }" @click="select(endpoints.client)" data-testid="pair-client">CLIENT · {{ nameOf(endpoints.client) }}</button>
-            <button type="button" :aria-pressed="selected === endpoints.server" :class="{ on: selected === endpoints.server }" @click="select(endpoints.server)" data-testid="pair-server">SERVER · {{ nameOf(endpoints.server) }}</button>
+            <button type="button" :aria-pressed="selected === endpoints.client" :class="{ on: selected === endpoints.client }" @click="select(endpoints.client)" data-testid="pair-client">{{ endpointLabels[0] }} · {{ nameOf(endpoints.client) }}</button>
+            <button type="button" :aria-pressed="selected === endpoints.server" :class="{ on: selected === endpoints.server }" @click="select(endpoints.server)" data-testid="pair-server">{{ endpointLabels[1] }} · {{ nameOf(endpoints.server) }}</button>
           </div>
           <LogInspector :key="report.generatedAt + report.traceId" :report="report" :span="selectedSpan" :initialLog="recordId" :focusLog="focusLog"
             :notKept="saved ? SNAPSHOT_LOGS_TEXT : ''"
@@ -195,7 +195,7 @@ import {
 import { initialSelection, spanKey, spanLogCounts, timeline } from '@/services/problems'
 import { SNAPSHOT_LOGS_TEXT, savedSpans, snapshotReport } from '@/services/quality'
 import { type SavedSnapshot } from '@/types/quality'
-import { buildSequence, exportSequenceHtml, pairEndpoints, sequenceExport } from '@/services/sequence'
+import { buildSequence, endpointLabels as labelsOf, exportSequenceHtml, pairEndpoints, sequenceExport } from '@/services/sequence'
 import {
   PAGES, VIEW_PREFERENCE_KEY, copyText, initialView, investigationLink, type ExecutionView, type Origin
 } from '@/services/navigation'
@@ -428,6 +428,7 @@ export default defineComponent({
     })
     const seqModel = computed(() => report.value && report.value.spans.records.length ? buildSequence(report.value) : null)
     const endpoints = computed(() => seqModel.value ? pairEndpoints(seqModel.value, selected.value) : null)
+    const endpointLabels = computed(() => seqModel.value ? labelsOf(seqModel.value, selected.value) : ['CLIENT', 'SERVER'])
     const nameOf = (key: string) => report.value?.spans.records.find((s) => spanKey(s) === key)?.name ?? key
     function select (key: string) {
       selected.value = key
@@ -472,7 +473,7 @@ export default defineComponent({
     return {
       comparing, otherTrace, reference, compareLoading, compareSource, compareError, compareWithTrace, compareWithCounterpart,
       view, setView, reportWindow, report, saved, loading, loadError, retrying, selected, select, selectLog, focusLog, logScope, originMissing,
-      generate, retrySection, widen, include, state, links, counts, tl, selectedSpan, entry, seqModel, endpoints, nameOf,
+      generate, retrySection, widen, include, state, links, counts, tl, selectedSpan, entry, seqModel, endpoints, endpointLabels, nameOf,
       copyLink, linkText, linkCopied, evidence, evidenceLabel, exportAs, originPageLabel, fmt, formatNs, windowText, sectionSummary,
       ROOT_PARENT, NO_LOGS_TEXT, NO_SPANS_TEXT, SCOPE_BOUNDARY_TEXT, SNAPSHOT_LOGS_TEXT
     }

@@ -19,22 +19,39 @@ unchanged. Uncommitted at the time of writing.
 - **Sequence**: one column per recorded service (at most 6; the rest share an
   "other services" column), one row per mark in time order (at most 80 per
   page, Earlier/Later, "Locate selection"). Marks are operation starts, span
-  completions ("Ended", never a response), call arrows and ERROR/FATAL log
-  markers on the span that recorded them. Under 430 px it becomes a labeled
-  list ("recording-api → object-storage · call PutObject").
+  completions ("Ended", never a response), call arrows, message arrows and
+  ERROR/FATAL log markers on the span that recorded them. Under 430 px it
+  becomes a labeled list ("recording-api → object-storage · call PutObject",
+  "worker → api · message publish jobs").
 - **Pairing**: a CLIENT span with exactly one directly parented SERVER span of
   another service is one arrow; both spans stay selectable through a
   CLIENT / SERVER switch above the inspector, each with its own logs. Several
   candidate servers stay separate. A CLIENT without a captured server points
   to its recorded peer (`peer.service`, `server.address`, …) shown as "not
   instrumented", or to "unknown peer".
+- **Messages**: a PRODUCER span with exactly one directly parented CONSUMER
+  span of another service (trace context carried in the message, e.g. over a
+  broker) is one message, drawn as a dashed one-way arrow from the producer's
+  service to the consumer's at the producer's start, labelled with the
+  producer span's name. A message has no response: the send gets no "Ended"
+  mark; the consumer's processing starts and ends in the consumer's column
+  (its children follow as usual), and the activation bar of a selected
+  message spans that processing. Both spans stay selectable through a
+  PRODUCER / CONSUMER switch. Fan-out (several consumers), no consumer, or a
+  consumer of the same service: no pairing, the spans stay separate
+  operations. The span kinds are the OpenTelemetry messaging kinds; senders
+  keep them, nothing is renamed to CLIENT/SERVER. An RPC over a broker shows
+  the request as a call and the reply as a message, because the reply is a
+  recorded PRODUCER → CONSUMER pair, not a response inferred from the call.
 - **Honesty rules** (unit-tested): INTERNAL spans stay local operations;
   missing parents are stated, never replaced; an unknown end has no
   completion marker; a log outside its span's interval stays visible with a
   note; repeated names are "repeat n of m", never retries; sibling overlaps
   come from recorded intervals (the package's 122 ms case), but between
-  services whose server spans fall outside their client's interval (clock
-  doubt) no cross-service overlap is claimed; links are listed as
+  services whose server spans fall outside their client's interval, or whose
+  consumer spans start before their producer's (clock doubt), no
+  cross-service overlap is claimed; a consumer starting after its producer
+  ended is ordinary async delivery, not a doubt; links are listed as
   associations and never fetched.
 - **Internal operations** checkbox hides local operations (presentation
   only; the selected span and log markers stay).
@@ -43,7 +60,9 @@ unchanged. Uncommitted at the time of writing.
   last choice per problem type (browser storage).
 - **Exports**: the existing report exports, plus `presentation` in JSON
   (renderer version, view state, participants, operations, events,
-  limitations, log associations) and an ordered event list in HTML.
+  limitations, log associations) and an ordered event list in HTML. Message
+  operations (`kind: "message"`, producer then consumer in `spanKeys`)
+  are exported as calls are.
 
 ## Changes
 

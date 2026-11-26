@@ -74,7 +74,7 @@ Compare shows what the two executions recorded differently. It doesn't say which
 
 ## Sequence
 
-The Sequence view draws services as lanes and calls as arrows. A CLIENT span with exactly one SERVER child in another service is one arrow; a client whose peer sends no spans points to “unknown peer”. Start, end and ERROR-log markers sit on each service's lane. Vertical spacing shows order, not elapsed time. A notice points out overlapping operations. At most 6 lanes and 80 marks fit on a page.
+The Sequence view draws services as lanes and calls as arrows. A CLIENT span with exactly one SERVER child in another service is one arrow; a client whose peer sends no spans points to “unknown peer”. A PRODUCER span with exactly one CONSUMER child in another service (a message, for example over a broker) is a dashed one-way arrow: the send has no end marker, and the consumer's processing starts and ends on the consumer's lane. Start, end and ERROR-log markers sit on each service's lane. Vertical spacing shows order, not elapsed time. A notice points out overlapping operations. At most 6 lanes and 80 marks fit on a page.
 
 ![Sequence view](/screenshots/exec-sequence.png)
 *A failed `start_recording` as a sequence: the API and worker lanes, start and end markers, and the ERROR log flagged as recorded outside its span's interval.*
