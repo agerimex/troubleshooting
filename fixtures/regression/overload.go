@@ -90,6 +90,9 @@ func overload(ctx context.Context, o options) error {
 		overloadHogs, baseline.n, baseline.p50, baseline.p95, baseline.max, loaded.n, loaded.p50, loaded.p95, loaded.max,
 		3*overloadAPIConns, burst.summary())
 	fmt.Print(report)
+	if err := os.MkdirAll(filepath.Dir(o.reportPath), 0o755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(filepath.Dir(o.reportPath), "overload.md"), []byte(report), 0o644); err != nil {
 		return err
 	}
