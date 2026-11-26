@@ -468,11 +468,41 @@ All settings are environment variables; docker-compose reads them from the shell
 | `SAMPLING_POLICY_DEFAULT` | analysis: sampling policy of spans that declare none (`unsampled`, `head:0.2`); empty = unknown, which withholds change signals | empty |
 | `TEST_CLOCK_CONTROL` | analysis: `1` enables the test clock and failure controls of the regression fixture; never on a real installation | off |
 
-One heavy query must not stop the others. Every query carries a time limit, a row limit and a memory limit (a share of the server's, so all queries at their limits still fit); interactive requests and the background statistics refresh use separate connection pools; and requests run at a higher ClickHouse priority, so a running request pauses refresh queries instead of waiting behind them. `make fixture-overload` checks this against the test stack (heavy low-priority queries while light requests must still answer quickly).
+How these limits keep one ClickHouse server responsive, and what they don't cover, is in [Keeping ClickHouse available](#keeping-clickhouse-available).
 
 The API reads the retention ClickHouse really applies from the table definitions (`GET /api/v1/retention`), so report warnings and statistics can't disagree with it. Expired data is removed by ClickHouse in the background, whole parts at a time; a longer retention can't restore what was already deleted.
 
 A query that hits a limit, or a request that hits its deadline (2 × `QUERY_TIMEOUT` + 2 s), fails with HTTP 504 and a message naming the limit, and an unreachable ClickHouse gives HTTP 503 ("the database is unavailable"); the API never returns a partial result as if it were complete. A request the browser abandons cancels its queries.
+
+Keeping ClickHouse available
+------
+Troubleshooting runs on one ClickHouse server. The design goal is that no single query, background job or burst of data can take that server down or make the UI wait behind it, and that an outage is reported as an outage, never as missing data. What it does, and what it doesn't:
+
+**Every query is bounded.**
+* Every span, log and report request names a half-open time window of at most `MAX_SEARCH_WINDOW` (96 h); a request without one is rejected (400) before any query runs. Raw tables are sorted by start time and partitioned by day, so ClickHouse reads only the days in the window.
+* Every query carries a time limit (`QUERY_TIMEOUT`), a row limit (`QUERY_MAX_ROWS_TO_READ`) and a memory limit. Exceeding one is an explicit error (504 with the limit named), never a silently partial result.
+* The memory limit is a share of the server's: the server's `max_server_memory_usage` divided by every query that may run at once (`CLICKHOUSE_MAX_QUERIES` interactive plus one background), at most 1 GiB. So even all queries at their limits together stay under the server's limit, and one heavy query can't take the memory the others need. A query that still meets the server's total limit is answered 503 "the database server is short of memory right now; retry", not "narrow the window".
+* Pages of Log Analysis read the next rows in time order and stop; they never sort the whole window. When the browser cancels a request, its query is cancelled in ClickHouse too.
+
+**People don't wait behind background work.**
+* Statistics, release comparisons, problems and the sequence library read hourly aggregates (`stat_*` tables) that a background refresh builds one hour at a time, so screens don't scan raw spans for their numbers.
+* Interactive requests and the refresh use separate connection pools (`CLICKHOUSE_MAX_QUERIES`, default 4, and 2), so the refresh can't take the connections requests need.
+* Requests run at ClickHouse priority 1, the refresh at 10: while a request runs, ClickHouse pauses refresh queries instead of making the request wait.
+* More concurrent requests than the pool wait for a connection; one that can't get it in time is answered 503 "every database connection was busy; retry".
+
+**Writes stay cheap.**
+* The receiver inserts with ClickHouse async inserts (`CLICKHOUSE_ASYNC_INSERT`): concurrent requests are written as one part instead of one part each, which saves the merges that cost memory and CPU under a steady stream. Each insert is still confirmed only after its rows are written.
+* Expired data leaves as whole daily parts (`ttl_only_drop_parts`), which costs almost nothing; retention changes are applied only when they differ.
+* `clickhouse/low-resources.xml` caps the server's memory (40 % of RAM) and its caches, and turns off internal logs and polling threads a small installation doesn't need. Background merge pools stay at their defaults: smaller ones make the server crash-loop.
+
+**An outage is visible, not silent.**
+* If ClickHouse can't be reached, the API answers 503 "the database is unavailable", and a report keeps the section that did load and marks the other unavailable, never empty.
+* The receiver answers a failed log insert and a failed OTLP insert with `Unavailable`, which senders treat as retryable: log-sender's log writer keeps unconfirmed records (up to 10 000, the oldest dropped and counted) and sends them again, OTLP exporters retry. Spans sent through log-sender are not retried: its exporter reports the failure to the OpenTelemetry SDK, which drops that batch. A retried record is stored again under the same id and counted once.
+* The receiver writes a heartbeat every 15 s; minutes without one are shown as collection gaps in statistics, so a gap is never read as zero traffic.
+
+**Checked in CI.** `make fixture-overload` keeps the test ClickHouse busy with heavy low-priority queries while light Log Analysis requests must still answer within 3 × their unloaded p95 + 250 ms, and sends a burst of three times the connection pool, which must get results or "busy; retry", never another failure. The regression fixture also stops and restarts ClickHouse (explicit errors, then recovery) and recreates it with its volume.
+
+**Not covered: replication.** All tables are plain `MergeTree` on one server. If that server or its disk fails, Troubleshooting is unavailable until it is back, and data written since the last backup is lost. High availability would need replicated tables (`ReplicatedMergeTree`), three ClickHouse Keeper nodes, at least two ClickHouse replicas behind the receiver and the API, and table creation on the cluster (the receiver creates tables today). Sharding (`Distributed` tables) is a further step for volumes one server can't hold. Until then, back up the ClickHouse volume if its history matters.
 
 Security
 ------
