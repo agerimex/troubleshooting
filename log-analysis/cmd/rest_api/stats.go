@@ -45,6 +45,16 @@ func (app *application) shapes(w http.ResponseWriter, r *http.Request) {
 	app.writeJSON(r.Context(), w, http.StatusOK, jsonResponse{Message: "success", Data: envelope{"Library": data.ComputeShapes(r.Context(), req)}})
 }
 
+// spanNames lists the services and span names of a window for the Log
+// Analysis picker (hourly statistics where they exist, raw spans elsewhere).
+func (app *application) spanNames(w http.ResponseWriter, r *http.Request) {
+	var req data.SpanNamesRequest
+	if !app.readValid(w, r, &req, func() error { return req.Validate() }) {
+		return
+	}
+	app.writeJSON(r.Context(), w, http.StatusOK, jsonResponse{Message: "success", Data: envelope{"Names": data.SelectSpanNames(r.Context(), req)}})
+}
+
 func (app *application) examples(w http.ResponseWriter, r *http.Request) {
 	var req data.ExamplesRequest
 	if !app.readValid(w, r, &req, func() error { return req.Validate() }) {

@@ -174,7 +174,7 @@ func TestConditions(t *testing.T) {
 // Every placeholder in a query must be bound, or ClickHouse rejects it.
 func TestEveryPlaceholderIsBound(t *testing.T) {
 	filter := SpanFilter{TimeFrom: "1", TimeTo: "2", TraceId: traceA, ParentId: spanA, Status: "ok",
-		ServiceName: "s", MethodName: "m", MinDurationMs: 1, AfterTime: "1", AfterTraceId: traceA, AfterSpanId: spanA}
+		ServiceName: "s", MethodName: "m", MinDurationMs: 1, ServiceNames: []string{"s"}, SpanNames: [][2]string{{"s", "n"}}, AfterTime: "1", AfterTraceId: traceA, AfterSpanId: spanA}
 	conds, params := filter.conditions(true)
 	params = append(params, filter.windowParams()...)
 	query := canonicalSpans(conds) + whereClause(conds)

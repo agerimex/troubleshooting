@@ -31,7 +31,7 @@ A worked example with screenshots, from a release regression to its cause: [Inve
 Start from what you have: a slow operation, a failed request, a recurring error, a trace ID, or a difference between two releases. The UI has six pages: **Log Analysis**, **Timeline & Sequence**, **Problems**, **Releases**, **Quality** and **Settings**. An investigation ends in one **report**: one trace's spans and its correlated log records together, within an explicit time window.
 
 1. Find an entry record:
-   * **Log Analysis** (the default page): set the window (From/To; an empty To means now) and filter spans by name, status or service. As soon as you filter, the search covers spans at **any depth**, so a failed step under a successful request is found; "Root spans" lists only trace roots. Expanding a span shows its child spans and the log records that recorded exactly that span, inline in the same table and in time order; trace-level logs and logs naming an unknown span are a separate group under the root span. Filters select spans; they never search log text, and an OK span keeps its ERROR logs. The row's "⋯" button, right-click or the keyboard offer **Open timeline**, **Open sequence** and **Copy investigation link**.
+   * **Log Analysis** (the default page): set the window (From/To; an empty To means now) and filter spans by name, status, service or minimum duration, or pick exact services and span names in **Services and span names…** (services first, then their span names). As soon as you filter, **Root spans only** is switched off and the search covers spans at any depth, so a failed step under a successful request is found; tick it again to list only trace roots. Expanding a span shows its child spans and the log records that recorded exactly that span, inline in the same table and in time order; trace-level logs and logs naming an unknown span are a separate group under the root span. Filters select spans; they never search log text, and an OK span keeps its ERROR logs. The row's "⋯" button, right-click or the keyboard offer **Open timeline**, **Open sequence** and **Copy investigation link**.
    * **Timeline & Sequence**: opens on the sequence library, the distinct shapes of execution in a window (`docs/sequence-library.md`), each opening a representative execution; or open a trace by its id.
    * **Problems**: a recurring error group or slow call has retained examples; each opens in Timeline & Sequence. A log without a recorded TraceId can be inspected but opens no report: a SpanId or a timestamp alone never identifies a trace.
 2. The report keeps the window of where it was opened and takes only the trace from the entry record: filters don't narrow it, and the record it was opened for is selected. It shows:
@@ -413,7 +413,7 @@ dotnet run -- .\samples\CANARY-7f3a.wav   # each argument is one convert-file; 2
 Remove-Item Env:TROUBLESHOOTING_OTLP, Env:TROUBLESHOOTING_RUN
 ```
 
-**Check it in the UI.** Open Log Analysis (`http://127.0.0.1:28095`), set the window, filter the service: "Root spans" shows one row per operation (`convert-file`), and expanding a row shows `decode` and `encode` under it. No rows usually means a mismatched `AddSource` name, a `localhost` endpoint, an OTLP/HTTP exporter (port 4318 or protocol `http/protobuf`), or a process that exited without flushing.
+**Check it in the UI.** Open Log Analysis (`http://127.0.0.1:28095`), set the window, filter the service and tick "Root spans only": one row per operation (`convert-file`), and expanding a row shows `decode` and `encode` under it. No rows usually means a mismatched `AddSource` name, a `localhost` endpoint, an OTLP/HTTP exporter (port 4318 or protocol `http/protobuf`), or a process that exited without flushing.
 
 **Check it through the API**, the same thing without the UI:
 
@@ -526,8 +526,11 @@ Span API
 | `parent_id` | 16 hex digits: children of this span. Needs `trace_id`, because span ids are unique only within a trace. |
 | `status`, `service_name`, `method_name` | `unset`/`error`/`ok`; case-insensitive substrings of the service and span name. |
 | `min_duration_ms` | Spans that lasted at least this many milliseconds (fractions allowed; 0 or absent: any duration). A span without a valid duration never matches. |
+| `service_names`, `span_names` | Exact picks (at most 500 each): a span matches if its service is one of `service_names`, or its `[service, span name]` pair is one of `span_names`, so a name picked under one service doesn't match it in another. Both empty: any. |
 | `rows_per_page` | Default 25, at most 1000. `HasMore` says whether more rows follow (read with one extra row, not guessed). |
 | `after_time`, `after_trace_id`, `after_span_id` | Cursor: the last row of the previous page; all three or none. Rows are ordered by (start time, trace id, span id). |
+
+`POST /api/v1/span-names` with `{"time_from", "time_to"}` (the same window rules) lists the window's services and span names for picking: `{"Names": {"status", "names": [{"service", "name", "spans", "entry"}], "truncated", "plan", "notices"}}`. Whole hours with committed statistics are read from the hourly aggregates (`stat_calls`, entry operations from `stat_shapes`), the rest of the window (the current hour, partial edge hours) from raw spans, so a long window doesn't scan raw spans and no hour counts twice. `spans` is approximate (canonical calls from statistics, stored rows from raw spans); `entry` means the name started an execution (a root span); `status` is `partial` when some hours are no longer retained; at most 5000 names, sorted by service and name.
 
 Rules every endpoint shares:
 

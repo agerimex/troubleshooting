@@ -23,7 +23,16 @@
               <label for="window-to">To</label>
               <Calendar inputId="window-to" v-model="windowTo" @update:modelValue="onRefresh()" showTime hourFormat="24" :showSeconds="true" dateFormat="dd.mm.yy" showButtonBar placeholder="now"/>
             </span>
-            <SelectButton v-model="scope" :options="scopeOptions" optionLabel="label" optionValue="value" :allowEmpty="false" @change="onScopeChange" data-testid="scope"/>
+            <span class="la-pair">
+              <label class="la-check" title="Only spans that start an execution (no parent); off: spans at any depth">
+                <input type="checkbox" :checked="scope === 'root'" @change="onRootToggle" data-testid="root-only"/> Root spans only
+              </label>
+              <span v-if="scopeAuto" class="text-xs opacity-80" data-testid="root-only-note">off while filtering, so failed child spans are found</span>
+            </span>
+            <span class="la-pair">
+              <PrimeButton type="button" icon="pi pi-list-check" :label="pickLabel" size="small" outlined @click="pickerOpen = true" data-testid="open-name-picker"/>
+              <PrimeButton v-if="hasPicks(picks)" type="button" icon="pi pi-times" size="small" text title="Clear the picked services and span names" aria-label="Clear the picked services and span names" @click="applyPicks(NO_PICKS)" data-testid="clear-picks"/>
+            </span>
             <InputText v-model="traceIdInput" placeholder="Trace id" class="w-72" @keyup.enter="openTraceById" data-testid="trace-id-input"/>
             <PrimeButton type="button" label="Open timeline" size="small" @click="openTraceById" data-testid="open-trace-by-id"/>
           </div>
@@ -129,6 +138,9 @@
       </TreeTable>
       </div>
 
+      <NamePicker :visible="pickerOpen" :timeFrom="pickerWindow.from" :timeTo="pickerWindow.to" :windowText="pickerWindowText" :initial="picks"
+        @close="pickerOpen = false" @apply="applyPicks"/>
+
       <ActionMenu :open="menu.open" :items="menu.items" :x="menu.x" :y="menu.y" :opener="menu.opener" @close="menu.open = false"/>
 
       <PrimeDialog v-model:visible="dialogVisible">
@@ -163,7 +175,6 @@
 import { ref, reactive, computed, defineComponent } from 'vue'
 import TreeTable from 'primevue/treetable'
 import MultiSelect from 'primevue/multiselect'
-import SelectButton from 'primevue/selectbutton'
 import PrimeButton from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Calendar from 'primevue/calendar'
@@ -173,6 +184,8 @@ import Column from 'primevue/column'
 import PrimeDialog from 'primevue/dialog'
 import SpanEvidenceDialog from '@/components/SpanEvidenceDialog.vue'
 import ActionMenu, { type Action } from '@/components/ActionMenu.vue'
+import NamePicker from '@/components/NamePicker.vue'
+import { filterOf, hasPicks, NO_PICKS, pickSummary, type Picks } from '@/services/namePicker'
 import spansApi from '@/api/spans.api'
 import logsApi from '@/api/logs.api'
 import { Spans } from '@/logs-api/spans.impl'
@@ -213,7 +226,7 @@ export default defineComponent({
   components: {
     TreeTable,
     Column,
-    SelectButton,
+    NamePicker,
     InputText,
     Calendar,
     MultiSelect,
@@ -271,17 +284,33 @@ export default defineComponent({
       searchWindow.value = { from: toNs(windowFrom.value), to: toNsExclusiveEnd(windowTo.value ?? new Date()) }
     }
 
-    const scopeOptions = [
-      { label: 'Root spans', value: 'root' },
-      { label: 'Any depth', value: 'all' }
-    ]
     const scope = ref<'root' | 'all'>('root')
-    // Searching by status, name or service looks at every depth (a failed child
-    // under a successful root must be found) unless the user chose otherwise.
+    // Searching by status, name, service, duration or picked names looks at
+    // every depth (a failed child under a successful root must be found)
+    // unless the user set "Root spans only" themselves; the note says when the
+    // checkbox was switched off for a filter.
     let scopeChosen = false
-    function onScopeChange() {
+    const scopeAuto = ref(false)
+    function onRootToggle(event: Event) {
+      scope.value = (event.target as HTMLInputElement).checked ? 'root' : 'all'
       scopeChosen = true
+      scopeAuto.value = false
       onRefresh()
+    }
+
+    // Picked services and span names (NamePicker), listed for the window as it
+    // is when the dialog opens.
+    const picks = ref<Picks>(NO_PICKS)
+    const pickerOpen = ref(false)
+    const pickerWindow = computed(() => pickerOpen.value
+      ? { from: toNs(windowFrom.value), to: toNsExclusiveEnd(windowTo.value ?? new Date()) }
+      : searchWindow.value)
+    const pickerWindowText = computed(() => `${formatNs(pickerWindow.value.from)} – ${formatNs(pickerWindow.value.to)}`)
+    const pickLabel = computed(() => pickSummary(picks.value) || 'Services and span names…')
+    function applyPicks(p: Picks) {
+      picks.value = p
+      pickerOpen.value = false
+      filterChanged()
     }
 
     const rowsPerPage = ref(25)
@@ -346,7 +375,8 @@ export default defineComponent({
         status: filterStatus.value || undefined,
         serviceName: filters.value['service'] || undefined,
         methodName: filterByMethodName.value || undefined,
-        minDurationMs: minDurationMs()
+        minDurationMs: minDurationMs(),
+        ...filterOf(picks.value)
       }
       if (withCursor && cursor.value !== null) {
         filter.afterTime = cursor.value.timeStamp
@@ -559,9 +589,10 @@ export default defineComponent({
     }
 
     function filterChanged () {
-      const searching = !!(filterStatus.value || filterByMethodName.value || filters.value['service'] || minDurationMs())
-      if (searching && !scopeChosen) {
+      const searching = !!(filterStatus.value || filterByMethodName.value || filters.value['service'] || minDurationMs() || hasPicks(picks.value))
+      if (searching && !scopeChosen && scope.value === 'root') {
         scope.value = 'all'
+        scopeAuto.value = true
       }
       onRefresh()
     }
@@ -776,8 +807,16 @@ export default defineComponent({
       windowTo,
       searchWindow,
       scope,
-      scopeOptions,
-      onScopeChange,
+      scopeAuto,
+      onRootToggle,
+      picks,
+      pickerOpen,
+      pickerWindow,
+      pickerWindowText,
+      pickLabel,
+      applyPicks,
+      hasPicks,
+      NO_PICKS,
       firstRow,
       onRefresh,
       traceIdInput,
@@ -851,6 +890,16 @@ export default defineComponent({
   min-width: 0;
 }
 
+.la-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.la-check input {
+  accent-color: var(--primary-color);
+}
 .la-table :deep(.la-min-duration) {
   text-align: right;
 }

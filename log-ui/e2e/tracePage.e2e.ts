@@ -265,3 +265,75 @@ test('a minimum duration finds slow spans at any depth; the count uses the same 
   await expect(rows(page)).toHaveText(['POST /recordings'])
   expect(api.spanRequests.at(-1)!.min_duration_ms).toBeUndefined()
 })
+
+test('the name picker lists the window\'s services and span names; picks narrow a service, keep another whole, and reach the list and the count', async ({ page }) => {
+  const root = span('POST /jobs', { spanId: '00000000000000d0', service: 'api', status: 'ok' })
+  const names = [
+    { service: 'api', name: 'POST /jobs', spans: 12, entry: true },
+    { service: 'api', name: 'SELECT jobs', spans: 30, entry: false },
+    { service: 'worker', name: 'process job', spans: 40, entry: false }
+  ]
+  const api = await mockApi(page, () => ({ spans: [root] }), () => ({ count: 1 }), {
+    names: () => ({ data: { Names: { status: 'ok', names, truncated: false, notices: [], plan: [], generatedAt: '1' } } })
+  })
+  await page.goto('/')
+  await expect(rows(page)).toHaveText(['POST /jobs'])
+  await expect(page.getByTestId('root-only')).toBeChecked()
+
+  await page.getByTestId('open-name-picker').click()
+  const picker = page.getByTestId('name-picker')
+  await expect(picker.getByTestId('name-picker-service')).toHaveCount(2)
+  // The list is read for the window as it is now.
+  const nameReq = api.nameRequests.at(-1)!
+  expect(BigInt(nameReq.time_to)).toBeGreaterThan(BigInt(nameReq.time_from))
+  // No service picked: every service's names; "root" marks names that start an execution.
+  await expect(picker.getByTestId('name-picker-name')).toHaveCount(3)
+  await expect(picker.locator('.np-root')).toHaveCount(1)
+  await picker.getByTestId('name-picker-entry-only').check()
+  await expect(picker.getByTestId('name-picker-name')).toHaveCount(1)
+  await picker.getByTestId('name-picker-entry-only').uncheck()
+
+  // Pick both services, then narrow api to one of its names.
+  await picker.getByTestId('name-picker-service').nth(0).check()
+  await picker.getByTestId('name-picker-service').nth(1).check()
+  await picker.locator('label', { hasText: 'SELECT jobs' }).getByTestId('name-picker-name').check()
+  await expect(picker.getByTestId('name-picker-summary')).toHaveText('2 services · 1 span name')
+  await picker.getByTestId('name-picker-apply').click()
+  await expect(picker).toBeHidden()
+
+  const search = api.spanRequests.at(-1)!
+  expect(search.service_names).toEqual(['worker'])
+  expect(search.span_names).toEqual([['api', 'SELECT jobs']])
+  expect(api.countRequests.at(-1)!.span_names).toEqual([['api', 'SELECT jobs']])
+  // Picking is a filter: the search looks at every depth, and says why.
+  expect(search.scope).toBe('all')
+  await expect(page.getByTestId('root-only')).not.toBeChecked()
+  await expect(page.getByTestId('root-only-note')).toBeVisible()
+  await expect(page.getByTestId('open-name-picker')).toHaveText('2 services · 1 span name')
+
+  // Root spans only, set by the user, stays as set.
+  await page.getByTestId('root-only').check()
+  expect(api.spanRequests.at(-1)!.scope).toBe('root')
+  await expect(page.getByTestId('root-only-note')).toHaveCount(0)
+
+  // Clearing removes the picks from the next search.
+  await page.getByTestId('clear-picks').click()
+  await expect(page.getByTestId('open-name-picker')).toHaveText('Services and span names…')
+  expect(api.spanRequests.at(-1)!.service_names).toBeUndefined()
+  expect(api.spanRequests.at(-1)!.span_names).toBeUndefined()
+  expect(api.spanRequests.at(-1)!.scope).toBe('root')
+})
+
+test('the name picker says when the names can\'t be loaded and offers retry', async ({ page }) => {
+  let fail = true
+  await mockApi(page, () => ({ spans: [] }), () => ({ count: 0 }), {
+    names: () => fail ? { status: 503, error: 'the database is unavailable' } : { data: { Names: { status: 'ok', names: [{ service: 'api', name: 'GET /', spans: 1, entry: true }], truncated: false, notices: [], plan: [], generatedAt: '1' } } }
+  })
+  await page.goto('/')
+  await page.getByTestId('open-name-picker').click()
+  await expect(page.getByTestId('name-picker-error')).toContainText('the database is unavailable')
+  await expect(page.getByTestId('name-picker-apply')).toBeDisabled()
+  fail = false
+  await page.getByTestId('name-picker-retry').click()
+  await expect(page.getByTestId('name-picker-service')).toHaveCount(1)
+})

@@ -91,6 +91,7 @@ export interface MockApi {
   compareRequests: Body[]
   problemRequests: Body[]
   ruleSaves: Body[]
+  nameRequests: Body[]
 }
 
 async function fulfil (route: Route, reply: { status?: number, error?: string, delayMs?: number }, data: Record<string, unknown>) {
@@ -129,6 +130,8 @@ export interface MockOptions {
   stats?: (body: Body) => DataReply
   errorGroups?: (body: Body) => DataReply
   examples?: (body: Body) => DataReply
+  // Log Analysis name picker; without it the list is empty.
+  names?: (body: Body) => DataReply
   // Sequence library; without it the library is empty.
   shapes?: (body: Body) => DataReply
   compare?: (body: Body) => DataReply
@@ -146,7 +149,7 @@ export interface MockOptions {
 
 export async function mockApi (page: Page, spans: (body: Body) => Reply, count: (body: Body) => Reply = () => ({ count: 0 }),
   options: MockOptions = {}): Promise<MockApi> {
-  const api: MockApi = { shapeRequests: [], spanRequests: [], countRequests: [], logRequests: [], reportRequests: [], statsRequests: [], groupRequests: [], exampleRequests: [], compareRequests: [], problemRequests: [], ruleSaves: [] }
+  const api: MockApi = { shapeRequests: [], spanRequests: [], countRequests: [], logRequests: [], reportRequests: [], statsRequests: [], groupRequests: [], exampleRequests: [], compareRequests: [], problemRequests: [], ruleSaves: [], nameRequests: [] }
   const dataRoute = async (path: string, requests: Body[], handler: ((body: Body) => DataReply) | undefined) => {
     await page.route(path, async (route) => {
       const body = route.request().postDataJSON()
@@ -160,6 +163,7 @@ export async function mockApi (page: Page, spans: (body: Body) => Reply, count: 
   await dataRoute('**/api/v1/stats/examples', api.exampleRequests, options.examples)
   await dataRoute('**/api/v1/stats/shapes', api.shapeRequests, options.shapes ?? (() => ({ data: { Library: { status: 'ok', shapes: [], truncated: false, notices: [], plan: [], contract: 'shapes-v1', generatedAt: '1' } } })))
   await dataRoute('**/api/v1/compare', api.compareRequests, options.compare)
+  await dataRoute('**/api/v1/span-names', api.nameRequests, options.names ?? (() => ({ data: { Names: { status: 'ok', names: [], truncated: false, notices: [], plan: [], generatedAt: '1' } } })))
   await dataRoute('**/api/v1/problems', api.problemRequests, options.problems)
   await page.route('**/api/v1/problems/services*', async (route) => {
     const reply = options.services ? options.services() : { data: { Services: [] } }

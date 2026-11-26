@@ -1,7 +1,7 @@
 import { type ISpans } from '@/interfaces/spans.interface'
 import Security from '@/services/security'
 import { requestJSON } from '@/services/request'
-import { type SpanFilter, type SpanPage } from '@/types/filter'
+import { type SpanFilter, type SpanNameList, type SpanPage } from '@/types/filter'
 
 function payloadOf (filter: SpanFilter, withCursor: boolean) {
   const payload: Record<string, unknown> = {
@@ -14,7 +14,9 @@ function payloadOf (filter: SpanFilter, withCursor: boolean) {
     status: filter.status,
     service_name: filter.serviceName,
     method_name: filter.methodName,
-    min_duration_ms: filter.minDurationMs
+    min_duration_ms: filter.minDurationMs,
+    service_names: filter.serviceNames?.length ? filter.serviceNames : undefined,
+    span_names: filter.spanNames?.length ? filter.spanNames : undefined
   }
   if (withCursor) {
     payload.after_time = filter.afterTime
@@ -28,6 +30,14 @@ export class Spans implements ISpans {
   public async viewSpans (filter: SpanFilter): Promise<[string | null, SpanPage | null]> {
     return requestJSON(import.meta.env.VITE_LOGS_APP_API_URL + '/api/v1/view-spans', Security.requestOptions(payloadOf(filter, true)),
       (data) => ({ spans: data.Spans ?? [], hasMore: data.HasMore === true }))
+  }
+
+  public async spanNames (timeFrom: string, timeTo: string): Promise<[string | null, SpanNameList | null]> {
+    return requestJSON(import.meta.env.VITE_LOGS_APP_API_URL + '/api/v1/span-names', Security.requestOptions({ time_from: timeFrom, time_to: timeTo }),
+      (data) => {
+        const n = data.Names ?? {}
+        return { status: n.status ?? 'error', error: n.error, names: n.names ?? [], truncated: n.truncated === true, notices: n.notices ?? [] }
+      })
   }
 
   // The total ignores the cursor: it counts the whole list for the filter.
