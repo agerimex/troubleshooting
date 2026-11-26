@@ -117,7 +117,7 @@ type clickhouseQualityStore struct{}
 
 func (clickhouseQualityStore) lookup(ctx context.Context, project, id string) (string, bool, error) {
 	var body string
-	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body" FROM quality_evaluations WHERE "Project" = {project:String} AND "Id" = {id:String} ORDER BY "RecordedAt", cityHash64("Body") LIMIT 1`,
+	err := dbFor(ctx).QueryRow(withLimits(ctx), `SELECT "Body" FROM quality_evaluations WHERE "Project" = {project:String} AND "Id" = {id:String} ORDER BY "RecordedAt", cityHash64("Body") LIMIT 1`,
 		clickhouse.Named("project", project), clickhouse.Named("id", id)).Scan(&body)
 	if errors.Is(err, errNoRows) {
 		return "", false, nil
@@ -252,7 +252,7 @@ func answerWithRecord(res *QualityResult, id, body string) {
 func insertQualityEvaluation(ctx context.Context, id string, row []any) error {
 	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
 		"insert_deduplicate": 1, "insert_deduplication_token": "quality-evaluation-" + id}))
-	batch, err := clickhouseDB.PrepareBatch(ctx, `INSERT INTO quality_evaluations (Id, Project, RecordedAt, Run, Ref, Commit, Gate, RulesSHA256, Rules, Summary, Body)`)
+	batch, err := dbFor(ctx).PrepareBatch(ctx, `INSERT INTO quality_evaluations (Id, Project, RecordedAt, Run, Ref, Commit, Gate, RulesSHA256, Rules, Summary, Body)`)
 	if err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func ListQualityEvaluations(ctx context.Context, f QualityHistoryFilter) ([]Qual
 		params = append(params, clickhouse.Named("before", num(f.Before)))
 	}
 	// One row per id, the earliest recorded (as lookup and LoadQualityEvaluation).
-	rows, err := clickhouseDB.Query(withLimits(ctx), `SELECT min("RecordedAt") AS "At", argMin("Summary", ("RecordedAt", cityHash64("Body")))
+	rows, err := dbFor(ctx).Query(withLimits(ctx), `SELECT min("RecordedAt") AS "At", argMin("Summary", ("RecordedAt", cityHash64("Body")))
 		FROM quality_evaluations WHERE `+strings.Join(where, " AND ")+` GROUP BY "Id" HAVING `+having+`
 		ORDER BY "At" DESC, "Id" DESC LIMIT `+strconv.Itoa(f.Limit+1), params...)
 	if err != nil {
@@ -361,7 +361,7 @@ type QualityRecord struct {
 // LoadQualityEvaluation returns a recorded evaluation.
 func LoadQualityEvaluation(ctx context.Context, id string) (QualityRecord, error) {
 	var body, rules string
-	err := clickhouseDB.QueryRow(withLimits(ctx), `SELECT "Body", "Rules" FROM quality_evaluations WHERE "Id" = {id:String} ORDER BY "RecordedAt", cityHash64("Body") LIMIT 1`,
+	err := dbFor(ctx).QueryRow(withLimits(ctx), `SELECT "Body", "Rules" FROM quality_evaluations WHERE "Id" = {id:String} ORDER BY "RecordedAt", cityHash64("Body") LIMIT 1`,
 		clickhouse.Named("id", id)).Scan(&body, &rules)
 	if errors.Is(err, errNoRows) {
 		return QualityRecord{}, ErrQualityEvaluationNotFound
@@ -383,7 +383,7 @@ type QualityProject struct {
 // ListQualityProjects returns the projects with recorded evaluations, the
 // most recently recorded first.
 func ListQualityProjects(ctx context.Context) ([]QualityProject, error) {
-	rows, err := clickhouseDB.Query(withLimits(ctx), `SELECT "Project", uniqExact("Id"), max("RecordedAt"), argMax("Gate", "RecordedAt")
+	rows, err := dbFor(ctx).Query(withLimits(ctx), `SELECT "Project", uniqExact("Id"), max("RecordedAt"), argMax("Gate", "RecordedAt")
 		FROM quality_evaluations GROUP BY "Project" ORDER BY max("RecordedAt") DESC LIMIT 200`)
 	if err != nil {
 		return nil, err

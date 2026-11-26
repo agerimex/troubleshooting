@@ -476,6 +476,7 @@ func TestExplainQueryError(t *testing.T) {
 
 	for _, err := range []error{
 		&net.OpError{Op: "dial", Err: errors.New("connection refused")},
+		fmt.Errorf("wrapped: %w", clickhouse.ErrAcquireConnTimeout),
 		// The server's total limit stops a small query: not this query's limit.
 		&clickhouse.Exception{Code: chMemoryLimitExceeded, Message: "(total) memory limit exceeded: would use 362.83 MiB (attempt to allocate chunk of 0.00 B), current RSS: 233.05 MiB, maximum: 362.40 MiB. OvercommitTracker decision: Query was selected to stop by OvercommitTracker."},
 		fmt.Errorf("wrapped: %w", &net.DNSError{Name: "clickhouse-server", Err: "server misbehaving"}),

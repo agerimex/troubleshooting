@@ -174,11 +174,11 @@ func FindExamples(ctx context.Context, req ExamplesRequest) ExamplesResult {
 	}
 
 	countQuery := `SELECT count() FROM (` + query + `)`
-	if err := clickhouseDB.QueryRow(withLimits(ctx), countQuery, params...).Scan(&res.Total); err != nil {
+	if err := dbFor(ctx).QueryRow(withLimits(ctx), countQuery, params...).Scan(&res.Total); err != nil {
 		res.Status, res.Condition = statsStatus(ctx, err)
 		return res
 	}
-	rows, err := clickhouseDB.Query(withLimits(ctx), query+` LIMIT `+strconv.Itoa(req.Limit), params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query+` LIMIT `+strconv.Itoa(req.Limit), params...)
 	if err != nil {
 		res.Status, res.Condition = statsStatus(ctx, err)
 		return res

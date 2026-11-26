@@ -92,6 +92,13 @@ func main() {
 		data.Redaction = false
 		log.Println("TROUBLESHOOTING_REDACT=off: spans and logs are stored as sent, SQL arguments and URL credentials included")
 	}
+	// Inserts are asynchronous on the server and still confirmed only after
+	// they are written (data.AsyncInsert); CLICKHOUSE_ASYNC_INSERT=off writes a
+	// part per request.
+	if os.Getenv("CLICKHOUSE_ASYNC_INSERT") == "off" {
+		data.AsyncInsert = false
+		log.Println("CLICKHOUSE_ASYNC_INSERT=off: every request writes its own part")
+	}
 	clickhouse, err := driver.Connect(driver.ConfigFromEnv())
 	if err != nil {
 		log.Fatalf("Failed to connect to clickhouse: %v", err)

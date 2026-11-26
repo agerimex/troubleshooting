@@ -503,7 +503,7 @@ func slowCallProblems(ctx context.Context, pop Population, rule SlowRule, revisi
 	ctx, span := startQuerySpan(ctx, "SELECT slow calls", query, params)
 	var err error
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		status, msg := statsStatus(ctx, err)
 		return nil, ProblemSource{Status: status, Condition: msg}
@@ -581,7 +581,7 @@ func comparisonsFor(ctx context.Context, pop Population) (_ []Analysis, err erro
 	params := []any{clickhouse.Named("service", pop.Service), clickhouse.Named("from", pop.TimeFrom), clickhouse.Named("to", pop.TimeTo)}
 	ctx, span := startQuerySpan(ctx, "SELECT comparisons", query, params)
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -618,7 +618,7 @@ func ListServices(ctx context.Context, from, to int64) (_ []string, err error) {
 		clickhouse.Named("recent", strconv.FormatInt(recent, 10))}
 	ctx, span := startQuerySpan(ctx, "SELECT services", query, params)
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return nil, err
 	}

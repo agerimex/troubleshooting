@@ -48,9 +48,16 @@ func (q QueryLimits) settings() clickhouse.Settings {
 	}
 }
 
-// withLimits attaches the query limits to ctx for the ClickHouse driver.
+// withLimits attaches the query limits and the priority of ctx's kind of
+// work (workload.go) to ctx for the ClickHouse driver.
 func withLimits(ctx context.Context) context.Context {
-	return clickhouse.Context(ctx, clickhouse.WithSettings(limits.settings()))
+	return clickhouse.Context(ctx, clickhouse.WithSettings(querySettings(ctx)))
+}
+
+func querySettings(ctx context.Context) clickhouse.Settings {
+	settings := limits.settings()
+	settings["priority"] = priorityOf(ctx)
+	return settings
 }
 
 // ClickHouse exception codes for the limits above.
@@ -79,6 +86,11 @@ func ExplainQueryError(ctx context.Context, err error) error {
 	var opErr *net.OpError
 	if errors.As(err, &dnsErr) || (errors.As(err, &opErr) && opErr.Op == "dial") {
 		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	// Every connection of the pool stayed busy (CLICKHOUSE_MAX_QUERIES queries
+	// ran) for the whole dial timeout: the API is busy, a retry may succeed.
+	if errors.Is(err, clickhouse.ErrAcquireConnTimeout) {
+		return fmt.Errorf("%w: every database connection was busy; retry", ErrUnavailable)
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("%w: the query took longer than %s; narrow the time window or filters", ErrQueryLimit, limits.Timeout)

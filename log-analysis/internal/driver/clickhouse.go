@@ -34,9 +34,14 @@ func getenv(key, def string) string {
 	return def
 }
 
-func Connect(cfg Config) (driver.Conn, error) {
+// Connect opens a pool of at most maxConns connections: the number of queries
+// it can run at once. A query that finds every connection busy waits for one
+// (until its context ends or the dial timeout passes).
+func Connect(cfg Config, maxConns int) (driver.Conn, error) {
 	return clickhouse.Open(&clickhouse.Options{
-		Addr: []string{cfg.Addr},
+		MaxOpenConns: maxConns,
+		MaxIdleConns: maxConns,
+		Addr:         []string{cfg.Addr},
 		Auth: clickhouse.Auth{
 			Database: cfg.Database,
 			Username: cfg.Username,

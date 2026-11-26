@@ -7,7 +7,7 @@ FIXTURE=cd fixtures/regression && go run .
 FIXTURE_ADDRS=-api http://127.0.0.1:28094 -otlp 127.0.0.1:24317 -sender 127.0.0.1:20055
 
 .PHONY: all images network up down test test-go test-ui \
-	test-stack-up test-stack-down test-stack-reset fixture-load fixture-check ui-e2e save upload demo
+	test-stack-up test-stack-down test-stack-reset fixture-load fixture-overload fixture-check ui-e2e save upload demo
 
 # Builds the images and creates the shared network. It does not start
 # anything: run "make up" (or docker compose up -d) afterwards.
@@ -62,6 +62,12 @@ test-stack-reset:
 # Sends a fresh fixture run (new base time and ids) to the test stack.
 fixture-load:
 	$(FIXTURE) load $(FIXTURE_ADDRS)
+
+# Heavy low-priority queries in the test ClickHouse while light API requests
+# must still answer quickly, plus a burst over the API's connection pool
+# (OVL-001/002). Reads the loaded run only; run it before fixture-check.
+fixture-overload:
+	$(FIXTURE) overload $(FIXTURE_ADDRS)
 
 # Checks the loaded run, replays it, interrupts and recreates the test
 # ClickHouse, and writes fixtures/regression/results/report.md.

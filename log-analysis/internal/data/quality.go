@@ -1388,7 +1388,7 @@ func runRanges(ctx context.Context, rules QualityRules, run, baseline string, lo
 	ctx, span := startQuerySpan(ctx, "SELECT quality run windows", query, params)
 	var err error
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -1456,7 +1456,7 @@ func loadRun(ctx context.Context, rules QualityRules, run string, from, to int64
 	ctx, span := startQuerySpan(ctx, "SELECT quality run", query, params)
 	var err error
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return queryProblem(ctx, err)
 	}

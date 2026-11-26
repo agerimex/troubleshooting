@@ -118,7 +118,7 @@ func selectErrorGroups(ctx context.Context, pop Population, union string) (_ []g
 	GROUP BY "SourceKind", "ServiceName", "Operation", "Environment", "Method", "Fingerprint", "Version"`
 	ctx, span := startQuerySpan(ctx, "SELECT error groups", query, params)
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func selectAffectedTraces(ctx context.Context, pop Population, union string) (_ 
 	GROUP BY "SourceKind", "ServiceName", "Operation", "Environment", "Fingerprint"`
 	ctx, span := startQuerySpan(ctx, "SELECT error group traces", query, params)
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return nil, err
 	}

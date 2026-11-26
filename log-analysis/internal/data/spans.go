@@ -390,7 +390,7 @@ func pageRange(ctx context.Context, conds []string, params []any) (first, last i
 	ctx, dbSpan := startQuerySpan(ctx, "SELECT page otel_traces", query, params)
 	defer func() { endQuerySpan(dbSpan, err) }()
 
-	err = clickhouseDB.QueryRow(withLimits(ctx), query, params...).Scan(&first, &last, &candidates)
+	err = dbFor(ctx).QueryRow(withLimits(ctx), query, params...).Scan(&first, &last, &candidates)
 	return first, last, candidates, err
 }
 
@@ -412,7 +412,7 @@ func querySpanPage(ctx context.Context, filter SpanFilter, source string, conds 
 	ctx, dbSpan := startQuerySpan(ctx, "SELECT otel_traces", query, params)
 	defer func() { endQuerySpan(dbSpan, err) }()
 
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return SpanPage{}, 0, err
 	}
@@ -616,7 +616,7 @@ func queryChildCounts(ctx context.Context, name, query string, params []any, sca
 	ctx, span := startQuerySpan(ctx, name, query, params)
 	defer func() { endQuerySpan(span, err) }()
 
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return err
 	}
@@ -691,7 +691,7 @@ func countByTime(ctx context.Context, table string, conds []string, params []any
 
 	var single, sharedCount uint64
 	var sharedTimes []string
-	if err = clickhouseDB.QueryRow(withLimits(ctx), query, params...).Scan(&single, &sharedCount, &sharedTimes); err != nil {
+	if err = dbFor(ctx).QueryRow(withLimits(ctx), query, params...).Scan(&single, &sharedCount, &sharedTimes); err != nil {
 		return 0, err
 	}
 	if sharedCount == 0 {
@@ -711,6 +711,6 @@ func countByTime(ctx context.Context, table string, conds []string, params []any
 func countShared(ctx context.Context, name, query string, params []any) (counted uint64, err error) {
 	ctx, span := startQuerySpan(ctx, name, query, params)
 	defer func() { endQuerySpan(span, err) }()
-	err = clickhouseDB.QueryRow(withLimits(ctx), query, params...).Scan(&counted)
+	err = dbFor(ctx).QueryRow(withLimits(ctx), query, params...).Scan(&counted)
 	return counted, err
 }

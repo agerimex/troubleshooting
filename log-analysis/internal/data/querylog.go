@@ -110,7 +110,7 @@ func queryLogFiguresOf(ctx context.Context, timeFrom, timeTo string, ids []strin
 	ctx, span := startQuerySpan(ctx, "SELECT query_log", query, params)
 	defer func() { endQuerySpan(span, err) }()
 
-	rows, err := clickhouseDB.Query(withLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query, params...)
 	if err != nil {
 		return nil, err
 	}

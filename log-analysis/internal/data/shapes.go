@@ -254,7 +254,7 @@ func ComputeShapes(ctx context.Context, f ShapeFilter) ShapeLibrary {
 	query := shapeLibraryQuery(plan, cutoff, statsConfig.AllowedLateness, filters)
 	ctx, span := startQuerySpan(ctx, "SELECT shapes", query, params)
 	defer func() { endQuerySpan(span, err) }()
-	rows, err := clickhouseDB.Query(withRefreshLimits(ctx), query, params...)
+	rows, err := dbFor(ctx).Query(withRefreshLimits(ctx), query, params...)
 	if err != nil {
 		return fail(err)
 	}

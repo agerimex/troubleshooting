@@ -108,7 +108,7 @@ func CurrentPolicy() EffectivePolicy {
 // the retention the trace report and statistics use.
 func LoadPolicy(ctx context.Context) (EffectivePolicy, error) {
 	ttl := map[string]int64{}
-	rows, err := clickhouseDB.Query(ctx, `SELECT name, engine_full FROM system.tables
+	rows, err := dbFor(ctx).Query(ctx, `SELECT name, engine_full FROM system.tables
 		WHERE database = currentDatabase() AND name IN ('otel_traces', 'log_records', 'stat_calls')`)
 	if err != nil {
 		return EffectivePolicy{}, err
@@ -233,7 +233,7 @@ func (d *Declaration) Validate() error {
 func Declare(ctx context.Context, d Declaration) error {
 	from, _ := strconv.ParseInt(d.TimeFrom, 10, 64)
 	to, _ := strconv.ParseInt(d.TimeTo, 10, 64)
-	return clickhouseDB.Exec(ctx, `INSERT INTO coverage_declarations ("DeclaredAt", "Source", "From", "To", "Status", "Reason")
+	return dbFor(ctx).Exec(ctx, `INSERT INTO coverage_declarations ("DeclaredAt", "Source", "From", "To", "Status", "Reason")
 		VALUES ({at:Int64}, {source:String}, {from:Int64}, {to:Int64}, {status:String}, {reason:String})`,
 		clickhouse.Named("at", strconv.FormatInt(time.Now().UnixNano(), 10)),
 		clickhouse.Named("source", d.Source),
@@ -259,7 +259,7 @@ type declared struct {
 // loadCoverage reads heartbeats and declarations overlapping [from, to).
 func loadCoverage(ctx context.Context, from, to int64) (coverageEvidence, error) {
 	ev := coverageEvidence{minutes: map[int64]bool{}}
-	rows, err := clickhouseDB.Query(withLimits(ctx), `SELECT DISTINCT toUnixTimestamp(toStartOfMinute("Time")) FROM collection_heartbeats
+	rows, err := dbFor(ctx).Query(withLimits(ctx), `SELECT DISTINCT toUnixTimestamp(toStartOfMinute("Time")) FROM collection_heartbeats
 		WHERE "Time" >= toDateTime(`+num(from/1e9-60)+`, 'UTC') AND "Time" < toDateTime(`+num(to/1e9+60)+`, 'UTC')`)
 	if err != nil {
 		return ev, err
@@ -276,7 +276,7 @@ func loadCoverage(ctx context.Context, from, to int64) (coverageEvidence, error)
 	if err := rows.Err(); err != nil {
 		return ev, err
 	}
-	rows, err = clickhouseDB.Query(withLimits(ctx), `SELECT "From", "To", "Source", "Status", "Reason" FROM coverage_declarations
+	rows, err = dbFor(ctx).Query(withLimits(ctx), `SELECT "From", "To", "Source", "Status", "Reason" FROM coverage_declarations
 		WHERE "From" < `+num(to)+` AND "To" > `+num(from)+` ORDER BY "DeclaredAt"`)
 	if err != nil {
 		return ev, err

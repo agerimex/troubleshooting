@@ -28,8 +28,8 @@ type options struct {
 }
 
 func main() {
-	if len(os.Args) < 2 || (os.Args[1] != "load" && os.Args[1] != "check") {
-		fmt.Fprintln(os.Stderr, "usage: regression load|check [flags]  (-h for flags)")
+	if len(os.Args) < 2 || (os.Args[1] != "load" && os.Args[1] != "check" && os.Args[1] != "overload") {
+		fmt.Fprintln(os.Stderr, "usage: regression load|overload|check [flags]  (-h for flags)")
 		os.Exit(2)
 	}
 	var o options
@@ -44,7 +44,7 @@ func main() {
 	fs.BoolVar(&o.outage, "outage", false, "check: stop the test ClickHouse, expect explicit errors, start it, retry (RF13)")
 	fs.BoolVar(&o.recreate, "recreate", false, "check: recreate the test ClickHouse container with its volume, check again (RF15)")
 	fs.BoolVar(&o.retention, "retention", false, "check: milestone 2 retention phase (moves the test clock, restarts log-analysis, recreates the receiver)")
-	fs.StringVar(&o.container, "container", "troubleshooting-test-clickhouse", "test ClickHouse container (-outage)")
+	fs.StringVar(&o.container, "container", "troubleshooting-test-clickhouse", "test ClickHouse container (-outage, overload)")
 	fs.StringVar(&o.composeFile, "compose-file", filepath.Join("..", "..", "docker-compose.test.yml"), "test stack compose file (-recreate)")
 	fs.StringVar(&o.composeProject, "compose-project", "troubleshooting-test", "test stack compose project (-recreate)")
 	fs.DurationVar(&o.readyTimeout, "ready-timeout", 3*time.Minute, "how long to wait for the stack and the data")
@@ -52,9 +52,12 @@ func main() {
 
 	ctx := context.Background()
 	var err error
-	if os.Args[1] == "load" {
+	switch os.Args[1] {
+	case "load":
 		err = load(ctx, o)
-	} else {
+	case "overload":
+		err = overload(ctx, o)
+	default:
 		err = check(ctx, o)
 	}
 	if err != nil {

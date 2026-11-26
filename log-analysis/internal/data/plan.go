@@ -70,7 +70,7 @@ func loadRevisions(ctx context.Context, from, to int64) (map[int64]Revision, err
 	FROM stat_revisions
 	WHERE "BucketStart" >= toDateTime(` + num(floorHour(from)/1e9) + `, 'UTC') AND "BucketStart" < toDateTime(` + num(ceilHour(to)/1e9) + `, 'UTC')
 	GROUP BY "BucketStart"`
-	rows, err := clickhouseDB.Query(withLimits(ctx), query)
+	rows, err := dbFor(ctx).Query(withLimits(ctx), query)
 	if err != nil {
 		return nil, err
 	}
