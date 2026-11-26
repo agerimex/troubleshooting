@@ -34,6 +34,8 @@
       </div>
       <div class="rows">
         <div v-for="c in lanesShown.length" :key="'l' + c" class="lifeline" :style="{ left: `calc(${(c - 0.5) / lanesShown.length * 100}% )` }"/>
+        <div v-if="activation" class="activation" :class="{ 'open-top': !activation.startsHere, 'open-bottom': !activation.endsHere }"
+          :style="activationStyle" aria-hidden="true" data-testid="seq-activation"/>
         <div v-for="e in page.events" :key="e.id" class="row">
           <button v-if="e.kind === 'call'" type="button" class="arrow" :class="{ sel: isSelected(e), rtl: col(e.target!) < col(e.participant) }"
             :style="arrowStyle(e)" :aria-pressed="isSelected(e)" @click="pick(e)" data-testid="seq-call" :data-span-key="e.spanKey">
@@ -42,7 +44,7 @@
           </button>
           <button v-else type="button" class="mark" :class="[e.kind, statusClass(e), { sel: isSelected(e) }]" :style="markStyle(e)"
             :aria-pressed="isSelected(e)" @click="pick(e)" :data-testid="'seq-' + e.kind" :data-span-key="e.spanKey">
-            <span class="t">{{ e.timeMs === null ? 'time unknown' : '+' + fmtMs(e.timeMs) + ' ms' }} · {{ kindWord(e) }}<template v-if="laneOf(laneSet, e.participant) === OTHER_LANE"> · {{ e.participant }}</template></span>
+            <span class="t">{{ e.timeMs === null ? 'time unknown' : '+' + fmtMs(e.timeMs) + ' ms' }} · {{ kindWord(e) }}<template v-if="laneOf(laneSet, e.participant) === OTHER_LANE"> · {{ e.participant }}</template><template v-if="e.kind === 'end' && isSelected(e)"> · end of the selection</template></span>
             <span class="d">{{ e.label }}<template v-if="e.kind === 'end' && durationOf(e) !== null"> · {{ fmtMs(durationOf(e)!) }} ms</template></span>
             <span v-if="e.note" class="n">{{ e.note }}</span>
           </button>
@@ -50,7 +52,7 @@
       </div>
     </div>
     <p class="legend text-xs opacity-80">
-      Arrows = correlated client/server spans (or a client's recorded peer). End markers = span completion, not a response. Vertical spacing shows order, not elapsed time; equal times are ordered by id, which is not causality.
+      Arrows = correlated client/server spans (or a client's recorded peer). End markers = span completion, not a response; the selected operation's bar runs on its lifeline from its start to its end. Vertical spacing shows order, not elapsed time; equal times are ordered by id, which is not causality.
       <template v-if="model.links.length"> {{ model.links.length }} recorded link(s) are associations, not calls: see Span details.</template>
     </p>
   </div>
@@ -58,7 +60,7 @@
 
 <script lang="ts">
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue'
-import { eventText, fmtMs, laneOf, lanes, locate, OTHER_LANE, pageOf, visibleEvents, type SeqEvent, type SequenceModel } from '@/services/sequence'
+import { activationOf, eventText, fmtMs, laneOf, lanes, locate, OTHER_LANE, pageOf, visibleEvents, type SeqEvent, type SequenceModel } from '@/services/sequence'
 
 // SequenceView draws the sequence model: one column per participant (at most
 // maxLanes), one row per mark in chronological order (at most maxMarks per
@@ -124,6 +126,31 @@ export default defineComponent({
         emit('select', e.spanKey)
       }
     }
+    // The activation bar of the selected operation: on its lifeline, from its
+    // call arrow (or start mark) down to its end mark, so the two read as one.
+    const activation = computed(() => {
+      const key = props.selected
+      const op = key ? props.model.operations.find((o) => o.spanKeys.includes(key)) : undefined
+      return op ? activationOf(events.value, page.value, op.id) : null
+    })
+    const ROW = 54
+    const PAD = 6
+    const MARK_TOP = 6 // .mark top within its row
+    const activationStyle = computed(() => {
+      const a = activation.value
+      if (!a) {
+        return {}
+      }
+      const startsWithArrow = page.value.events[a.from]?.kind === 'call'
+      const top = a.startsHere ? PAD + a.from * ROW + (startsWithArrow ? ROW - 10 : ROW / 2) : 0
+      const style: Record<string, string> = { left: `calc(${pct(col(a.participant))}% - 4px)`, top: top + 'px' }
+      if (a.endsHere) {
+        style.height = Math.max(PAD + a.to * ROW + MARK_TOP - top, 4) + 'px' // to the end mark's top edge
+      } else {
+        style.bottom = '0'
+      }
+      return style
+    })
     const pct = (i: number) => ((i + 0.5) / lanesShown.value.length) * 100
     function arrowStyle (e: SeqEvent) {
       const a = col(e.participant)
@@ -143,7 +170,7 @@ export default defineComponent({
     const repeatOf = (e: SeqEvent) => { const r = opOf(e)?.repeat; return r ? `(repeat ${r.index} of ${r.count})` : '' }
     const targetObserved = (e: SeqEvent) => opOf(e)?.targetObserved ?? true
     return {
-      root, narrow, showInternal, start, page, laneSet, lanesShown, col, hiddenErrors, locateSelection, isSelected, pick, arrowStyle, markStyle,
+      root, narrow, showInternal, start, page, laneSet, lanesShown, col, hiddenErrors, locateSelection, isSelected, pick, arrowStyle, markStyle, activation, activationStyle,
       kindWord, statusClass, durationOf, repeatOf, targetObserved, eventText, fmtMs, laneOf, OTHER_LANE
     }
   }
@@ -169,6 +196,11 @@ export default defineComponent({
 .rows { position: relative; padding: 6px 0; }
 .lifeline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--surface-border); }
 .row { position: relative; height: 54px; }
+.activation { position: absolute; width: 8px; border-radius: 2px; background: color-mix(in srgb, var(--primary-color) 35%, transparent);
+  border: 1px solid var(--primary-color); box-sizing: border-box; pointer-events: none; }
+.activation.open-top { border-top: 0; mask-image: linear-gradient(to bottom, transparent, #000 24px); }
+.activation.open-bottom { border-bottom: 0; mask-image: linear-gradient(to top, transparent, #000 24px); }
+.activation.open-top.open-bottom { mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
 .mark { position: absolute; top: 6px; height: 42px; text-align: left; background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 6px;
   color: var(--text-color); padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
 .mark.end { border-style: dashed; background: transparent; }

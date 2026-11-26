@@ -366,6 +366,38 @@ export function pageOf (events: SeqEvent[], start: number, maxMarks: number): Se
   return { events: events.slice(from, from + maxMarks), start: from, total: events.length }
 }
 
+// activationOf places the activation bar of one operation on a page: rows
+// (indexes into page.events) from its start mark to its end mark, clipped to
+// the page; startsHere/endsHere say whether the ends are on this page. null
+// when the operation has no start or no valid end, or lies on other pages.
+export interface Activation {
+  participant: string
+  from: number
+  to: number
+  startsHere: boolean
+  endsHere: boolean
+}
+
+export function activationOf (events: SeqEvent[], page: SequencePage, operationId: string): Activation | null {
+  const s = events.findIndex((e) => e.id === operationId + ':start')
+  const en = events.findIndex((e) => e.id === operationId + ':end')
+  if (s < 0 || en < 0 || page.events.length === 0) {
+    return null
+  }
+  const first = page.start
+  const last = page.start + page.events.length - 1
+  if (en < first || s > last) {
+    return null
+  }
+  return {
+    participant: events[s].participant,
+    from: Math.max(s, first) - first,
+    to: Math.min(en, last) - first,
+    startsHere: s >= first,
+    endsHere: en <= last
+  }
+}
+
 // locate returns the page start that shows the first event of a span.
 export function locate (events: SeqEvent[], key: string, maxMarks: number): number | null {
   const i = events.findIndex((e) => e.spanKey === key || e.operationId === key)
