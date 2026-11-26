@@ -450,7 +450,7 @@ func TestExplainQueryError(t *testing.T) {
 		context.DeadlineExceeded,
 		&clickhouse.Exception{Code: chTimeoutExceeded},
 		&clickhouse.Exception{Code: chTooManyRows},
-		fmt.Errorf("wrapped: %w", &clickhouse.Exception{Code: chMemoryLimitExceeded}),
+		fmt.Errorf("wrapped: %w", &clickhouse.Exception{Code: chMemoryLimitExceeded, Message: "(for query) memory limit exceeded: would use 1.00 GiB"}),
 	} {
 		if got := ExplainQueryError(context.Background(), err); !errors.Is(got, ErrQueryLimit) {
 			t.Errorf("ExplainQueryError(%v) = %v, want ErrQueryLimit", err, got)
@@ -463,6 +463,8 @@ func TestExplainQueryError(t *testing.T) {
 
 	for _, err := range []error{
 		&net.OpError{Op: "dial", Err: errors.New("connection refused")},
+		// The server's total limit stops a small query: not this query's limit.
+		&clickhouse.Exception{Code: chMemoryLimitExceeded, Message: "(total) memory limit exceeded: would use 362.83 MiB (attempt to allocate chunk of 0.00 B), current RSS: 233.05 MiB, maximum: 362.40 MiB. OvercommitTracker decision: Query was selected to stop by OvercommitTracker."},
 		fmt.Errorf("wrapped: %w", &net.DNSError{Name: "clickhouse-server", Err: "server misbehaving"}),
 	} {
 		if got := ExplainQueryError(context.Background(), err); !errors.Is(got, ErrUnavailable) {

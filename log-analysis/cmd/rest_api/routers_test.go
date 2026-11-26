@@ -8,7 +8,33 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+// A CORS preflight is answered before tracing: it is not an execution.
+func TestCORSPreflightIsNotTraced(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	defer otel.SetTracerProvider(previous)
+
+	app := &application{serviceConfig: ServiceConfig{allowedOrigins: []string{"http://localhost:5173"}}}
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/view-spans", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	rec := httptest.NewRecorder()
+	app.routers().ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
+		t.Fatalf("preflight not answered: %v", rec.Header())
+	}
+	if spans := recorder.Ended(); len(spans) != 0 {
+		t.Errorf("a preflight was traced: %d span(s), first %q", len(spans), spans[0].Name())
+	}
+}
 
 func TestCORSAllowsOnlyConfiguredOrigins(t *testing.T) {
 	app := &application{serviceConfig: ServiceConfig{allowedOrigins: []string{"http://localhost:5173"}}}

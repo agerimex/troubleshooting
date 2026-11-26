@@ -15,15 +15,17 @@ func (app *application) routers() http.Handler {
 	mux := chi.NewRouter()
 	mux.Use(middleware.Recoverer)
 	// mux.Use(app.Logging)
-	mux.Use(otelchi.Middleware("LOG", otelchi.WithChiRoutes(mux)))
 	// No AllowCredentials: the UI sends no cookies, and basic auth is handled by
-	// Caddy on the same origin.
+	// Caddy on the same origin. CORS comes before tracing: it answers a
+	// preflight (OPTIONS) itself, which would otherwise be traced as an
+	// execution of its own named "/".
 	mux.Use(cors.Handler(cors.Options{
 		AllowedOrigins: app.serviceConfig.allowedOrigins,
 		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
 		MaxAge:         300,
 	}))
+	mux.Use(otelchi.Middleware("LOG", otelchi.WithChiRoutes(mux)))
 
 	mux.Group(func(r chi.Router) {
 		r.Use(app.requestDeadline(app.requestTimeout()))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -90,8 +91,20 @@ func ExplainQueryError(ctx context.Context, err error) error {
 		case chTooManyRows:
 			return fmt.Errorf("%w: the query would read more than %d rows; narrow the time window or filters", ErrQueryLimit, limits.MaxRowsToRead)
 		case chMemoryLimitExceeded:
+			if serverMemoryLimit(ex.Message) {
+				return fmt.Errorf("%w: the database server is short of memory right now (its total limit, not this query's); retry", ErrUnavailable)
+			}
 			return fmt.Errorf("%w: the query needs more than %d MiB of memory; narrow the time window or filters", ErrQueryLimit, limits.MaxMemoryBytes>>20)
 		}
 	}
 	return err
+}
+
+// serverMemoryLimit says whether a MEMORY_LIMIT_EXCEEDED came from the server's
+// (or the user's) total limit rather than this query's own: the server then
+// stops some query, often a small one, when all of them together reach the
+// limit. Narrowing the query doesn't help; a retry usually does.
+func serverMemoryLimit(message string) bool {
+	m := strings.ToLower(message)
+	return strings.Contains(m, "(total)") || strings.Contains(m, "(for user)") || strings.Contains(m, "overcommittracker")
 }
