@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSequence, eventText, lanes, locate, pageOf, pairEndpoints, visibleEvents, OTHER_LANE } from '@/services/sequence'
+import { activationOf, buildSequence, eventText, lanes, locate, pageOf, pairEndpoints, visibleEvents, OTHER_LANE, type SeqEvent } from '@/services/sequence'
 import { timeline } from '@/services/problems'
 import { type Report } from '@/types/report'
 import { type Span } from '@/types/filter'
@@ -165,5 +165,24 @@ describe('bounded rendering (SEQ-RES-001)', () => {
     expect(hidden.some((e) => e.kind === 'log' && e.spanKey === upload)).toBe(true)
     expect(visibleEvents(m, false, upload).some((e) => e.operationId === upload && e.kind === 'start')).toBe(true)
     expect(m.events).toHaveLength(visibleEvents(m, true, null).length)
+  })
+})
+
+describe('activation bar of the selected operation', () => {
+  const ev = (id: string, participant = 'api'): SeqEvent => ({ id, kind: id.endsWith(':end') ? 'end' : 'call', timeMs: 0, operationId: id.split(':')[0], spanKey: id.split(':')[0], participant, label: id })
+  // a starts, b starts, a ends, b ends: a's end is not next to its start.
+  const events = [ev('r:start', 'web'), ev('a:start'), ev('b:start'), ev('b:end'), ev('a:end'), ev('r:end', 'web')]
+
+  it('runs from the start mark to the end mark on the operation\'s lifeline', () => {
+    expect(activationOf(events, pageOf(events, 0, 80), 'a')).toEqual({ participant: 'api', from: 1, to: 4, startsHere: true, endsHere: true })
+  })
+  it('is clipped to the page and says which end is elsewhere', () => {
+    expect(activationOf(events, pageOf(events, 2, 2), 'a')).toEqual({ participant: 'api', from: 0, to: 1, startsHere: false, endsHere: false })
+    expect(activationOf(events, pageOf(events, 0, 3), 'a')).toEqual({ participant: 'api', from: 1, to: 2, startsHere: true, endsHere: false })
+  })
+  it('is absent without a valid end or when the operation is on other pages', () => {
+    const noEnd = events.filter((e) => e.id !== 'a:end')
+    expect(activationOf(noEnd, pageOf(noEnd, 0, 80), 'a')).toBeNull()
+    expect(activationOf(events, pageOf(events, 5, 1), 'a')).toBeNull()
   })
 })

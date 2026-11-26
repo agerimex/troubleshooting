@@ -183,3 +183,20 @@ test('SEQ-RES-006 / SEQ-RES-007: exports keep hidden operations, the view and in
   expect(h).not.toMatch(/<script/i)
   expect(h).toContain('recording-api → object-storage · call PutObject')
 })
+
+test('SEQ-UI-012: the selected call has an activation bar on its lifeline from its arrow to its end mark', async ({ page }) => {
+  await openExample(page, ['error'])
+  const call = page.getByTestId('seq-call').filter({ hasText: 'PutObject' })
+  await call.click()
+  const end = page.locator(`[data-testid=seq-end][data-span-key="${await call.getAttribute('data-span-key')}"]`)
+  await expect(end).toContainText('end of the selection')
+  const bar = page.getByTestId('seq-activation')
+  await expect(bar).toHaveCount(1)
+  const [b, a, e] = [await bar.boundingBox(), await call.locator('.line').boundingBox(), await end.boundingBox()]
+  // Starts at the arrow's line, ends at the end mark's top edge, centered on the caller's lifeline (the arrow's left end).
+  expect(Math.abs(b!.y - a!.y)).toBeLessThan(4)
+  expect(Math.abs(b!.y + b!.height - e!.y)).toBeLessThan(3)
+  expect(Math.abs(b!.x + b!.width / 2 - a!.x)).toBeLessThan(3)
+  // Other end marks don't claim the selection.
+  await expect(page.getByTestId('seq-end').filter({ hasText: 'end of the selection' })).toHaveCount(1)
+})
