@@ -42,7 +42,13 @@ type SpanFilter struct {
 	// MinDurationMs keeps spans that lasted at least this long (0: any).
 	// Spans without a valid duration (stored as -1) never match it.
 	MinDurationMs float64 `json:"min_duration_ms"`
-	RowsPerPage   int     `json:"rows_per_page"`
+	// Picked from POST /api/v1/span-names: a span matches if its service is one
+	// of ServiceNames exactly, or its (service, span name) is one of the
+	// SpanNames pairs (so a name picked under one service doesn't match it in
+	// another). Both empty: any.
+	ServiceNames []string    `json:"service_names"`
+	SpanNames    [][2]string `json:"span_names"`
+	RowsPerPage  int         `json:"rows_per_page"`
 
 	AfterTime    string `json:"after_time"`
 	AfterTraceId string `json:"after_trace_id"`
@@ -73,6 +79,9 @@ var (
 	traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	spanIDPattern  = regexp.MustCompile(`^[0-9a-f]{16}$`)
 )
+
+// MaxPickedNames bounds service_names and span_names each.
+const MaxPickedNames = 500
 
 // maxMinDurationMs bounds min_duration_ms (a week): larger values are typos.
 const maxMinDurationMs = 7 * 24 * 3600 * 1000.0
@@ -118,6 +127,20 @@ func (f *SpanFilter) Validate() error {
 
 	if f.Status != "" && StatusCodeFromString(f.Status) == "" {
 		return invalid("unknown status %q", f.Status)
+	}
+	pairNames := make([]string, 0, 2*len(f.SpanNames))
+	for _, p := range f.SpanNames {
+		pairNames = append(pairNames, p[0], p[1])
+	}
+	for field, names := range map[string][]string{"service_names": f.ServiceNames, "span_names": pairNames} {
+		if len(names) > MaxPickedNames*2 || (field == "service_names" && len(names) > MaxPickedNames) {
+			return invalid("%s: at most %d names", field, MaxPickedNames)
+		}
+		for _, n := range names {
+			if n == "" || len(n) > 1024 {
+				return invalid("%s: names must be 1 to 1024 bytes", field)
+			}
+		}
 	}
 	if f.MinDurationMs < 0 || math.IsNaN(f.MinDurationMs) || math.IsInf(f.MinDurationMs, 0) || f.MinDurationMs > maxMinDurationMs {
 		return invalid("min_duration_ms must be a number of milliseconds from 0 to %d", int64(maxMinDurationMs))
@@ -167,6 +190,28 @@ func (f *SpanFilter) conditions(withCursor bool) ([]string, []any) {
 	}
 	if f.MethodName != "" {
 		add(`"SpanName" ILIKE {spanName:String}`, clickhouse.Named("spanName", "%"+f.MethodName+"%"))
+	}
+	// Picked names: a span matches if its service is one of ServiceNames (the
+	// whole service) or its (service, span name) is one of SpanNames, so
+	// "these names of A, and all of B" is one filter.
+	var picked []string
+	var pickedParams []any
+	if len(f.ServiceNames) > 0 {
+		picked = append(picked, `"ServiceName" IN {serviceNames:Array(String)}`)
+		pickedParams = append(pickedParams, clickhouse.Named("serviceNames", arrayLiteral(f.ServiceNames)))
+	}
+	if len(f.SpanNames) > 0 {
+		// The name list alone lets the SpanName index skip data; the pairs make
+		// the match exact.
+		names := make([]string, len(f.SpanNames))
+		for i, p := range f.SpanNames {
+			names[i] = p[1]
+		}
+		picked = append(picked, `("SpanName" IN {spanNames:Array(String)} AND ("ServiceName", "SpanName") IN {spanPairs:Array(Tuple(String, String))})`)
+		pickedParams = append(pickedParams, clickhouse.Named("spanNames", arrayLiteral(names)), clickhouse.Named("spanPairs", pairsLiteral(f.SpanNames)))
+	}
+	if len(picked) > 0 {
+		add(`(`+strings.Join(picked, ` OR `)+`)`, pickedParams...)
 	}
 	if f.MinDurationMs > 0 {
 		// Duration is stored in microseconds; round up, minus float noise

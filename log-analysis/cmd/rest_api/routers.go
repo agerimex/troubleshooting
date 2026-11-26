@@ -33,6 +33,7 @@ func (app *application) routers() http.Handler {
 		r.Post("/api/v1/trace-report", app.traceReport)
 		r.Post("/api/v1/view-spans", app.viewSpans)
 		r.Post("/api/v1/count-spans", app.countSpans)
+		r.Post("/api/v1/span-names", app.spanNames)
 	})
 
 	// Statistics run several bounded queries one after another.

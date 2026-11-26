@@ -9,13 +9,14 @@ Log Analysis is the default page: one table of spans in which each span expands 
 ## Search
 
 - **From / To** set a half-open window `[From, To)`. An empty To means now. The line under the fields shows the exact window that was searched.
-- **Root spans** lists only entry spans. **Any depth** lists every matching span. Filtering switches to Any depth unless you picked a scope yourself.
+- **Root spans only** lists only entry spans; unticked, every matching span at any depth. Filtering unticks it (a note says so) unless you set it yourself.
+- **Services and span names…** opens a picker with the services of the window on the left and their span names on the right, each with an approximate count; a `root` tag marks names that start an execution, and "Only names that start an execution" hides the rest. A service whose names you pick is narrowed to them; a picked service without picked names is shown whole. The button then shows what is picked, with a clear button next to it.
 - **Trace id** + **Open timeline** jumps straight to one execution.
-- The header filters select spans by their own name, status (`ok` / `error` / `unset`) and service. They never search log text.
+- The header filters select spans by their own name, status (`ok` / `error` / `unset`), service and minimum duration (`min ms` in the duration column). They never search log text.
 - The chips above the table (`msg`, `service`) hide or show columns.
 
 ![Log Analysis: spans of the recording services](/screenshots/logs-table.png)
-*Spans of the `fxdc108d54-recording` services since 11:52. A service filter switches the scope to “Any depth”, so the worker's `upload_recording` is listed next to the two `start_recording` executions.*
+*Spans of the `fxdc108d54-recording` services since 11:52. A service filter unticks “Root spans only”, so the worker's `upload_recording` is listed next to the two `start_recording` executions.*
 
 ## Expanding a span
 
