@@ -59,7 +59,7 @@
         <div v-for="e in page.events" :key="e.id" class="row">
           <button v-if="e.kind === 'call' || e.kind === 'message'" type="button" class="arrow" :class="{ sel: isSelected(e), rtl: col(e.target!) < col(e.participant), msg: e.kind === 'message' }"
             :style="arrowStyle(e)" :aria-pressed="isSelected(e)" @click="pick(e)" :data-testid="e.kind === 'message' ? 'seq-message' : 'seq-call'" :data-span-key="e.spanKey">
-            <span class="lbl">+{{ fmtMs(e.timeMs ?? 0) }} ms · {{ e.kind === 'message' ? 'Message' : 'Call' }}<template v-if="repeatOf(e)"> {{ repeatOf(e) }}</template><br><b>{{ e.label }}</b><i v-if="!targetObserved(e)" class="peer">(peer not instrumented)</i></span>
+            <span class="lbl">+{{ fmtMs(e.timeMs ?? 0) }} ms · {{ e.kind === 'message' ? 'Message' : 'Call' }}{{ repeatOf(e) ? ' ' + repeatOf(e) : '' }}<br><b>{{ e.label }}</b><i v-if="!targetObserved(e)" class="peer">(peer not instrumented)</i></span>
             <span class="line"/>
           </button>
           <button v-else type="button" class="mark" :class="[e.kind, statusClass(e), { sel: isSelected(e) }]" :style="markStyle(e)"
