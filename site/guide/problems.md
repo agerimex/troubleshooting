@@ -19,7 +19,7 @@ Choose a **Service** (required), optionally an **Environment**, and the window (
 Errors whose records name no span are listed as “Call attribution unavailable” and never meet the threshold.
 
 ![Problem list](/screenshots/problems-list.png)
-*Nine problem groups of `fxdc108d54-pw-worker`, 09:00–10:00: slow `render_preview` calls, error groups per source kind (ERROR logs, ERROR spans), and “Cache volume is full”, whose logs name no span, so its calls can't be attributed. No release regression is listed: no stored comparison of this service overlaps the window.*
+*Nine problem groups of `fx83718d82-pw-worker`, 20:00–21:00: slow `render_preview` calls, error groups per source kind (ERROR logs, ERROR spans), and “Cache volume is full”, whose logs name no span, so its calls can't be attributed. No release regression is listed: no stored comparison of this service overlaps the window.*
 
 ## Problem detail
 
@@ -38,4 +38,4 @@ Under **Investigate**, pick one of the retained example calls (up to 20 are kept
 A regression's **Compare releases** tab shows the stored comparison it was detected from: baseline and candidate versions, every metric with its change and result. Choose another version under **Fixed release** and click **Check fixed release** to see whether a later release brought the latency back.
 
 ![Release regression with comparison](/screenshots/problems-regression.png)
-*“upload_recording became slower in version 1.1.0” on `fxdc108d54-recording-worker`: p95 100 ms → 160 ms, +60%, from the stored comparison of 1.1.0 against 1.0.0.*
+*“upload_recording became slower in version 1.1.0” on `fx83718d82-recording-worker`: p95 100 ms → 160 ms, +60%, from the stored comparison of 1.1.0 against 1.0.0.*

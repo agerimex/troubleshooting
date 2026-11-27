@@ -19,7 +19,7 @@ Three rules, each with its own checkbox:
 The header shows the revision in force and when it was saved. Changing a value shows “Unsaved changes” with **Save rules** and **Discard changes**. A save applies from the next evaluation and creates a new revision; every revision is kept. If someone else saved in the meantime, the save is refused and you reload their revision first.
 
 ![Detection rules](/screenshots/settings-rules.png)
-*The detection rules at revision 28.*
+*The detection rules at revision 2.*
 
 ![Detection rules with unsaved change](/screenshots/settings-rules-edit.png)
 *Slow-call duration changed to 120 ms, not yet saved.*

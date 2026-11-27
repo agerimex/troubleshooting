@@ -15,7 +15,7 @@ A population is a service, a window and optional dimensions: operation, span kin
 - **Saved comparisons** reopens any comparison stored earlier, exactly as it was generated.
 
 ![Comparison form](/screenshots/compare-form.png)
-*Baseline: `fxdc108d54-recording-worker`, operation `upload_recording`, version 1.0.0, 04:00–05:00. Candidate: version 1.1.0, 06:00–07:00.*
+*Baseline: `fx83718d82-recording-worker`, operation `upload_recording`, version 1.0.0, 15:00–16:00. Candidate: version 1.1.0, 17:00–18:00.*
 
 ## The comparison
 
@@ -53,4 +53,4 @@ In an opened example, **Include in comparison export** adds its report to the co
 The second tab shows one population without a comparison: one row per operation and span kind (or per version with **one row per version**), with calls, rate, ERROR/OK/UNSET counts, error fraction, percentiles and valid durations. Below it are calls per hour (UTC) and the population's error groups, each with examples. Percentiles need at least 20 (p50), 200 (p95) and 1000 (p99) valid durations.
 
 ![Operation statistics](/screenshots/stats.png)
-*Statistics of `fxdc108d54-recording-worker`, 04:00–10:00, one row per version, with hourly buckets and error groups.*
+*Statistics of `fx83718d82-recording-worker`, 15:00–21:00, one row per version, with hourly buckets and error groups.*

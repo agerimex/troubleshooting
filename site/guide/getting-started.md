@@ -20,7 +20,7 @@ browser ── UI :8095 ── /api/* ──▶ log-analysis :8094 (REST) ──
 ```
 
 - **Go services** use the `log-sender` library. It sends spans and log records over gRPC to the receiver on port 50055. Each log record carries the trace and span it was written in, so logs attach to the right span.
-- **Any OpenTelemetry SDK or Collector** can send traces over OTLP/gRPC to port 4317.
+- **Any OpenTelemetry SDK or Collector** can send traces and logs over OTLP/gRPC to port 4317. Logs carrying the active span's ids appear under that span.
 - The receiver stores everything in ClickHouse. Raw spans and logs are kept 3 days, statistics 30 days.
 
 ## Install
@@ -48,5 +48,5 @@ The header has six pages, in this order:
 A page keeps its state when you switch away and back. Any page can open one execution. The browser address then names it (`#/executions?trace=…&from=…&to=…&span=…&view=…`), so you can copy the link and send it to a colleague. Links carry identifiers only, never log text.
 
 ::: info About the screenshots
-The screenshots in this handbook were taken on 2026-11-18 from the regression fixture data set (run `dc108d54`) on the current `main`. Its service names carry the run prefix, for example `fxdc108d54-recording-worker`. Times show in the browser's local time (UTC+1).
+The screenshots in this handbook were taken on 2026-11-26 from the regression fixture data set (run `83718d82`) on the current `main`. Its service names carry the run prefix, for example `fx83718d82-recording-worker`. Times show in the browser's local time (UTC+1).
 :::

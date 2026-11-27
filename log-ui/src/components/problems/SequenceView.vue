@@ -44,9 +44,8 @@
           </button>
           <button v-else type="button" class="mark" :class="[e.kind, statusClass(e), { sel: isSelected(e) }]" :style="markStyle(e)"
             :aria-pressed="isSelected(e)" @click="pick(e)" :data-testid="'seq-' + e.kind" :data-span-key="e.spanKey">
-            <span class="t">{{ e.timeMs === null ? 'time unknown' : '+' + fmtMs(e.timeMs) + ' ms' }} · {{ kindWord(e) }}<template v-if="laneOf(laneSet, e.participant) === OTHER_LANE"> · {{ e.participant }}</template><template v-if="e.kind === 'end' && isSelected(e)"> · end of the selection</template></span>
+            <span class="t">{{ e.timeMs === null ? 'time unknown' : '+' + fmtMs(e.timeMs) + ' ms' }} · {{ kindWord(e) }}<template v-if="laneOf(laneSet, e.participant) === OTHER_LANE"> · {{ e.participant }}</template><template v-if="e.kind === 'end' && isSelected(e)"> · end of the selection</template><template v-if="e.note"> · <span class="n">{{ e.note }}</span></template></span>
             <span class="d">{{ e.label }}<template v-if="e.kind === 'end' && e.durationMs !== undefined"> · {{ fmtMs(e.durationMs) }} ms</template></span>
-            <span v-if="e.note" class="n">{{ e.note }}</span>
           </button>
         </div>
       </div>
@@ -217,7 +216,7 @@ export default defineComponent({
 .t { color: var(--text-color-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mark.log .t { color: #fca5a5; }
 .d { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.n { font-size: 10px; color: #fcd34d; }
+.n { color: #fcd34d; }
 .arrow { position: absolute; top: 0; height: 54px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--text-color); font: inherit; }
 .lbl { display: block; text-align: center; font-size: 12px; line-height: 1.3; border-radius: 4px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .line { position: absolute; left: 0; right: 0; bottom: 10px; height: 2px; background: #60a5fa; }

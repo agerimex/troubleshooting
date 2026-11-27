@@ -16,7 +16,7 @@ Log Analysis is the default page: one table of spans in which each span expands 
 - The chips above the table (`msg`, `service`) hide or show columns.
 
 ![Log Analysis: spans of the recording services](/screenshots/logs-table.png)
-*Spans of the `fxdc108d54-recording` services since 11:52. A service filter unticks “Root spans only”, so the worker's `upload_recording` is listed next to the two `start_recording` executions.*
+*Spans of the `fx83718d82-recording` services since 23:32. A service filter unticks “Root spans only”, so the worker's `upload_recording` is listed next to the two `start_recording` executions.*
 
 ## Expanding a span
 
@@ -44,4 +44,4 @@ Every row, span or log, has the same actions. Open them with the `…` button, a
 Set the status filter to `error` to see only failed spans. Paging moves forward with Next. The total (“Rows 1–1 of 1”) is counted once per search; if the count fails, the rows stay and the page says “Total unavailable”.
 
 ![Status filter error](/screenshots/logs-errors.png)
-*Status filter `error` on the `fxdc108d54-recording` services: one failed span.*
+*Status filter `error` on the `fx83718d82-recording` services: one failed span.*

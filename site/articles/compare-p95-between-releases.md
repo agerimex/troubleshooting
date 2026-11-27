@@ -31,7 +31,7 @@ With any other OpenTelemetry SDK, set the same two resource attributes and expor
 
 ## 2. Define two populations, not two lines
 
-On **Releases → Compare releases**, a *population* is a service, a time window and optional dimensions: operation, span kind, environment, version, installation and workload segment. Each dimension is *any*, *is* a value, or *not recorded*. Fill a **Baseline** (version 1.0.0, 04:00–05:00) and a **Candidate** (version 1.1.0, 06:00–07:00).
+On **Releases → Compare releases**, a *population* is a service, a time window and optional dimensions: operation, span kind, environment, version, installation and workload segment. Each dimension is *any*, *is* a value, or *not recorded*. Fill a **Baseline** (version 1.0.0, 15:00–16:00) and a **Candidate** (version 1.1.0, 17:00–18:00).
 
 ![Comparison form](/screenshots/compare-form.png)
 
