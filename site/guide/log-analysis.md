@@ -13,7 +13,7 @@ Log Analysis is the default page: one table of spans in which each span expands 
 - **Services and span names…** opens a picker with the services of the window on the left and their span names on the right, each with an approximate count; a `root` tag marks names that start an execution, and "Only names that start an execution" hides the rest. A service whose names you pick is narrowed to them; a picked service without picked names is shown whole. The button then shows what is picked, with a clear button next to it.
 - **Trace id** + **Open timeline** jumps straight to one execution.
 - The header filters select spans by their own name, status (`ok` / `error` / `unset`), service and minimum duration (`min ms` in the duration column). They never search log text.
-- The chips above the table (`msg`, `service`) hide or show columns.
+- The chips above the table (`msg`, `service`) hide or show columns. The optional **user** column shows the span's user (its `enduser.id`, `user.id` or `user.name` attribute, which request middleware usually sets on the entry span) and filters by it, to tell apart the requests of different users.
 
 ![Log Analysis: spans of the recording services](/screenshots/logs-table.png)
 *Spans of the `fx83718d82-recording` services since 23:32. A service filter unticks “Root spans only”, so the worker's `upload_recording` is listed next to the two `start_recording` executions.*

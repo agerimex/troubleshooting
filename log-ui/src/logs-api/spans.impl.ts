@@ -14,6 +14,7 @@ function payloadOf (filter: SpanFilter, withCursor: boolean) {
     status: filter.status,
     service_name: filter.serviceName,
     method_name: filter.methodName,
+    user_name: filter.userName,
     min_duration_ms: filter.minDurationMs,
     service_names: filter.serviceNames?.length ? filter.serviceNames : undefined,
     span_names: filter.spanNames?.length ? filter.spanNames : undefined

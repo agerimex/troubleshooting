@@ -148,6 +148,11 @@ func TestConditions(t *testing.T) {
 			notWant: []string{"Duration"},
 		},
 		{
+			name:   "a user is a substring of any user attribute",
+			filter: SpanFilter{Scope: ScopeAll, UserName: "alice"},
+			want:   []string{`("SpanAttributes"['enduser.id'] ILIKE {userName:String} OR "SpanAttributes"['user.id'] ILIKE {userName:String} OR "SpanAttributes"['user.name'] ILIKE {userName:String})`},
+		},
+		{
 			name:   "service and method filters",
 			filter: SpanFilter{Scope: ScopeAll, ServiceName: "bill", MethodName: "GET"},
 			want:   []string{`"ServiceName" ILIKE {serviceName:String}`, `"SpanName" ILIKE {spanName:String}`},
@@ -174,7 +179,7 @@ func TestConditions(t *testing.T) {
 // Every placeholder in a query must be bound, or ClickHouse rejects it.
 func TestEveryPlaceholderIsBound(t *testing.T) {
 	filter := SpanFilter{TimeFrom: "1", TimeTo: "2", TraceId: traceA, ParentId: spanA, Status: "ok",
-		ServiceName: "s", MethodName: "m", MinDurationMs: 1, ServiceNames: []string{"s"}, SpanNames: [][2]string{{"s", "n"}}, AfterTime: "1", AfterTraceId: traceA, AfterSpanId: spanA}
+		ServiceName: "s", MethodName: "m", UserName: "u", MinDurationMs: 1, ServiceNames: []string{"s"}, SpanNames: [][2]string{{"s", "n"}}, AfterTime: "1", AfterTraceId: traceA, AfterSpanId: spanA}
 	conds, params := filter.conditions(true)
 	params = append(params, filter.windowParams()...)
 	query := canonicalSpans(conds) + whereClause(conds)

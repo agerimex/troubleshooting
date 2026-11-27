@@ -12,6 +12,8 @@ export interface SpanFilter {
   status?: string
   serviceName?: string
   methodName?: string
+  // A case-insensitive substring of the span's user (enduser.id, user.id or user.name).
+  userName?: string
   // Spans that lasted at least this many milliseconds (unset: any duration).
   minDurationMs?: number
   // Exact picks from the name list (POST /api/v1/span-names): services, and
