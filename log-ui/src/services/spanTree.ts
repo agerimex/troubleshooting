@@ -49,6 +49,7 @@ export interface SpanNodeData extends Omit<Span, 'duration'> {
   humanTime: string
   duration: number | string // milliseconds, or "invalid"
   durationMicros: number
+  user: string // userOf: enduser.id, user.id or user.name; '' when not recorded
   // Why the span is shown at the top of a trace although it has a parent.
   parentMissing?: string
 }
@@ -88,6 +89,19 @@ export function spanKey (traceId: string, spanId: string): string {
   return traceId + ':' + spanId
 }
 
+// USER_ATTRIBUTES name the user of a span, first found wins (OpenTelemetry's
+// enduser.id, the newer user.id, then user.name); the API's user filter reads
+// the same three.
+export const USER_ATTRIBUTES = ['enduser.id', 'user.id', 'user.name']
+
+export function userOf (row: Span): string {
+  for (const key of USER_ATTRIBUTES) {
+    const value = (row.tags ?? []).find((t) => t.key === key)?.value
+    if (value) return value
+  }
+  return ''
+}
+
 export function createItem (row: Span): TreeNode {
   return {
     key: spanKey(row.traceId, row.spanId),
@@ -96,6 +110,7 @@ export function createItem (row: Span): TreeNode {
       events: row.events ?? [],
       links: row.links ?? [],
       humanTime: formatNs(row.timeStamp),
+      user: userOf(row),
       duration: row.duration < 0 ? INVALID_DURATION : Math.round(row.duration / 1000),
       durationMicros: row.duration
     },

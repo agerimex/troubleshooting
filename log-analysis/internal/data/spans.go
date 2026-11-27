@@ -39,6 +39,9 @@ type SpanFilter struct {
 	Status      string `json:"status"`
 	ServiceName string `json:"service_name"`
 	MethodName  string `json:"method_name"`
+	// UserName is a case-insensitive substring of the span's user: the
+	// enduser.id, user.id or user.name attribute (UserAttributes).
+	UserName string `json:"user_name"`
 	// MinDurationMs keeps spans that lasted at least this long (0: any).
 	// Spans without a valid duration (stored as -1) never match it.
 	MinDurationMs float64 `json:"min_duration_ms"`
@@ -79,6 +82,10 @@ var (
 	traceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	spanIDPattern  = regexp.MustCompile(`^[0-9a-f]{16}$`)
 )
+
+// UserAttributes name the user of a span, in the order the UI reads them
+// (OpenTelemetry's enduser.id, the newer user.id, and user.name).
+var UserAttributes = []string{"enduser.id", "user.id", "user.name"}
 
 // MaxPickedNames bounds service_names and span_names each.
 const MaxPickedNames = 500
@@ -190,6 +197,13 @@ func (f *SpanFilter) conditions(withCursor bool) ([]string, []any) {
 	}
 	if f.MethodName != "" {
 		add(`"SpanName" ILIKE {spanName:String}`, clickhouse.Named("spanName", "%"+f.MethodName+"%"))
+	}
+	if f.UserName != "" {
+		var user []string
+		for _, key := range UserAttributes {
+			user = append(user, `"SpanAttributes"['`+key+`'] ILIKE {userName:String}`)
+		}
+		add(`(`+strings.Join(user, ` OR `)+`)`, clickhouse.Named("userName", "%"+f.UserName+"%"))
 	}
 	// Picked names: a span matches if its service is one of ServiceNames (the
 	// whole service) or its (service, span name) is one of SpanNames, so

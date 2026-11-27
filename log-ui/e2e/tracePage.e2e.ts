@@ -337,3 +337,25 @@ test('the name picker says when the names can\'t be loaded and offers retry', as
   await page.getByTestId('name-picker-retry').click()
   await expect(page.getByTestId('name-picker-service')).toHaveCount(1)
 })
+
+test('the optional user column shows each request\'s user, and its filter reaches the list and the count', async ({ page }) => {
+  const alice = span('GET /recordings', { spanId: '00000000000000e1', status: 'ok', tags: [{ key: 'enduser.id', value: 'alice@example.test' }] })
+  const bob = span('GET /recordings', { spanId: '00000000000000e2', status: 'ok', tags: [{ key: 'user.id', value: 'bob' }] })
+  const api = await mockApi(page, (body) => ({ spans: body.user_name === 'alice' ? [alice] : [alice, bob] }), () => ({ count: 2 }))
+  await page.goto('/')
+  await expect(rows(page)).toHaveCount(2)
+  // The column is off by default.
+  await expect(page.getByTestId('filter-user')).toHaveCount(0)
+
+  await page.getByTestId('columns').click()
+  await page.locator('.p-multiselect-item', { hasText: 'user' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('td', { hasText: 'alice@example.test' })).toHaveCount(1)
+  await expect(page.locator('td', { hasText: /^bob$/ })).toHaveCount(1)
+
+  await page.getByTestId('filter-user').fill('alice')
+  await expect(rows(page)).toHaveCount(1)
+  expect(api.spanRequests.at(-1)!.user_name).toBe('alice')
+  expect(api.countRequests.at(-1)!.user_name).toBe('alice')
+  expect(api.spanRequests.at(-1)!.scope).toBe('all')
+})

@@ -44,7 +44,7 @@
             <PrimeButton v-if="total.state === 'failed'" type="button" label="Retry total" size="small" text @click="retryTotal" data-testid="retry-total"/>
           </div>
           <div class="text-xs opacity-80 mt-1" data-testid="filter-scope">
-            Name, status, service and minimum duration filters select spans by their own recorded values; they never search log text. Logs appear under an expanded span by exact trace and span id, whatever their severity.
+            Name, status, service, user and minimum duration filters select spans by their own recorded values; they never search log text. Logs appear under an expanded span by exact trace and span id, whatever their severity.
           </div>
           <div v-if="notice" class="flex items-center gap-2 mt-2 text-red-600" data-testid="notice">
             <span>{{ notice }}</span>
@@ -356,6 +356,9 @@ export default defineComponent({
       {field: 'serviceTags', header: 'serviceTags', filter: false, filterPlaceHolder: 'Filter by service tags'},
       {field: 'msg', header: 'msg', filter: false, filterPlaceHolder: 'Filter by msg'},
       {field: 'service', header: 'service', filter: true, filterPlaceHolder: 'Filter by service'},
+      // The span's user (enduser.id, user.id or user.name), to tell apart the
+      // requests of different users; optional, off by default.
+      {field: 'user', header: 'user', filter: true, filterPlaceHolder: 'Filter by user'},
       {field: 'statusMessage', header: 'statusMessage', filter: false, filterPlaceHolder: 'Filter by statusMessage'}
     ])
     const defaultColumns = ref([
@@ -374,6 +377,7 @@ export default defineComponent({
         rowsPerPage: rowsPerPage.value,
         status: filterStatus.value || undefined,
         serviceName: filters.value['service'] || undefined,
+        userName: filters.value['user'] || undefined,
         methodName: filterByMethodName.value || undefined,
         minDurationMs: minDurationMs(),
         ...filterOf(picks.value)
@@ -589,7 +593,7 @@ export default defineComponent({
     }
 
     function filterChanged () {
-      const searching = !!(filterStatus.value || filterByMethodName.value || filters.value['service'] || minDurationMs() || hasPicks(picks.value))
+      const searching = !!(filterStatus.value || filterByMethodName.value || filters.value['service'] || filters.value['user'] || minDurationMs() || hasPicks(picks.value))
       if (searching && !scopeChosen && scope.value === 'root') {
         scope.value = 'all'
         scopeAuto.value = true

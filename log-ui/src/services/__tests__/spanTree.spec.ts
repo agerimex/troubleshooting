@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ROOT_PARENT, PARENT_LOOP, PARENT_NOT_IN_WINDOW, PARENT_NOT_LOADED, addMs, buildTraceTree, createItem, durationMsText, expandAll,
-  findNode, formatNs, replaceNode, toNs, toNsExclusiveEnd, type SpanNodeData, type TreeNode
+  findNode, formatNs, replaceNode, toNs, toNsExclusiveEnd, userOf, type SpanNodeData, type TreeNode
 } from '@/services/spanTree'
 import { type Span } from '@/types/filter'
 
@@ -93,5 +93,16 @@ describe('durations', () => {
     expect(durationMsText(-1)).toBe('invalid')
     expect(durationMsText(0)).toBe('0.000')
     expect(durationMsText(150000)).toBe('150.000')
+  })
+})
+
+describe('the user of a span', () => {
+  const withTags = (tags: Record<string, string>): Span => ({ ...span('1', ROOT_PARENT), tags: Object.entries(tags).map(([key, value]) => ({ key, value })) })
+  it('reads enduser.id, then user.id, then user.name; empty when none is recorded', () => {
+    expect(userOf(withTags({ 'user.name': 'Alice', 'enduser.id': 'u-17' }))).toBe('u-17')
+    expect(userOf(withTags({ 'user.name': 'Alice', 'user.id': 'u-18' }))).toBe('u-18')
+    expect(userOf(withTags({ 'user.name': 'Alice' }))).toBe('Alice')
+    expect(userOf(withTags({ 'http.method': 'GET' }))).toBe('')
+    expect((createItem(withTags({ 'enduser.id': 'u-17' })).data as SpanNodeData).user).toBe('u-17')
   })
 })
