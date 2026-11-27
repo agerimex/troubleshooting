@@ -24,9 +24,9 @@
         <button type="button" class="link" @click="promptOpen = false">Close</button>
       </div>
     </div>
-    <p v-if="model.overlaps.length" class="note" data-testid="seq-overlap">
-      {{ model.overlaps[0].aName }} and {{ model.overlaps[0].bName }} overlap for {{ fmtMs(model.overlaps[0].overlapMs) }} ms (recorded intervals, both in flight; not a dependency or a join).
-      <template v-if="model.overlaps.length > 1"> {{ model.overlaps.length - 1 }} more overlap(s).</template>
+    <p v-if="overlaps.length" class="note" data-testid="seq-overlap">
+      {{ overlaps[0].aName }} and {{ overlaps[0].bName }} overlap for {{ fmtMs(overlaps[0].overlapMs) }} ms (recorded intervals, both in flight; not a dependency or a join).
+      <template v-if="overlaps.length > 1"> {{ overlaps.length - 1 }} more overlap(s).</template>
       <button type="button" class="link" @click="$emit('show-timing')" data-testid="seq-overlap-timing">See Timing</button>
     </p>
     <p v-for="(l, i) in model.limitations" :key="i" class="note warn" data-testid="seq-limitation">{{ l }}</p>
@@ -59,7 +59,7 @@
         <div v-for="e in page.events" :key="e.id" class="row">
           <button v-if="e.kind === 'call' || e.kind === 'message'" type="button" class="arrow" :class="{ sel: isSelected(e), rtl: col(e.target!) < col(e.participant), msg: e.kind === 'message' }"
             :style="arrowStyle(e)" :aria-pressed="isSelected(e)" @click="pick(e)" :data-testid="e.kind === 'message' ? 'seq-message' : 'seq-call'" :data-span-key="e.spanKey">
-            <span class="lbl">+{{ fmtMs(e.timeMs ?? 0) }} ms · {{ e.kind === 'message' ? 'Message' : 'Call' }}<template v-if="repeatOf(e)"> {{ repeatOf(e) }}</template><br><b>{{ e.label }}</b><template v-if="!targetObserved(e)"> <i>(peer not instrumented)</i></template></span>
+            <span class="lbl">+{{ fmtMs(e.timeMs ?? 0) }} ms · {{ e.kind === 'message' ? 'Message' : 'Call' }}<template v-if="repeatOf(e)"> {{ repeatOf(e) }}</template><br><b>{{ e.label }}</b><i v-if="!targetObserved(e)" class="peer">(peer not instrumented)</i></span>
             <span class="line"/>
           </button>
           <button v-else type="button" class="mark" :class="[e.kind, statusClass(e), { sel: isSelected(e) }]" :style="markStyle(e)"
@@ -79,7 +79,7 @@
 
 <script lang="ts">
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue'
-import { activationOf, agentPrompt, eventText, fmtMs, hiddenOperations, laneOf, lanes, locate, OTHER_LANE, pageOf, visibleEvents, type SeqEvent, type SequenceModel } from '@/services/sequence'
+import { activationOf, agentPrompt, eventText, fmtMs, hiddenOperations, laneOf, lanes, locate, OTHER_LANE, pageOf, visibleEvents, visibleOverlaps, type SeqEvent, type SequenceModel } from '@/services/sequence'
 import { type Report } from '@/types/report'
 
 // SequenceView draws the sequence model: one column per participant (at most
@@ -124,6 +124,7 @@ export default defineComponent({
     const hiddenSet = computed(() => new Set(hidden.value))
     const hiddenCount = computed(() => hiddenOperations(props.model, hiddenSet.value))
     const events = computed(() => visibleEvents(props.model, showInternal.value, props.selected, hiddenSet.value))
+    const overlaps = computed(() => visibleOverlaps(props.model, events.value))
     const page = computed(() => pageOf(events.value, start.value, props.maxMarks))
     const laneSet = computed(() => {
       const used = new Set(events.value.flatMap((e) => [e.participant, e.target ?? e.participant]))
@@ -234,7 +235,7 @@ export default defineComponent({
     const repeatOf = (e: SeqEvent) => { const r = opOf(e)?.repeat; return r ? `(repeat ${r.index} of ${r.count})` : '' }
     const targetObserved = (e: SeqEvent) => opOf(e)?.targetObserved ?? true
     return {
-      root, narrow, showInternal, start, page, laneSet, hidden, toggleParticipant, hiddenCount, promptOpen, promptBox, promptText, copied, copyFailed, copyPrompt, lanesShown, col, hiddenErrors, locateSelection, isSelected, pick, arrowStyle, markStyle, activation, activationStyle,
+      root, narrow, showInternal, start, page, overlaps, laneSet, hidden, toggleParticipant, hiddenCount, promptOpen, promptBox, promptText, copied, copyFailed, copyPrompt, lanesShown, col, hiddenErrors, locateSelection, isSelected, pick, arrowStyle, markStyle, activation, activationStyle,
       kindWord, statusClass, repeatOf, targetObserved, eventText, fmtMs, laneOf, OTHER_LANE
     }
   }
@@ -282,6 +283,7 @@ export default defineComponent({
 .d { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .n { color: #fcd34d; }
 .arrow { position: absolute; top: 0; height: 54px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--text-color); font: inherit; }
+.lbl .peer { margin-left: 0.3em; }
 .lbl { display: block; text-align: center; font-size: 12px; line-height: 1.3; border-radius: 4px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .line { position: absolute; left: 0; right: 0; bottom: 10px; height: 2px; background: #60a5fa; }
 .line::after { content: ''; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left: 7px solid #60a5fa; border-right: 0; }

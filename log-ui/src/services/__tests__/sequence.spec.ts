@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activationOf, agentPrompt, buildSequence, endpointLabels, eventText, hiddenOperations, lanes, locate, pageOf, pairEndpoints, sequenceExport, visibleEvents, OTHER_LANE, type SeqEvent } from '@/services/sequence'
+import { activationOf, agentPrompt, buildSequence, endpointLabels, eventText, hiddenOperations, lanes, visibleOverlaps, locate, pageOf, pairEndpoints, sequenceExport, visibleEvents, OTHER_LANE, type SeqEvent } from '@/services/sequence'
 import { timeline } from '@/services/problems'
 import { type Report } from '@/types/report'
 import { type Span } from '@/types/filter'
@@ -289,6 +289,14 @@ describe('hidden participants and the agent prompt', () => {
     expect(hiddenOperations(m, hidden)).toBe(1)
     // The selected operation stays, even when it touches a hidden participant.
     expect(visibleEvents(m, true, put.id, hidden).some((e) => e.operationId === put.id)).toBe(true)
+  })
+
+  it('the overlap note names only overlaps of operations the view shows', () => {
+    const m = buildSequence(report('error'))
+    expect(visibleOverlaps(m, visibleEvents(m, true, null))).toHaveLength(1)
+    const thumb = m.operations.find((o) => o.name === 'GenerateThumbnail')!
+    const hidden = new Set([thumb.target === thumb.source ? thumb.source : thumb.target])
+    expect(visibleOverlaps(m, visibleEvents(m, true, null, hidden))).toHaveLength(0)
   })
 
   it('the prompt asks for an explanation from the evidence and carries what the view shows', () => {
