@@ -422,6 +422,14 @@ export function hiddenOperations (model: SequenceModel, hidden: ReadonlySet<stri
   return model.operations.filter((o) => hidden.has(o.source) || hidden.has(o.target)).length
 }
 
+// visibleOverlaps keeps the overlaps whose two spans both belong to an
+// operation the view shows: an overlap of hidden calls is not named.
+export function visibleOverlaps (model: SequenceModel, events: SeqEvent[]): SeqOverlap[] {
+  const ops = new Set(events.map((e) => e.operationId))
+  const keys = new Set(model.operations.filter((o) => ops.has(o.id)).flatMap((o) => o.spanKeys))
+  return model.overlaps.filter((o) => keys.has(o.a) && keys.has(o.b))
+}
+
 // agentPrompt is a prompt for an AI agent asking it to explain this execution,
 // with the evidence it needs: what the view shows (after its filters), the
 // failed spans with their status messages, and the trace's logs. It holds
