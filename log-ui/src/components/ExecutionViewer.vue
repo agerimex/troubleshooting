@@ -172,7 +172,7 @@
 </template>
 
 <script lang="ts">
-import { computed, defineComponent, reactive, ref, type PropType } from 'vue'
+import { computed, defineComponent, reactive, ref, watch, type PropType } from 'vue'
 import PrimeButton from 'primevue/button'
 import Tag from 'primevue/tag'
 import TraceTimeline from '@/components/problems/TraceTimeline.vue'
@@ -305,6 +305,8 @@ export default defineComponent({
       comparing.value = false
       try { window.localStorage.setItem(VIEW_PREFERENCE_KEY, v) } catch { /* a convenience only */ }
     }
+    // A link to this execution with another view switches it in place.
+    watch(() => props.initialViewChoice, (v) => { if (v) setView(v) })
 
     const reportWindow = ref({ ...props.initialWindow })
     const report = ref<Report | null>(null)

@@ -206,6 +206,18 @@ test('NAV-EXP-009: an old investigate link with view=timing opens Timeline', asy
   await expect(page.getByTestId('inspector-span')).toHaveText('upload_recording')
 })
 
+test('a link to the open execution with another view switches the view and keeps the report', async ({ page }) => {
+  const api = await mockApi(page, () => ({ spans: [] }), () => ({ count: 0 }), { report })
+  const link = `/#/executions?trace=${TRACE}&from=1760090000000000000&to=1760093600000000000&span=${child.spanId}`
+  await page.goto(link + '&view=timeline')
+  await expect(page.getByTestId('trace-timeline')).toBeVisible()
+  await page.evaluate((h) => { window.location.hash = h }, link.slice(2) + '&view=sequence')
+  await expect(page.getByTestId('sequence')).toBeVisible()
+  await expect(page.getByTestId('view-sequence')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('inspector-span')).toHaveText('upload_recording')
+  expect(api.reportRequests).toHaveLength(1)
+})
+
 test('an invalid link opens the page with an explanation instead of guessing a trace', async ({ page }) => {
   await mockApi(page, () => ({ spans: [] }), () => ({ count: 0 }), { report })
   await page.goto('/#/executions?trace=123&from=1&to=2')

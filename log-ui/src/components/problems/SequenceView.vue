@@ -274,8 +274,11 @@ export default defineComponent({
 .activation.open-top.open-bottom { mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
 .mark { position: absolute; top: 6px; height: 42px; text-align: left; background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 6px;
   color: var(--text-color); padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
-.mark.end { border-style: dashed; background: transparent; }
-.mark.log, .mark.bad { background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.5); color: #fca5a5; }
+/* Marks sit above the lifelines and the activation bar, so neither runs
+   through their text: an end mark keeps the diagram's background. */
+.mark { z-index: 1; }
+.mark.end { border-style: dashed; background: var(--surface-ground); }
+.mark.log, .mark.bad { background: linear-gradient(rgba(248, 113, 113, 0.12), rgba(248, 113, 113, 0.12)), var(--surface-ground); border-color: rgba(248, 113, 113, 0.5); color: #fca5a5; }
 .mark.sel, .arrow.sel .lbl { outline: 2px solid var(--primary-color); outline-offset: 1px; }
 .mark:focus-visible, .arrow:focus-visible, .item:focus-visible, .chk input:focus-visible { outline: 2px solid var(--primary-color); }
 .t { color: var(--text-color-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

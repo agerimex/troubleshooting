@@ -114,6 +114,10 @@ export default defineComponent({
       if (route.target && !sameTarget(target.value, route.target)) {
         targetKey.value++
         target.value = route.target
+      } else if (route.target?.view && target.value && target.value.view !== route.target.view) {
+        // The open execution with another view in the link: switch the view,
+        // keep the loaded report.
+        target.value = { ...target.value, view: route.target.view }
       }
       show(route.page)
     }
