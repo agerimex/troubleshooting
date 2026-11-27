@@ -81,7 +81,7 @@ The Sequence view draws services as lanes and calls as arrows. A CLIENT span wit
 ![Sequence with PostgreSQL hidden](/screenshots/exec-sequence-hidden.png)
 *The slow `start_session` with `postgresql` unticked: its 21 queries are hidden, leaving the permission check and the call to the directory service.*
 
-**Prompt for an agent** builds a prompt asking an AI agent to explain the execution from the evidence: what the view shows (after its filters, and saying what was hidden), the failed spans with their status messages and the trace's logs. Copy it into your agent. It contains trace ids, service and span names and log messages, so paste it only where that is allowed. At most 6 lanes and 80 marks fit on a page.
+**Prompt for an agent** builds a prompt for an AI coding agent that works in your services' source code. It asks the agent to find the code behind each recorded call (as file:line), explain what it does and why it is designed that way, say where the time goes and where the code and the trace disagree, and change nothing. The prompt carries what the view shows (after its filters, saying what was hidden): the calls as a tree with timings, statuses and attributes such as SQL statements and routes, the services' versions, the calls that ran concurrently, the failed spans and the logs. It contains service and span names, attributes and log messages, so paste it only where that is allowed. At most 6 lanes and 80 marks fit on a page.
 
 ![Sequence view](/screenshots/exec-sequence.png)
 *A failed `start_recording` as a sequence: the API and worker lanes, start and end markers, and the ERROR log flagged as recorded outside its span's interval.*

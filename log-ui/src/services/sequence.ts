@@ -1,5 +1,5 @@
 import { ROOT_PARENT } from '@/services/spanTree'
-import { association, escapeHtml, htmlPage, reportHtmlBody, sortedLogs } from '@/services/report'
+import { association, escapeHtml, htmlPage, reportHtmlBody, serviceVersion, sortedLogs } from '@/services/report'
 import { isErrorSeverity, offsetMs, spanKey, traceStart } from '@/services/problems'
 import { type Span } from '@/types/filter'
 import { type LogRecord, type Report } from '@/types/report'
@@ -430,24 +430,103 @@ export function visibleOverlaps (model: SequenceModel, events: SeqEvent[]): SeqO
   return model.overlaps.filter((o) => keys.has(o.a) && keys.has(o.b))
 }
 
-// agentPrompt is a prompt for an AI agent asking it to explain this execution,
-// with the evidence it needs: what the view shows (after its filters), the
-// failed spans with their status messages, and the trace's logs. It holds
-// trace ids, service and span names and log messages: what the report holds.
+const PROMPT_MAX_SPANS = 300
+const PROMPT_MAX_ATTRIBUTES = 30
+const PROMPT_MAX_VALUE = 300
+
+function promptValue (v: string): string {
+  const one = v.replace(/\s+/g, ' ').trim()
+  return one.length > PROMPT_MAX_VALUE ? one.slice(0, PROMPT_MAX_VALUE) + '…' : one
+}
+
+// Attributes that locate code come first (the list is capped and the
+// receiver stores maps in random order); client network details are noise for
+// reading code and are left out.
+const PROMPT_FIRST = ['code.', 'http.route', 'http.method', 'http.request.method', 'url.path', 'http.target', 'rpc.', 'messaging.', 'db.system', 'db.operation', 'db.statement', 'db.query.text', 'peer.service', 'server.address', 'exception.']
+const PROMPT_SKIP = ['http.user_agent', 'user_agent.original', 'http.client_ip', 'client.address', 'net.peer.ip', 'net.peer.port', 'net.sock.peer.addr', 'net.sock.peer.port', 'network.peer.address', 'network.peer.port', 'client.port', 'net.transport', 'http.flavor', 'network.protocol.version', 'http.scheme']
+
+function promptRank (key: string): number {
+  const i = PROMPT_FIRST.findIndex((p) => (p.endsWith('.') ? key.startsWith(p) : key === p))
+  return i < 0 ? PROMPT_FIRST.length : i
+}
+
+function promptAttributes (list: Record<string, string>[] | undefined): string {
+  const all = (list ?? []).filter((t) => t.key && t.value !== '' && !PROMPT_SKIP.includes(t.key))
+    .sort((a, b) => promptRank(a.key) - promptRank(b.key) || a.key.localeCompare(b.key))
+  const shown = all.slice(0, PROMPT_MAX_ATTRIBUTES).map((t) => `${t.key}=${promptValue(t.value)}`)
+  return shown.join('; ') + (all.length > shown.length ? `; … ${all.length - shown.length} more` : '')
+}
+
+// promptSpanTree lists the spans by recorded parentage, in start order, each
+// with its timing, kind, status and attributes (what an agent searches the
+// code for: span names, db.statement, http.route, code.* …). Spans that keep
+// rejects are left out; their children move up a level.
+function promptSpanTree (spans: Span[], keep: (s: Span) => boolean): string[] {
+  const origin = traceStart(spans)
+  const ids = new Set(spans.map((x) => x.spanId))
+  const children = new Map<string, Span[]>()
+  const tops: Span[] = []
+  const byStart = (a: Span, b: Span) => { const x = BigInt(a.timeStamp); const y = BigInt(b.timeStamp); return x < y ? -1 : x > y ? 1 : 0 }
+  for (const x of spans) {
+    if (!x.parentSpanId || x.parentSpanId === ROOT_PARENT || !ids.has(x.parentSpanId)) tops.push(x)
+    else children.set(x.parentSpanId, [...(children.get(x.parentSpanId) ?? []), x])
+  }
+  const out: string[] = []
+  let listed = 0
+  let left = 0
+  const seen = new Set<string>()
+  const walk = (x: Span, depth: number) => {
+    if (seen.has(x.spanId)) return
+    seen.add(x.spanId)
+    let next = depth
+    if (keep(x)) {
+      next = depth + 1
+      if (listed >= PROMPT_MAX_SPANS) {
+        left++
+      } else {
+        listed++
+        const at = origin !== null ? `+${fmtMs(offsetMs(x.timeStamp, origin))} ms` : 'time unknown'
+        const took = x.duration < 0 ? 'no valid duration' : `${fmtMs(x.duration / 1000)} ms`
+        const pad = '  '.repeat(depth)
+        const status = (x.status || 'unset').toUpperCase() + (x.statusMessage ? `: ${promptValue(x.statusMessage)}` : '')
+        out.push(`${pad}- ${at}, ${took} · ${(x.spanKind || 'kind unknown').toUpperCase()} · ${x.service} · "${x.name}" · ${status}`)
+        const attrs = promptAttributes(x.tags)
+        if (attrs) out.push(`${pad}  attributes: ${attrs}`)
+        if (x.parentSpanId && x.parentSpanId !== ROOT_PARENT && !ids.has(x.parentSpanId)) out.push(`${pad}  (its parent span is not in the report)`)
+      }
+    }
+    for (const c of (children.get(x.spanId) ?? []).sort(byStart)) walk(c, next)
+  }
+  for (const t of tops.sort(byStart)) walk(t, 0)
+  if (left) out.push(`- … ${left} more spans not listed`)
+  return out
+}
+
+// agentPrompt is a prompt for an AI coding agent that works in the source
+// code of the services: explain this execution in terms of the code and why
+// it is designed that way. It carries what the view shows (after its
+// filters) as the span tree with attributes, the services' versions and
+// resource attributes, concurrent calls, the failed spans with their status
+// messages and the trace's logs. It holds trace ids, service and span names,
+// attributes and log messages: what the report holds.
 export function agentPrompt (model: SequenceModel, report: Report, view: { events: SeqEvent[], hidden: string[], showInternal: boolean, selectedKey: string | null }): string {
   const spans = report.spans.records
   const root = spans.find((x) => !x.parentSpanId || x.parentSpanId === ROOT_PARENT)
   const selected = view.selectedKey ? spans.find((x) => spanKey(x) === view.selectedKey) : undefined
   const lines: string[] = []
-  lines.push('You are helping investigate one execution (one trace) recorded by Troubleshooting from OpenTelemetry spans and logs.')
+  lines.push('You are working in the source code of the services that produced one execution (one trace), recorded by Troubleshooting from OpenTelemetry spans and logs. The trace below is what the code actually did at run time.')
   lines.push('')
-  lines.push('Task: explain what happened in this execution, step by step: which service called which and in what order, how long the parts took, and where and why it failed or slowed down. Use only the evidence below. Say when the evidence is incomplete or does not show a cause; do not invent calls, timings, errors or causes. Times are milliseconds from the trace start.')
+  lines.push('Task: explain this execution in terms of the code and its design.')
+  lines.push('1. Find the code behind each recorded span: start at the entry operation, then follow the code path that makes each recorded call, in the recorded order. Search for span names, routes, statements and code.* attributes; name each place as file:line.')
+  lines.push('2. Explain what the code does at each step and why it is designed that way: what each call is for, why calls run one after another or concurrently (compare with the concurrent calls below), and what the design trades off. Take the reasons from the code, its comments, the docs and the git history; when a reason is not written down, say so instead of guessing.')
+  lines.push('3. Say where the time goes and whether the code explains it, and where the code and the trace disagree: a call the code makes that is not recorded, or a recorded call you cannot find. Name possible reasons (another version, a branch not taken, missing instrumentation) without picking one the evidence does not support.')
+  lines.push('Do not change any code; this is an explanation. Use only the evidence below and the repository; do not invent calls, timings, errors or causes. Times are milliseconds from the trace start; durations are recorded span durations.')
   if (selected) {
     lines.push(`Focus on the selected operation "${selected.name}" of ${selected.service} and how it relates to the rest.`)
   }
   lines.push('')
   lines.push('## Execution')
-  lines.push(`- Trace ${model.traceId}${root ? `, entry "${root.name}" of ${root.service}` : ''}, ${fmtMs(model.totalMs)} ms from first start to last end, ${model.spanCount} spans, ${report.logs.records.length} logs.`)
+  lines.push(`- ${root ? `Entry "${root.name}" of ${root.service}` : 'Entry span not in the report'}, ${fmtMs(model.totalMs)} ms from first start to last end, ${model.spanCount} spans, ${report.logs.records.length} logs.`)
   const partial = report.spans.status !== 'ok' || report.logs.status !== 'ok' || report.spans.truncated || report.logs.truncated
   lines.push(`- Report: ${partial ? 'partial (see the limitations)' : 'complete within its window'}.`)
   for (const l of model.limitations) lines.push(`- Limitation: ${l}`)
@@ -456,27 +535,48 @@ export function agentPrompt (model: SequenceModel, report: Report, view: { event
   if (model.unobserved.length) lines.push(`- Peers seen only from their callers (no spans of their own): ${model.unobserved.join(', ')}.`)
   if (view.hidden.length) lines.push(`- Left out of this view by the user: ${view.hidden.join(', ')}, and every call to or from them.`)
   if (!view.showInternal) lines.push('- Internal operations are left out of this view.')
+  // Only what the view shows: spans of shown operations, their services and
+  // logs (a log of a hidden span is left out; one without a span stays).
+  const ops = new Set(view.events.map((e) => e.operationId))
+  const shown = new Set(model.operations.filter((o) => ops.has(o.id)).flatMap((o) => o.spanKeys))
+  const shownSpans = spans.filter((x) => shown.has(spanKey(x)))
   lines.push('')
-  lines.push('## Sequence')
-  lines.push('Arrows are calls (or one-way messages); "ended" is a span completion, not a response.')
-  const max = 300
-  for (const e of view.events.slice(0, max)) lines.push('- ' + eventText(e, model))
-  if (view.events.length > max) lines.push(`- … ${view.events.length - max} more marks not listed`)
-  const failed = spans.filter((x) => x.status === 'error')
+  lines.push('## Services')
+  lines.push('Check that the code you read is the recorded version.')
+  for (const svc of [...new Set(shownSpans.map((x) => x.service))]) {
+    const first = shownSpans.find((x) => x.service === svc)!
+    const version = serviceVersion(first)
+    const res = promptAttributes((first.serviceTags ?? []).filter((t) => t.key !== 'service.name' && t.key !== 'service.version'))
+    lines.push(`- ${svc}: ${version ? 'version ' + version : 'version not recorded'}${res ? `; resource: ${res}` : ''}`)
+  }
+  lines.push('')
+  lines.push('## Spans')
+  lines.push('By recorded parentage (indented under the span that started them), in start order: start, duration, kind, service, name, status, then the span attributes.')
+  lines.push(...promptSpanTree(spans, (x) => shown.has(spanKey(x))))
+  const concurrent = visibleOverlaps(model, view.events)
+  if (concurrent.length) {
+    lines.push('')
+    lines.push('## Concurrent calls')
+    lines.push('Sibling spans whose recorded intervals overlap (both in flight; not a dependency).')
+    for (const o of concurrent.slice(0, 20)) lines.push(`- "${o.aName}" and "${o.bName}" overlap for ${fmtMs(o.overlapMs)} ms, from +${fmtMs(o.fromMs)} ms`)
+    if (concurrent.length > 20) lines.push(`- … ${concurrent.length - 20} more overlaps not listed`)
+  }
+  const failed = shownSpans.filter((x) => x.status === 'error')
   if (failed.length) {
     lines.push('')
     lines.push('## Failed spans')
-    for (const x of failed) lines.push(`- "${x.name}" of ${x.service}${x.statusMessage ? `: ${x.statusMessage}` : ' (no status message recorded)'}`)
+    for (const x of failed) lines.push(`- "${x.name}" of ${x.service}${x.statusMessage ? `: ${promptValue(x.statusMessage)}` : ' (no status message recorded)'}`)
   }
-  const logs = sortedLogs(report.logs.records)
+  const spanOf = (l: LogRecord) => (l.spanId ? spans.find((x) => x.spanId === l.spanId && x.traceId === l.traceId) : undefined)
+  const logs = sortedLogs(report.logs.records).filter((l) => { const s = spanOf(l); return !s || shown.has(spanKey(s)) })
   if (logs.length) {
     lines.push('')
     lines.push('## Logs')
     const origin = traceStart(spans)
     for (const l of logs.slice(0, 200)) {
       const at = origin !== null ? `+${fmtMs(offsetMs(l.timeUnixNano, origin))} ms ` : ''
-      const span = l.spanId ? spans.find((x) => x.spanId === l.spanId && x.traceId === l.traceId) : undefined
-      lines.push(`- ${at}${l.severity || 'no level'} ${l.service}${span ? ` in "${span.name}"` : ''}: ${l.message}`)
+      const span = spanOf(l)
+      lines.push(`- ${at}${l.severity || 'no level'}${l.service ? ' ' + l.service : ''}${span ? ` in "${span.name}"` : ''}: ${l.message}`)
     }
     if (logs.length > 200) lines.push(`- … ${logs.length - 200} more logs not listed`)
   }
