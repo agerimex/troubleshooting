@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activationOf, buildSequence, endpointLabels, eventText, lanes, locate, pageOf, pairEndpoints, sequenceExport, visibleEvents, OTHER_LANE, type SeqEvent } from '@/services/sequence'
+import { activationOf, agentPrompt, buildSequence, endpointLabels, eventText, hiddenOperations, lanes, locate, pageOf, pairEndpoints, sequenceExport, visibleEvents, OTHER_LANE, type SeqEvent } from '@/services/sequence'
 import { timeline } from '@/services/problems'
 import { type Report } from '@/types/report'
 import { type Span } from '@/types/filter'
@@ -273,5 +273,39 @@ describe('messages: PRODUCER → CONSUMER', () => {
     const out = sequenceExport(m, rep(spans), { view: 'sequence', selected: null, showInternal: true, logScope: 'span' })
     expect(out.operations.filter((o) => o.kind === 'message')).toHaveLength(2)
     expect(out.events.filter((e) => e.text.includes('worker → api · message publish <default>'))).toHaveLength(2)
+  })
+})
+
+describe('hidden participants and the agent prompt', () => {
+  it('hiding a participant leaves out every operation to or from it and its log markers, but not the selected one', () => {
+    const m = buildSequence(report('error'))
+    const all = visibleEvents(m, true, null)
+    const hidden = new Set(['object-storage'])
+    const shown = visibleEvents(m, true, null, hidden)
+    const put = m.operations.find((o) => o.name === 'PutObject')!
+    expect(all.some((e) => e.operationId === put.id)).toBe(true)
+    expect(shown.some((e) => e.operationId === put.id)).toBe(false)
+    expect(shown.some((e) => e.kind === 'log' && e.participant === 'object-storage')).toBe(false)
+    expect(hiddenOperations(m, hidden)).toBe(1)
+    // The selected operation stays, even when it touches a hidden participant.
+    expect(visibleEvents(m, true, put.id, hidden).some((e) => e.operationId === put.id)).toBe(true)
+  })
+
+  it('the prompt asks for an explanation from the evidence and carries what the view shows', () => {
+    const r = report('error')
+    const m = buildSequence(r)
+    const hidden = new Set(['object-storage'])
+    const events = visibleEvents(m, true, null, hidden)
+    const text = agentPrompt(m, r, { events, hidden: [...hidden], showInternal: true, selectedKey: null })
+    expect(text).toContain('Use only the evidence below')
+    expect(text).toContain('do not invent')
+    expect(text).toContain(r.traceId)
+    expect(text).toContain('Left out of this view by the user: object-storage')
+    expect(text).toContain('## Failed spans')
+    expect(text).toContain('## Logs')
+    expect(text).not.toContain('call PutObject')
+    for (const e of events) expect(text).toContain(eventText(e, m))
+    const focused = agentPrompt(m, r, { events, hidden: [], showInternal: true, selectedKey: m.operations.find((o) => o.name === 'PutObject')!.id })
+    expect(focused).toContain('Focus on the selected operation "PutObject"')
   })
 })

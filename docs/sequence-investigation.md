@@ -55,6 +55,12 @@ unchanged. Uncommitted at the time of writing.
   associations and never fetched.
 - **Internal operations** checkbox hides local operations (presentation
   only; the selected span and log markers stay).
+- **Show** hides a participant with every operation to or from it and the
+  logs of those calls (presentation only; the selected operation stays, the
+  report and exports keep everything; a note counts what is hidden).
+- **Prompt for an agent** builds a prompt asking an AI agent to explain the
+  execution from the evidence the view shows (and what it hides), the failed
+  spans with their status messages and the logs, with a Copy button.
 - **Timing** is the existing timeline. The view starts as Sequence for error
   problems and Timing for slow calls and regressions, then keeps the user's
   last choice per problem type (browser storage).

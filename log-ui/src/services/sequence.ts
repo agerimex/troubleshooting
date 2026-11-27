@@ -393,14 +393,86 @@ export interface SequencePage {
   total: number
 }
 
-// visibleEvents applies the internal-operation filter (presentation only),
-// then pages by maxMarks. Events of the selected span are never filtered out.
-export function visibleEvents (model: SequenceModel, showInternal: boolean, selectedKey: string | null): SeqEvent[] {
-  if (showInternal) {
-    return model.events
+// visibleEvents applies the presentation filters: internal operations, and
+// hidden participants (an operation that starts or ends on a hidden
+// participant, such as every call to a database, is left out with its marks,
+// and so are the hidden participants' log markers). The selected operation is
+// never filtered out.
+export function visibleEvents (model: SequenceModel, showInternal: boolean, selectedKey: string | null, hidden: ReadonlySet<string> = new Set()): SeqEvent[] {
+  const out = new Set<string>() // operations left out
+  const outByParticipant = new Set<string>() // ... because they touch a hidden participant
+  for (const o of model.operations) {
+    if (selectedKey && o.spanKeys.includes(selectedKey)) continue
+    const touchesHidden = hidden.has(o.source) || hidden.has(o.target)
+    if (touchesHidden) outByParticipant.add(o.id)
+    if (touchesHidden || (!showInternal && o.kind === 'local')) out.add(o.id)
   }
-  const local = new Set(model.operations.filter((o) => o.kind === 'local').map((o) => o.id))
-  return model.events.filter((e) => !local.has(e.operationId) || e.kind === 'log' || e.operationId === selectedKey || e.spanKey === selectedKey)
+  return model.events.filter((e) => {
+    if (selectedKey && (e.spanKey === selectedKey || e.operationId === selectedKey)) return true
+    // Log markers stay with hidden internal operations (as before), and leave
+    // with operations of a hidden participant (the logs of those calls).
+    if (e.kind === 'log') return !hidden.has(e.participant) && !outByParticipant.has(e.operationId)
+    return !out.has(e.operationId)
+  })
+}
+
+// hiddenOperations counts the operations a set of hidden participants leaves
+// out (for the note under the participant switches).
+export function hiddenOperations (model: SequenceModel, hidden: ReadonlySet<string>): number {
+  return model.operations.filter((o) => hidden.has(o.source) || hidden.has(o.target)).length
+}
+
+// agentPrompt is a prompt for an AI agent asking it to explain this execution,
+// with the evidence it needs: what the view shows (after its filters), the
+// failed spans with their status messages, and the trace's logs. It holds
+// trace ids, service and span names and log messages: what the report holds.
+export function agentPrompt (model: SequenceModel, report: Report, view: { events: SeqEvent[], hidden: string[], showInternal: boolean, selectedKey: string | null }): string {
+  const spans = report.spans.records
+  const root = spans.find((x) => !x.parentSpanId || x.parentSpanId === ROOT_PARENT)
+  const selected = view.selectedKey ? spans.find((x) => spanKey(x) === view.selectedKey) : undefined
+  const lines: string[] = []
+  lines.push('You are helping investigate one execution (one trace) recorded by Troubleshooting from OpenTelemetry spans and logs.')
+  lines.push('')
+  lines.push('Task: explain what happened in this execution, step by step: which service called which and in what order, how long the parts took, and where and why it failed or slowed down. Use only the evidence below. Say when the evidence is incomplete or does not show a cause; do not invent calls, timings, errors or causes. Times are milliseconds from the trace start.')
+  if (selected) {
+    lines.push(`Focus on the selected operation "${selected.name}" of ${selected.service} and how it relates to the rest.`)
+  }
+  lines.push('')
+  lines.push('## Execution')
+  lines.push(`- Trace ${model.traceId}${root ? `, entry "${root.name}" of ${root.service}` : ''}, ${fmtMs(model.totalMs)} ms from first start to last end, ${model.spanCount} spans, ${report.logs.records.length} logs.`)
+  const partial = report.spans.status !== 'ok' || report.logs.status !== 'ok' || report.spans.truncated || report.logs.truncated
+  lines.push(`- Report: ${partial ? 'partial (see the limitations)' : 'complete within its window'}.`)
+  for (const l of model.limitations) lines.push(`- Limitation: ${l}`)
+  const observed = model.participants.filter((p) => !model.unobserved.includes(p))
+  lines.push(`- Services that recorded spans: ${observed.join(', ') || 'none'}.`)
+  if (model.unobserved.length) lines.push(`- Peers seen only from their callers (no spans of their own): ${model.unobserved.join(', ')}.`)
+  if (view.hidden.length) lines.push(`- Left out of this view by the user: ${view.hidden.join(', ')}, and every call to or from them.`)
+  if (!view.showInternal) lines.push('- Internal operations are left out of this view.')
+  lines.push('')
+  lines.push('## Sequence')
+  lines.push('Arrows are calls (or one-way messages); "ended" is a span completion, not a response.')
+  const max = 300
+  for (const e of view.events.slice(0, max)) lines.push('- ' + eventText(e, model))
+  if (view.events.length > max) lines.push(`- … ${view.events.length - max} more marks not listed`)
+  const failed = spans.filter((x) => x.status === 'error')
+  if (failed.length) {
+    lines.push('')
+    lines.push('## Failed spans')
+    for (const x of failed) lines.push(`- "${x.name}" of ${x.service}${x.statusMessage ? `: ${x.statusMessage}` : ' (no status message recorded)'}`)
+  }
+  const logs = sortedLogs(report.logs.records)
+  if (logs.length) {
+    lines.push('')
+    lines.push('## Logs')
+    const origin = traceStart(spans)
+    for (const l of logs.slice(0, 200)) {
+      const at = origin !== null ? `+${fmtMs(offsetMs(l.timeUnixNano, origin))} ms ` : ''
+      const span = l.spanId ? spans.find((x) => x.spanId === l.spanId && x.traceId === l.traceId) : undefined
+      lines.push(`- ${at}${l.severity || 'no level'} ${l.service}${span ? ` in "${span.name}"` : ''}: ${l.message}`)
+    }
+    if (logs.length > 200) lines.push(`- … ${logs.length - 200} more logs not listed`)
+  }
+  return lines.join('\n')
 }
 
 export function pageOf (events: SeqEvent[], start: number, maxMarks: number): SequencePage {

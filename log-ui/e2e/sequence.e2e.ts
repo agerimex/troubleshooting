@@ -200,3 +200,33 @@ test('SEQ-UI-012: the selected call has an activation bar on its lifeline from i
   // Other end marks don't claim the selection.
   await expect(page.getByTestId('seq-end').filter({ hasText: 'end of the selection' })).toHaveCount(1)
 })
+
+test('SEQ-UI-014: a participant can be hidden with every call to it; the view says so and can show it again', async ({ page }) => {
+  await openExample(page, ['error'])
+  await expect(page.getByTestId('seq-call')).toHaveCount(2)
+  await expect(page.getByTestId('seq-participant')).toHaveText(['recording-api', 'thumbnail-worker', 'object-storage'])
+  const storage = page.getByTestId('seq-participants').locator('label', { hasText: 'object-storage' }).getByTestId('seq-participant-toggle')
+  await storage.uncheck()
+  await expect(page.getByTestId('seq-participant')).toHaveText(['recording-api', 'thumbnail-worker'])
+  await expect(page.getByTestId('seq-call').filter({ hasText: 'PutObject' })).toHaveCount(0)
+  await expect(page.getByTestId('seq-call')).toHaveCount(1)
+  await expect(page.getByTestId('seq-hidden-note')).toContainText('1 operation to or from object-storage hidden')
+  await storage.check()
+  await expect(page.getByTestId('seq-call')).toHaveCount(2)
+  await expect(page.getByTestId('seq-hidden-note')).toHaveCount(0)
+})
+
+test('SEQ-UI-015: the agent prompt explains the execution from what the view shows and can be copied', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await openExample(page, ['error'])
+  await page.getByTestId('seq-participants').locator('label', { hasText: 'object-storage' }).getByTestId('seq-participant-toggle').uncheck()
+  await page.getByTestId('seq-prompt-open').click()
+  const text = page.getByTestId('seq-prompt-text')
+  await expect(text).toHaveValue(/Use only the evidence below/)
+  await expect(text).toHaveValue(new RegExp(C.error.traceId))
+  await expect(text).toHaveValue(/Left out of this view by the user: object-storage/)
+  await expect(text).not.toHaveValue(/call PutObject/)
+  await page.getByTestId('seq-prompt-copy').click()
+  await expect(page.getByTestId('seq-prompt-copy')).toHaveText('Copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('## Sequence')
+})
