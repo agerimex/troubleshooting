@@ -78,6 +78,9 @@ The Sequence view draws services as lanes and calls as arrows. A CLIENT span wit
 
 **Show** lists the participants with a checkbox each. Unticking one hides it with every operation to or from it and the logs of those calls, for example every query to PostgreSQL in an execution that makes hundreds; a note says how many operations are hidden. The report and its exports keep them.
 
+![Sequence with PostgreSQL hidden](/screenshots/exec-sequence-hidden.png)
+*The slow `start_session` with `postgresql` unticked: its 21 queries are hidden, leaving the permission check and the call to the directory service.*
+
 **Prompt for an agent** builds a prompt asking an AI agent to explain the execution from the evidence: what the view shows (after its filters, and saying what was hidden), the failed spans with their status messages and the trace's logs. Copy it into your agent. It contains trace ids, service and span names and log messages, so paste it only where that is allowed. At most 6 lanes and 80 marks fit on a page.
 
 ![Sequence view](/screenshots/exec-sequence.png)
