@@ -58,9 +58,14 @@ unchanged. Uncommitted at the time of writing.
 - **Show** hides a participant with every operation to or from it and the
   logs of those calls (presentation only; the selected operation stays, the
   report and exports keep everything; a note counts what is hidden).
-- **Prompt for an agent** builds a prompt asking an AI agent to explain the
-  execution from the evidence the view shows (and what it hides), the failed
-  spans with their status messages and the logs, with a Copy button.
+- **Prompt for an agent** builds a prompt for an AI coding agent working in
+  the services' source code: find the code behind each recorded span
+  (file:line), explain what it does and why it is designed that way (from
+  comments, docs and history), where the time goes and where code and trace
+  disagree, without changing code. It carries what the view shows: the span
+  tree with kinds, timings, statuses and attributes, the services' versions,
+  concurrent calls, failed spans and logs; no trace id (useless in a
+  repository). Copy button.
 - **Timing** is the existing timeline. The view starts as Sequence for error
   problems and Timing for slow calls and regressions, then keeps the user's
   last choice per problem type (browser storage).

@@ -299,7 +299,7 @@ describe('hidden participants and the agent prompt', () => {
     expect(visibleOverlaps(m, visibleEvents(m, true, null, hidden))).toHaveLength(0)
   })
 
-  it('the prompt asks for an explanation from the evidence and carries what the view shows', () => {
+  it('the prompt asks a coding agent to explain the code behind what the view shows', () => {
     const r = report('error')
     const m = buildSequence(r)
     const hidden = new Set(['object-storage'])
@@ -307,12 +307,26 @@ describe('hidden participants and the agent prompt', () => {
     const text = agentPrompt(m, r, { events, hidden: [...hidden], showInternal: true, selectedKey: null })
     expect(text).toContain('Use only the evidence below')
     expect(text).toContain('do not invent')
-    expect(text).toContain(r.traceId)
+    expect(text).toContain('file:line')
+    expect(text).toContain('Do not change any code')
+    // A coding agent can do nothing with a trace id.
+    expect(text).not.toContain(r.traceId)
     expect(text).toContain('Left out of this view by the user: object-storage')
+    expect(text).toContain('## Services')
+    expect(text).toContain('## Spans')
     expect(text).toContain('## Failed spans')
     expect(text).toContain('## Logs')
-    expect(text).not.toContain('call PutObject')
-    for (const e of events) expect(text).toContain(eventText(e, m))
+    // The span tree lists the shown spans with kind and status; the hidden call is left out everywhere.
+    expect(text).toContain('· INTERNAL · recording-api · "upload_recording" · ERROR')
+    expect(text).not.toContain('"PutObject"')
+    // Attributes that locate code come first; client network noise is left out.
+    const tagged = report('error', (spans) => spans.map((x) => x.name === 'upload_recording'
+      ? { ...x, tags: [{ key: 'zz.custom', value: 'a' }, { key: 'http.user_agent', value: 'Mozilla' }, { key: 'code.function', value: 'Upload' }] }
+      : x))
+    const tm = buildSequence(tagged)
+    const tt = agentPrompt(tm, tagged, { events: visibleEvents(tm, true, null), hidden: [], showInternal: true, selectedKey: null })
+    expect(tt).toContain('attributes: code.function=Upload; zz.custom=a')
+    expect(tt).not.toContain('Mozilla')
     const focused = agentPrompt(m, r, { events, hidden: [], showInternal: true, selectedKey: m.operations.find((o) => o.name === 'PutObject')!.id })
     expect(focused).toContain('Focus on the selected operation "PutObject"')
   })

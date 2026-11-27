@@ -216,17 +216,18 @@ test('SEQ-UI-014: a participant can be hidden with every call to it; the view sa
   await expect(page.getByTestId('seq-hidden-note')).toHaveCount(0)
 })
 
-test('SEQ-UI-015: the agent prompt explains the execution from what the view shows and can be copied', async ({ page, context }) => {
+test('SEQ-UI-015: the agent prompt asks a coding agent to explain the code behind what the view shows and can be copied', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await openExample(page, ['error'])
   await page.getByTestId('seq-participants').locator('label', { hasText: 'object-storage' }).getByTestId('seq-participant-toggle').uncheck()
   await page.getByTestId('seq-prompt-open').click()
   const text = page.getByTestId('seq-prompt-text')
   await expect(text).toHaveValue(/Use only the evidence below/)
-  await expect(text).toHaveValue(new RegExp(C.error.traceId))
+  await expect(text).toHaveValue(/file:line/)
+  await expect(text).not.toHaveValue(new RegExp(C.error.traceId))
   await expect(text).toHaveValue(/Left out of this view by the user: object-storage/)
   await expect(text).not.toHaveValue(/call PutObject/)
   await page.getByTestId('seq-prompt-copy').click()
   await expect(page.getByTestId('seq-prompt-copy')).toHaveText('Copied')
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('## Sequence')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('## Spans')
 })

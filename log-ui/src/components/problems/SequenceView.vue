@@ -16,7 +16,7 @@
     </p>
     <div v-if="promptOpen && report" class="prompt" data-testid="seq-prompt">
       <div class="text-sm"><strong>Prompt for an agent</strong></div>
-      <div class="text-xs opacity-80">Asks an AI agent to explain this execution from the evidence shown here (this view's filters apply). It contains trace ids, service and span names and log messages: paste it only where that is allowed.</div>
+      <div class="text-xs opacity-80">For an AI coding agent working in the services' source code: it asks the agent to find the code behind each recorded call and explain it and its design, from what this view shows (its filters apply). It contains service and span names, span attributes (such as SQL statements) and log messages: paste it only where that is allowed.</div>
       <textarea ref="promptBox" readonly :value="promptText" rows="12" aria-label="Prompt for an agent" data-testid="seq-prompt-text"/>
       <div class="prompt-actions">
         <button type="button" class="pbtn" @click="copyPrompt" data-testid="seq-prompt-copy">{{ copied ? 'Copied' : 'Copy' }}</button>
