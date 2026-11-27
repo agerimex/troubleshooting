@@ -131,7 +131,7 @@
                 <ExecutionCompare class="mt-2" :reference="reference.spans" :current="report.spans.records" :referenceLabel="reference.label" currentLabel="this execution"/>
               </template>
             </div>
-            <SequenceView v-else-if="view === 'sequence' && seqModel" :model="seqModel" :selected="selected" @select="select" @select-log="selectLog" @show-timing="setView('timeline')"/>
+            <SequenceView v-else-if="view === 'sequence' && seqModel" :model="seqModel" :report="report" :selected="selected" @select="select" @select-log="selectLog" @show-timing="setView('timeline')"/>
             <TraceTimeline v-else :spans="report.spans.records" :selected="selected" :counts="counts" @select="select"/>
           </template>
         </div>

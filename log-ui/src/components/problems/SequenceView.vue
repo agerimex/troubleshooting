@@ -3,6 +3,26 @@
     <div class="bar">
       <label class="chk"><input type="checkbox" v-model="showInternal" data-testid="seq-internal"/> Internal operations</label>
       <span class="text-xs opacity-80" data-testid="seq-counts">{{ model.operations.length }} operations / {{ model.spanCount }} spans</span>
+      <button v-if="report" type="button" class="link" @click="promptOpen = !promptOpen" :aria-expanded="promptOpen" data-testid="seq-prompt-open">Prompt for an agent</button>
+    </div>
+    <div v-if="model.participants.length > 1" class="parts" role="group" aria-label="Participants shown" data-testid="seq-participants">
+      <span class="text-xs opacity-80">Show:</span>
+      <label v-for="p in model.participants" :key="p" class="chk part">
+        <input type="checkbox" :checked="!hidden.includes(p)" @change="toggleParticipant(p)" data-testid="seq-participant-toggle"/> {{ p }}
+      </label>
+    </div>
+    <p v-if="hidden.length" class="note" data-testid="seq-hidden-note">
+      {{ hiddenCount }} operation{{ hiddenCount === 1 ? '' : 's' }} to or from {{ hidden.join(', ') }} hidden in this view; the report and its exports keep them.
+    </p>
+    <div v-if="promptOpen && report" class="prompt" data-testid="seq-prompt">
+      <div class="text-sm"><strong>Prompt for an agent</strong></div>
+      <div class="text-xs opacity-80">Asks an AI agent to explain this execution from the evidence shown here (this view's filters apply). It contains trace ids, service and span names and log messages: paste it only where that is allowed.</div>
+      <textarea ref="promptBox" readonly :value="promptText" rows="12" aria-label="Prompt for an agent" data-testid="seq-prompt-text"/>
+      <div class="prompt-actions">
+        <button type="button" class="pbtn" @click="copyPrompt" data-testid="seq-prompt-copy">{{ copied ? 'Copied' : 'Copy' }}</button>
+        <span v-if="copyFailed" class="text-xs" data-testid="seq-prompt-select">The clipboard is not available: the text is selected, copy it with Ctrl+C.</span>
+        <button type="button" class="link" @click="promptOpen = false">Close</button>
+      </div>
     </div>
     <p v-if="model.overlaps.length" class="note" data-testid="seq-overlap">
       {{ model.overlaps[0].aName }} and {{ model.overlaps[0].bName }} overlap for {{ fmtMs(model.overlaps[0].overlapMs) }} ms (recorded intervals, both in flight; not a dependency or a join).
@@ -59,18 +79,22 @@
 
 <script lang="ts">
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from 'vue'
-import { activationOf, eventText, fmtMs, laneOf, lanes, locate, OTHER_LANE, pageOf, visibleEvents, type SeqEvent, type SequenceModel } from '@/services/sequence'
+import { activationOf, agentPrompt, eventText, fmtMs, hiddenOperations, laneOf, lanes, locate, OTHER_LANE, pageOf, visibleEvents, type SeqEvent, type SequenceModel } from '@/services/sequence'
+import { type Report } from '@/types/report'
 
 // SequenceView draws the sequence model: one column per participant (at most
 // maxLanes), one row per mark in chronological order (at most maxMarks per
-// page). Hiding internal operations and paging are presentation only.
+// page). Hiding internal operations or participants, and paging, are
+// presentation only. With the report it also builds a prompt for an AI agent
+// to explain the execution from what the view shows.
 export default defineComponent({
   name: 'SequenceView',
   props: {
     model: { type: Object as PropType<SequenceModel>, required: true },
     selected: { type: String as PropType<string | null>, default: null },
     maxMarks: { type: Number, default: 80 },
-    maxLanes: { type: Number, default: 6 }
+    maxLanes: { type: Number, default: 6 },
+    report: { type: Object as PropType<Report | null>, default: null }
   },
   emits: ['select', 'select-log', 'show-timing'],
   setup (props, { emit }) {
@@ -89,9 +113,43 @@ export default defineComponent({
     onBeforeUnmount(() => observer?.disconnect())
     const narrow = computed(() => width.value > 0 && width.value < 430)
 
-    const events = computed(() => visibleEvents(props.model, showInternal.value, props.selected))
+    // Hidden participants: their operations and log markers leave the view
+    // (e.g. every call to a database); a lane stays while a visible mark (the
+    // selected operation's) still needs it.
+    const hidden = ref<string[]>([])
+    function toggleParticipant (p: string) {
+      hidden.value = hidden.value.includes(p) ? hidden.value.filter((x) => x !== p) : [...hidden.value, p]
+      start.value = 0
+    }
+    const hiddenSet = computed(() => new Set(hidden.value))
+    const hiddenCount = computed(() => hiddenOperations(props.model, hiddenSet.value))
+    const events = computed(() => visibleEvents(props.model, showInternal.value, props.selected, hiddenSet.value))
     const page = computed(() => pageOf(events.value, start.value, props.maxMarks))
-    const laneSet = computed(() => lanes(props.model, props.maxLanes))
+    const laneSet = computed(() => {
+      const used = new Set(events.value.flatMap((e) => [e.participant, e.target ?? e.participant]))
+      const participants = props.model.participants.filter((p) => !hiddenSet.value.has(p) || used.has(p))
+      return lanes({ ...props.model, participants }, props.maxLanes)
+    })
+
+    const promptOpen = ref(false)
+    const promptBox = ref<HTMLTextAreaElement | null>(null)
+    const copied = ref(false)
+    const copyFailed = ref(false)
+    const promptText = computed(() => props.report
+      ? agentPrompt(props.model, props.report, { events: events.value, hidden: hidden.value, showInternal: showInternal.value, selectedKey: props.selected })
+      : '')
+    watch(promptText, () => { copied.value = false })
+    async function copyPrompt () {
+      try {
+        await navigator.clipboard.writeText(promptText.value)
+        copied.value = true
+        copyFailed.value = false
+      } catch {
+        copyFailed.value = true
+        promptBox.value?.focus()
+        promptBox.value?.select()
+      }
+    }
     const lanesShown = computed(() => laneSet.value.other.length ? [...laneSet.value.shown, OTHER_LANE] : laneSet.value.shown)
     const col = (participant: string) => lanesShown.value.indexOf(laneOf(laneSet.value, participant))
     const hiddenErrors = computed(() => {
@@ -176,7 +234,7 @@ export default defineComponent({
     const repeatOf = (e: SeqEvent) => { const r = opOf(e)?.repeat; return r ? `(repeat ${r.index} of ${r.count})` : '' }
     const targetObserved = (e: SeqEvent) => opOf(e)?.targetObserved ?? true
     return {
-      root, narrow, showInternal, start, page, laneSet, lanesShown, col, hiddenErrors, locateSelection, isSelected, pick, arrowStyle, markStyle, activation, activationStyle,
+      root, narrow, showInternal, start, page, laneSet, hidden, toggleParticipant, hiddenCount, promptOpen, promptBox, promptText, copied, copyFailed, copyPrompt, lanesShown, col, hiddenErrors, locateSelection, isSelected, pick, arrowStyle, markStyle, activation, activationStyle,
       kindWord, statusClass, repeatOf, targetObserved, eventText, fmtMs, laneOf, OTHER_LANE
     }
   }
@@ -185,7 +243,13 @@ export default defineComponent({
 
 <style scoped>
 .seq { background: var(--surface-ground); border-radius: 8px; padding: 12px; }
-.bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.parts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 8px; }
+.part { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.prompt { margin-top: 8px; background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.prompt textarea { width: 100%; min-height: 12rem; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--surface-ground); color: var(--text-color); border: 1px solid var(--surface-border); border-radius: 4px; padding: 6px; }
+.prompt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pbtn { background: var(--primary-color); color: var(--primary-color-text); border: 0; border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; }
 .chk { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .chk input { accent-color: var(--primary-color); }
 .note { background: var(--surface-card); border-radius: 6px; padding: 7px 10px; font-size: 13px; margin: 8px 0 0; }
