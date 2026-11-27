@@ -19,7 +19,7 @@ A shape is the entry operation plus the set of distinct caller → callee calls 
 The window defaults to the last 24 hours. Service, entry operation and “with failed executions” filter on the server. Ten rows per page. A notice says when buckets still come from provisional statistics.
 
 ![Sequence library with expanded calls](/screenshots/library-calls.png)
-*The library of `fxdc108d54-qg-api`, 10:00–11:00: three shapes of `start_session`. The first is expanded to its three distinct calls (219 executions, none failed); the third also calls the directory service.*
+*The library of `fx83718d82-qg-api`, 21:00–22:00: three shapes of `start_session`. The first is expanded to its three distinct calls (219 executions, none failed); another also calls the directory service.*
 
 ## Open one execution by trace id
 
@@ -45,7 +45,7 @@ Each span is a bar on a common time axis, indented under its parent, with status
 ![Timeline with trace logs](/screenshots/exec-timeline.png)
 *Timeline of the failed `publish_recording` with all 12 trace logs.*
 
-Click a span to select it. The right panel then shows only that span's logs: **Task lanes** place each log on a lane by its `task.id` (dot INFO, diamond WARN, cross ERROR), **Log list** lists them.
+Click a span to select it. The right panel names it with its service, kind, duration and status; a failed span shows its status message right under the name. A line names the host and process it ran in, and a **Resources** block shows what it cost, when the application recorded it: for a database query, the server's CPU time, peak memory and rows read for that query alone; for a request or job, the process's CPU and allocations during the call, marked as shared when other calls ran at the same time (log-sender `WithProcessResources`). The panel then shows only that span's logs: **Task lanes** place each log on a lane by its `task.id` (dot INFO, diamond WARN, cross ERROR), **Log list** lists them.
 
 ![Selected span with task lanes](/screenshots/exec-timeline-span.png)
 *`upload_recording` selected: its logs on the task lanes `checksum` and `transfer`, with the ERROR “Storage returned 403 AccessDenied” in `transfer`.*
@@ -74,7 +74,7 @@ Compare shows what the two executions recorded differently. It doesn't say which
 
 ## Sequence
 
-The Sequence view draws services as lanes and calls as arrows. A CLIENT span with exactly one SERVER child in another service is one arrow; a client whose peer sends no spans points to “unknown peer”. A PRODUCER span with exactly one CONSUMER child in another service (a message, for example over a broker) is a dashed one-way arrow: the send has no end marker, and the consumer's processing starts and ends on the consumer's lane. Start, end and ERROR-log markers sit on each service's lane. Vertical spacing shows order, not elapsed time. A notice points out overlapping operations. At most 6 lanes and 80 marks fit on a page.
+The Sequence view draws services as lanes and calls as arrows. A CLIENT span with exactly one SERVER child in another service is one arrow; a client whose peer sends no spans points to “unknown peer”. A PRODUCER span with exactly one CONSUMER child in another service (a message, for example over a broker) is a dashed one-way arrow: the send has no end marker, and the consumer's processing starts and ends on the consumer's lane. Start, end and ERROR-log markers sit on each service's lane. Selecting a call highlights its arrow and its end marker, and an activation bar on its lifeline joins the two, so a call stays readable when other calls start before it ends. Vertical spacing shows order, not elapsed time. A notice points out overlapping operations. At most 6 lanes and 80 marks fit on a page.
 
 ![Sequence view](/screenshots/exec-sequence.png)
 *A failed `start_recording` as a sequence: the API and worker lanes, start and end markers, and the ERROR log flagged as recorded outside its span's interval.*

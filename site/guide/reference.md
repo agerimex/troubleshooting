@@ -19,7 +19,9 @@ All configuration is environment variables; the defaults match `docker-compose.y
 | `UI_AUTH`, `UI_USER`, `UI_PASSWORD_HASH` | UI (Caddy basic auth) | `off` |
 | `QUERY_TIMEOUT` | API, per query | `10s` |
 | `QUERY_MAX_ROWS_TO_READ` | API, per query | `50000000` |
-| `QUERY_MAX_MEMORY_BYTES` | API, per query | 1 GiB |
+| `QUERY_MAX_MEMORY_BYTES` | API, per query | unset: an equal share of the ClickHouse server's memory limit per possible concurrent query, at most 1 GiB |
+| `CLICKHOUSE_MAX_QUERIES` | API: queries interactive requests run at once (the statistics refresh has its own pool and a lower ClickHouse priority) | `4` |
+| `CLICKHOUSE_ASYNC_INSERT` | receiver: `off` writes one part per request instead of ClickHouse async inserts | on |
 | `MAX_SEARCH_WINDOW` | API: widest search window | `96h` |
 | `TRACE_RETENTION`, `LOG_RETENTION` | receiver: raw spans and logs | `72h` |
 | `STATS_RETENTION` | receiver: statistics and saved comparisons | `720h` (30 days) |
@@ -33,6 +35,7 @@ All configuration is environment variables; the defaults match `docker-compose.y
 | Spans you just sent are missing | Check the window: an old From/To, or a narrow window, hides them. The searched window is printed under the fields |
 | “Total unavailable” | The count failed or hit a limit. The rows are still correct; click retry |
 | HTTP 504 / “query limit exceeded” | A query hit `QUERY_TIMEOUT`, row or memory limits. Narrow the window or add filters |
+| HTTP 503 “busy; retry” or “short of memory right now; retry” | Every database connection was busy, or ClickHouse was at its total memory limit. Retry; narrowing the window doesn't help |
 | A report section says unavailable or limit | Use that section's Retry, or Widen the window |
 | Percentile shows “—” | Too few valid durations (20 / 200 / 1000 for p50 / p95 / p99) |
 | “provisional statistics” notice | Hours less than a day old can still change when late records arrive |

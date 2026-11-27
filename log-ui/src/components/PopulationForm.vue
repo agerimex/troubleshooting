@@ -19,7 +19,7 @@
           <template #value="{ value }">{{ d.label }}: {{ modes.find((m) => m.value === value)?.label }}</template>
         </Dropdown>
         <InputText v-if="modeOf(d.key) === 'is'" :modelValue="modelValue[d.key] ?? ''" @update:modelValue="(v) => set(d.key, v ?? '')"
-          :placeholder="d.label" class="w-36" :data-testid="testid + '-' + d.key"/>
+          :placeholder="d.label" class="w-48" :data-testid="testid + '-' + d.key"/>
       </div>
     </div>
     <div class="text-xs opacity-80" :data-testid="testid + '-window'">

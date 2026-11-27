@@ -90,7 +90,7 @@
             <InputText v-model="filterByMethodName" placeholder="Filter by span name" type="text" class="p-column-filter" v-on:update:modelValue="filterChanged()" data-testid="filter-name"/>
           </template>
         </Column>
-        <Column field="status" header="status" style="width: 9.5rem">
+        <Column field="status" header="status" style="width: 11rem">
           <template #body="{ node }">
             <Tag v-if="!node.data.kind" :value="node.data.status" :severity="getSeverity(node.data.status)"/>
             <Tag v-else-if="node.data.kind === 'log'" :value="node.data.log.severity || 'not recorded'" :severity="logSeverity(node.data.log.severity)" data-testid="log-row-severity"/>
@@ -116,7 +116,7 @@
             </div>
           </template>
         </Column>
-        <Column field="duration" header="duration, ms" headerStyle="width: 7.5rem; text-align: right" bodyStyle="text-align: right; overflow: visible">
+        <Column field="duration" header="duration, ms" headerStyle="width: 8.5rem; text-align: right" bodyStyle="text-align: right; overflow: visible">
           <template #filter>
             <InputText v-model="filterMinDuration" type="number" min="0" step="any" inputmode="decimal" class="p-column-filter la-min-duration" placeholder="min ms"
               aria-label="Minimum duration, ms" title="Spans that lasted at least this many milliseconds" v-on:update:modelValue="filterChanged()" data-testid="filter-min-duration"/>
